@@ -1,12 +1,42 @@
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { useEffect } from 'react';
+import { BASEMAPS } from '../map/basemaps';
+import type { BasemapId } from '../map/basemaps';
+import { useEditorStore } from '../store/useEditorStore';
+import type { DisplayUnits } from '../lib/units';
 
 /**
- * Persistent chrome shared by both routes: brand, page switcher, and a slot for
- * global actions (open / download, units, imagery source) once those exist.
+ * Persistent chrome shared by both routes.
  *
- * Layout mirrors the agreed UI prototype: a slim top bar over a full-height workspace.
+ * Units, imagery source, and undo/redo live here because they are global to the session
+ * rather than to a page — the same cross-section is being edited whichever route you are
+ * on, and switching pages should never lose your place in the history.
  */
 export default function AppShell() {
+  const units = useEditorStore((s) => s.units);
+  const basemapId = useEditorStore((s) => s.basemapId);
+  const customTileUrl = useEditorStore((s) => s.customTileUrl);
+  const past = useEditorStore((s) => s.past);
+  const future = useEditorStore((s) => s.future);
+
+  const { setUnits, setBasemap, setCustomTileUrl, undo, redo } = useEditorStore.getState();
+  const location = useLocation();
+  const onMap = location.pathname === '/';
+
+  // Ctrl/Cmd+Z and Shift+Ctrl/Cmd+Z, skipped while typing in a field.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'z') return;
+      const target = e.target as HTMLElement | null;
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      e.preventDefault();
+      if (e.shiftKey) redo();
+      else undo();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [undo, redo]);
+
   return (
     <div className="app">
       <header className="topbar">
@@ -23,9 +53,73 @@ export default function AppShell() {
           <NavLink to="/builder">Asset builder</NavLink>
         </nav>
 
+        <div className="history">
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={undo}
+            disabled={past.length === 0}
+            title="Undo (Ctrl+Z)"
+            aria-label="Undo"
+          >
+            ↶
+          </button>
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={redo}
+            disabled={future.length === 0}
+            title="Redo (Ctrl+Shift+Z)"
+            aria-label="Redo"
+          >
+            ↷
+          </button>
+        </div>
+
         <div className="spacer" />
 
-        {/* Global actions (imagery source, units, open/download) mount here — Phase 1 & 6. */}
+        {onMap && (
+          <div className="control">
+            <span className="label">Imagery</span>
+            <select
+              className="select"
+              value={basemapId}
+              onChange={(e) => setBasemap(e.target.value as BasemapId)}
+            >
+              {BASEMAPS.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.label} — {b.licence}
+                </option>
+              ))}
+            </select>
+            {basemapId === 'custom' && (
+              <input
+                className="select mono"
+                style={{ width: 230 }}
+                placeholder="https://…/{z}/{x}/{y}.png"
+                value={customTileUrl}
+                onChange={(e) => setCustomTileUrl(e.target.value)}
+                aria-label="Custom XYZ tile URL"
+              />
+            )}
+          </div>
+        )}
+
+        <div className="control">
+          <span className="label">Units</span>
+          <div className="segmented">
+            {(['ft', 'm'] as DisplayUnits[]).map((u) => (
+              <button
+                key={u}
+                type="button"
+                aria-pressed={units === u}
+                onClick={() => setUnits(u)}
+              >
+                {u.toUpperCase()}
+              </button>
+            ))}
+          </div>
+        </div>
       </header>
 
       <main className="workspace">

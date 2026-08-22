@@ -98,47 +98,87 @@ the `#` in the URL, which is a fair trade for a static host.
 
 ```text
 src/
-  main.tsx              React entry
-  App.tsx               HashRouter + route table
+  main.tsx                React entry
+  App.tsx                 HashRouter + lazy route table
+  lib/
+    units.ts              Metres <-> feet; storage is always metres
+  library/
+    primitives.ts         Lane primitives, NACTO-derived defaults, material colours
+    templates.ts          Starter cross-sections, defined as primitive lists
+  model/
+    types.ts              CrossSection, SectionComponent
+    section.ts            Cross-section arithmetic — widths, anchor, boundary offsets
+    section.test.ts       17 tests pinning the anchor semantics
+    schema.ts             Zod validation for the asset interchange format
+    assetFile.ts          Download / upload plumbing
+  store/
+    useEditorStore.ts     Zustand store with snapshot undo/redo
+  map/
+    basemaps.ts           Imagery sources, verified against the live services
+    MapCanvas.tsx         MapLibre wrapper
   components/
-    AppShell.tsx        Persistent chrome — brand, page switcher, global actions
-    Placeholder.tsx     Scaffold-only; delete once both routes are built
+    AppShell.tsx          Chrome — units, imagery picker, undo/redo
+    CrossSectionSvg.tsx   Shared elevation renderer, both pages
+    ComponentStack.tsx    Shared editable stack, both pages
+    NoticeBar.tsx         File-operation feedback
   routes/
-    MapEditor.tsx       "/"        — entry point for the map workspace
-    AssetBuilder.tsx    "/builder" — entry point for the cross-section assembler
+    MapEditor.tsx         "/"
+    AssetBuilder.tsx      "/builder"
   styles/
-    global.css          Design tokens (light / dark / system) and app chrome
+    global.css            Design tokens (light / dark / system) and chrome
 
 scripts/
-  prep-pages.mjs        Repeatable build + prep for each deploy target
+  prep-pages.mjs          Repeatable build + prep for each deploy target
 
 .env, .env.pages, .env.domain    Base path per target (tracked; not secrets)
 ```
 
-Both route files carry a doc comment naming the components that will replace their
-placeholder. Geometry is deliberately absent from the route layer: it belongs in pure,
-headless, unit-tested modules under `src/geo/`, and the routes only render what those
-produce.
+Geometry is deliberately absent from the route layer. `model/section.ts` computes *where*
+each boundary sits along the cross-section; turning those distances into polygons on a
+real centerline belongs in pure, headless, unit-tested modules under `src/geo/`, and the
+routes will only render what those produce.
+
+`CrossSectionSvg` and `ComponentStack` are shared by both pages rather than duplicated —
+the Asset Builder renders them large and the Map Editor inspector small, from the same
+state.
 
 ---
 
 ## Status
 
-Scaffold. Routing, build, theming, and deployment are wired; the editor itself is not
-built yet. Roadmap in short:
+Everything that does not require geodesy is built and working.
 
-1. Map canvas with a satellite basemap and source picker
-2. **Geometry core** — local metric projection, polyline offsetting, cross-section
-   banding, curvature warnings. Headless and unit-tested before any drawing UI, because
-   it is the whole technical risk.
-3. Centerline drawing → single-component streets
-4. Lane primitive library → multi-component cross-sections
-5. Selection, inspector editing, undo/redo, right-of-way fit check
-6. GeoJSON save / load round-trip
-7. Starter templates, palette, custom asset upload
-8. Asset builder page
-9. Before / after comparison
-10. Crosswalks, then roundabouts
+#### Done
+
+- Asset Builder (`/builder`) — lane primitive library, editable component stack with
+  reorder and direction, live cross-section elevation with engineering dimension lines,
+  travelway-anchored centerline marker, asset JSON download and upload with Zod
+  validation and readable per-field errors
+- Map Editor (`/`) — live satellite imagery with a source picker (Esri, USGS NAIP,
+  custom XYZ), scale bar, attribution, cursor and zoom readout, imagery toggle,
+  right-of-way fit check, and the shared cross-section inspector
+- 8 starter cross-section templates, feet/metres toggle, undo/redo with Ctrl+Z
+- 17 unit tests covering cross-section arithmetic and anchor semantics
+
+**Next — the geometry engine.** Local metric projection, polyline offsetting,
+cross-section banding, and curvature warnings, built headless and unit-tested before any
+drawing UI, because it is the whole technical risk. Once it lands, the Map Editor gets
+centerline drawing and the rendered design layer.
+
+**After that:** GeoJSON project save/load round-trip, before/after swipe, crosswalks,
+roundabouts.
+
+### Why the geometry is its own phase
+
+`@turf/lineOffset` converts a metric distance to degrees once, then does planar
+arithmetic on longitude/latitude with no cosine-of-latitude correction. A north–south
+street's bands come out narrow by `cos(latitude)` — at Cincinnati a 3.0 m lane measures
+2.33 m — while east–west streets are correct, so the error is invisible unless you
+compare two streets. `@turf/buffer` is unaffected (it projects to azimuthal equidistant),
+which makes the trap worse: the naive first step looks perfect.
+
+All geometry will therefore happen in a local metric tangent plane, in a pure module,
+gated on a test asserting that a 3.0 m band measures 3.0 m whichever way the street runs.
 
 ---
 

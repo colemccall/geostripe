@@ -23,9 +23,13 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "immer": "^11.1.18",
+    "maplibre-gl": "^6.5.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^7.1.3"
+    "react-router-dom": "^7.1.3",
+    "zod": "^4.4.3",
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",

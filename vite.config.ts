@@ -24,9 +24,26 @@ export default defineConfig(({ mode }) => {
   return {
     base,
     plugins: [react()],
+    optimizeDeps: {
+      // MapLibre 6 ships as three sibling ESM files and locates its worker at runtime
+      // with `new Worker(new URL('./maplibre-gl-worker.mjs', import.meta.url))`.
+      // Pre-bundling rewrites the entry into node_modules/.vite/deps/ without copying
+      // that sibling, so import.meta.url resolves to a file that does not exist and the
+      // map fails to start — no tiles, no pan, no zoom.
+      //
+      // Excluding it makes Vite serve the package straight from node_modules, where the
+      // relative URL resolves correctly. Production builds are unaffected: Rollup
+      // understands the `new URL(..., import.meta.url)` pattern and emits the worker as
+      // a real asset.
+      exclude: ['maplibre-gl'],
+    },
     build: {
       outDir: env.VITE_OUT_DIR || 'dist',
       emptyOutDir: true,
+      // MapLibre is ~800 kB and cannot be trimmed meaningfully. It is already isolated
+      // into the lazy-loaded MapEditor chunk, so /builder never downloads it. Raised so
+      // the warning stays meaningful for chunks we can actually do something about.
+      chunkSizeWarningLimit: 1100,
     },
     test: {
       // Geometry lives in pure modules with no DOM dependency, so the default

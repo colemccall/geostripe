@@ -1,32 +1,253 @@
-import Placeholder from '../components/Placeholder';
+import { PRIMITIVE_ORDER, PRIMITIVES } from '../library/primitives';
+import { TEMPLATES, templateTotalWidth } from '../library/templates';
+import { useEditorStore, anchorModeOf } from '../store/useEditorStore';
+import type { AnchorMode } from '../store/useEditorStore';
+import { downloadAsset, pickTextFile } from '../model/assetFile';
+import { parseAssetFile } from '../model/schema';
+import {
+  autoAnchorOffset,
+  resolveAnchorOffset,
+  totalWidth,
+  travelwayWidth,
+} from '../model/section';
+import { formatWidth } from '../lib/units';
+import CrossSectionSvg from '../components/CrossSectionSvg';
+import ComponentStack from '../components/ComponentStack';
+import NoticeBar from '../components/NoticeBar';
 
 /**
  * Route: "/builder" — the Asset Builder.
  *
- * Streetmix-style cross-section assembler. No satellite imagery and no centerline:
- * an asset is a geometry-agnostic stack of components and widths that becomes real
- * geometry only when it is placed on a street in the Map Editor.
- *
- * ── ENTRY POINT FOR EDITOR LOGIC ────────────────────────────────────────────────
- * Replace <Placeholder/> with:
- *
- *   <PrimitiveLibrary/>  left rail   — the lane primitives, click to append
- *   <CrossSectionSvg/>   centre      — elevation view with dimension lines.
- *                                      SHARED with the Map Editor inspector preview;
- *                                      keep it a pure function of (components, opts).
- *   <AssetPanel/>        right rail  — name, stack reorder, download / upload JSON
- * ────────────────────────────────────────────────────────────────────────────────
+ * Streetmix-style cross-section assembler. Notably this page needs *no geometry engine*:
+ * an asset is a geometry-agnostic stack of widths with no centerline and no coordinates,
+ * so composition, dimensioning, and the JSON round-trip are all pure arithmetic. It
+ * becomes real geometry only when placed on a street in the Map Editor.
  */
 export default function AssetBuilder() {
+  const section = useEditorStore((s) => s.section);
+  const units = useEditorStore((s) => s.units);
+  const selectedId = useEditorStore((s) => s.selectedComponentId);
+  const notice = useEditorStore((s) => s.notice);
+
+  const {
+    addComponent,
+    removeComponent,
+    setWidth,
+    setDirection,
+    moveComponent,
+    select,
+    rename,
+    setAnchorMode,
+    loadSection,
+    loadTemplate,
+    setNotice,
+  } = useEditorStore.getState();
+
+  const total = totalWidth(section.components);
+  const travelway = travelwayWidth(section.components);
+  const anchor = resolveAnchorOffset(section);
+  const anchorMode = anchorModeOf(section);
+
+  async function handleUpload() {
+    const text = await pickTextFile();
+    if (text === null) return;
+
+    const result = parseAssetFile(text);
+    if (!result.ok) {
+      setNotice({
+        kind: 'error',
+        title: "That file couldn't be loaded",
+        details: result.errors,
+      });
+      return;
+    }
+
+    loadSection(result.section);
+    setNotice({
+      kind: result.warnings.length ? 'warning' : 'success',
+      title: `Loaded “${result.section.name}”`,
+      details: result.warnings,
+    });
+  }
+
+  function handleDownload() {
+    downloadAsset(section);
+    setNotice({ kind: 'success', title: `Downloaded “${section.name}”` });
+  }
+
   return (
-    <Placeholder
-      title="Asset builder"
-      lead="Stack lane primitives into a reusable cross-section, then download it as a single JSON file anyone can load."
-      slots={[
-        ['Left rail', 'Lane primitive library with NACTO-derived default widths'],
-        ['Centre', 'Cross-section elevation with dimension lines and total width'],
-        ['Right rail', 'Asset name, component stack, download / upload asset JSON'],
-      ]}
-    />
+    <div className="workspace-grid">
+      {/* ---------------------------------------------------------------- left rail */}
+      <aside className="rail">
+        <section className="panel">
+          <header className="panel-head">
+            <span className="label">Lane primitives</span>
+          </header>
+          <ul className="prims">
+            {PRIMITIVE_ORDER.map((type) => {
+              const spec = PRIMITIVES[type];
+              return (
+                <li key={type}>
+                  <button type="button" className="prim" onClick={() => addComponent(type)}>
+                    <span className="swatch" style={{ background: spec.color }} />
+                    <span className="prim-name">{spec.label}</span>
+                    <span className="prim-width mono">{formatWidth(spec.defaultWidthMeters, units)}</span>
+                    <span className="prim-add" aria-hidden="true">
+                      +
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+          <p className="hint">
+            Defaults come from NACTO guidance and are starting values, never constraints.
+          </p>
+        </section>
+
+        <section className="panel">
+          <header className="panel-head">
+            <span className="label">Start from a template</span>
+          </header>
+          <ul className="cards">
+            {TEMPLATES.map((t) => (
+              <li key={t.id}>
+                <button type="button" className="card" onClick={() => loadTemplate(t.id)}>
+                  <span className="card-title">{t.label}</span>
+                  <span className="chip-row" aria-hidden="true">
+                    {t.specs.map(([type, , w], i) => (
+                      <i
+                        key={i}
+                        style={{
+                          flexGrow: w ?? PRIMITIVES[type].defaultWidthMeters,
+                          background: PRIMITIVES[type].color,
+                        }}
+                      />
+                    ))}
+                  </span>
+                  <span className="card-meta">
+                    <span>{t.note}</span>
+                    <span className="mono">
+                      {formatWidth(templateTotalWidth(t), units, { withUnit: true })}
+                    </span>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      </aside>
+
+      {/* -------------------------------------------------------------------- stage */}
+      <main className="stage stage-pad">
+        <NoticeBar notice={notice} onDismiss={() => setNotice(null)} />
+
+        <div className="stage-body">
+          <div className="asset-head">
+            <h1>{section.name}</h1>
+            <span className="tag mono">
+              {section.components.length} components · {formatWidth(total, units, { withUnit: true })}
+            </span>
+          </div>
+
+          <div className="section-canvas">
+            <CrossSectionSvg
+              section={section}
+              units={units}
+              variant="full"
+              selectedId={selectedId}
+              onSelect={select}
+            />
+          </div>
+
+          <p className="asset-note">
+            An asset is geometry-agnostic — a stack of components and widths with no
+            centerline. Download it as a single <code>.json</code> and anyone can load it
+            into their own palette. No account, no backend, no server.
+          </p>
+        </div>
+
+        <footer className="statusbar">
+          {[
+            ['Components', String(section.components.length)],
+            ['Total width', formatWidth(total, units, { withUnit: true })],
+            ['Travelway', formatWidth(travelway, units, { withUnit: true })],
+            ['Anchor', `${formatWidth(anchor, units, { withUnit: true })} from left`],
+            ['Schema', 'v1 · geometry-agnostic'],
+          ].map(([k, v]) => (
+            <div className="cell" key={k}>
+              <span className="label">{k}</span>
+              <b className="mono">{v}</b>
+            </div>
+          ))}
+        </footer>
+      </main>
+
+      {/* --------------------------------------------------------------- right rail */}
+      <aside className="rail rail-right">
+        <section className="panel">
+          <header className="panel-head">
+            <span className="label">Asset</span>
+          </header>
+          <label className="field">
+            <span className="label">Name</span>
+            <input
+              className="text-input"
+              value={section.name}
+              onChange={(e) => rename(e.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span className="label">Anchor</span>
+            <select
+              className="text-input"
+              value={anchorMode}
+              onChange={(e) => setAnchorMode(e.target.value as AnchorMode)}
+            >
+              <option value="travelway">
+                Travelway centre — {formatWidth(autoAnchorOffset(section.components), units, { withUnit: true })} from left
+              </option>
+              <option value="geometric">Geometric centre of section</option>
+              <option value="leftEdge">Left edge of section</option>
+              {anchorMode === 'custom' && <option value="custom">Custom offset</option>}
+            </select>
+            <span className="hint">
+              Where the drawn centerline lands. Travelway centre puts it on the line you
+              can actually see on imagery.
+            </span>
+          </label>
+        </section>
+
+        <section className="panel">
+          <header className="panel-head">
+            <span className="label">Stack · left → right</span>
+            <span className="label mono">{formatWidth(total, units, { withUnit: true })}</span>
+          </header>
+          <ComponentStack
+            components={section.components}
+            units={units}
+            selectedId={selectedId}
+            onSelect={select}
+            onWidth={setWidth}
+            onDirection={setDirection}
+            onMove={moveComponent}
+            onRemove={removeComponent}
+          />
+        </section>
+
+        <section className="panel">
+          <header className="panel-head">
+            <span className="label">Share</span>
+          </header>
+          <button type="button" className="btn btn-solid btn-block" onClick={handleDownload}>
+            Download asset JSON
+          </button>
+          <button type="button" className="btn btn-ghost btn-block" onClick={handleUpload}>
+            Upload asset JSON…
+          </button>
+          <p className="hint">No account needed — the file is the sharing mechanism.</p>
+        </section>
+      </aside>
+    </div>
   );
 }
