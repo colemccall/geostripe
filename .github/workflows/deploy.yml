@@ -21,11 +21,14 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          # The Node that runs the build. Separate from the Node that runs the actions
+          # themselves — the runner's "Node 20 is deprecated" notice refers to the latter,
+          # and is resolved by the action versions pinned in this file, not by this value.
+          node-version: 24
           cache: npm
 
       - name: Install dependencies
@@ -44,9 +47,16 @@ jobs:
         # this must become `npm run build:domain` or every asset 404s. See DEPLOYMENT.md.
         run: npm run build:pages
 
-      - uses: actions/configure-pages@v5
+      # Requires Settings -> Pages -> Source: "GitHub Actions".
+      #
+      # If the source is still "Deploy from a branch", this step fails with
+      # "Get Pages site failed ... Not Found". The action's `enablement: true` input can
+      # create the site automatically, but it explicitly requires a PAT with repo/Pages
+      # write scope — it does NOT work with the default GITHUB_TOKEN — so flipping the
+      # setting once by hand is the simpler and more predictable fix.
+      - uses: actions/configure-pages@v6
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: dist
 
@@ -58,4 +68,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

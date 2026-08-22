@@ -15,13 +15,13 @@ Nothing hardcodes an absolute domain, so switching targets never edits source.
 
 ## 1. GitHub Pages via Actions — the default
 
-**One-time setup**
+#### One-time setup
 
 1. Push the repository to `https://github.com/colemccall/geostripe`.
 2. On GitHub: **Settings → Pages → Build and deployment → Source: `GitHub Actions`**.
    (Not "Deploy from a branch" — that is target 2.)
 
-**Every deploy after that**
+#### Every deploy after that
 
 ```bash
 git push origin main
@@ -31,7 +31,7 @@ git push origin main
 tests, builds with base `/geostripe/`, and publishes `dist/`. Watch it under the
 repository's **Actions** tab; the run summary links the published URL.
 
-**Verify locally before pushing**
+#### Verify locally before pushing
 
 ```bash
 npm run build:pages
@@ -136,6 +136,58 @@ Beyond running the build:
 --domain <host>                   write a CNAME (implies --target domain)
 --base /custom/                   override the base path directly
 ```
+
+---
+
+## Troubleshooting
+
+### `Get Pages site failed ... Not Found` — the workflow fails at `configure-pages`
+
+```text
+Run actions/configure-pages@v6
+Error: Get Pages site failed. Please verify that the repository has Pages enabled
+and configured to build using GitHub Actions...
+```
+
+**Cause:** Pages source is set to *Deploy from a branch*, not *GitHub Actions*.
+
+**Fix:** **Settings → Pages → Build and deployment → Source: `GitHub Actions`**, then
+re-run the workflow from the **Actions** tab.
+
+The action's `enablement: true` input can create the Pages site automatically, but it
+requires a PAT with repo or Pages write scope and does **not** work with the default
+`GITHUB_TOKEN` — so flipping the setting once by hand is simpler and more predictable.
+
+### The site loads but the console 404s on `/src/main.tsx`
+
+Same root cause as above, seen from the browser. While the source is *Deploy from a
+branch*, GitHub runs its own built-in "pages build and deployment" workflow, which
+publishes the **repository root verbatim** — including the source `index.html`, whose
+`<script src="/src/main.tsx">` only resolves under the Vite dev server. Vite rewrites that
+tag to a hashed bundle at build time, so the published file should reference
+`/geostripe/assets/index-*.js` instead.
+
+**Tell them apart quickly** — `curl -s https://<user>.github.io/geostripe/ | grep script`:
+
+| What you see | Meaning |
+| --- | --- |
+| `src="/src/main.tsx"` | Serving repo source — Pages source is still a branch |
+| `src="/geostripe/assets/index-*.js"` | Serving the real build — correct |
+
+Once the source is switched to GitHub Actions, the built-in workflow stops running and
+ours publishes `dist/` instead.
+
+### `Node 20 is being deprecated` warning in the run log
+
+Refers to the Node runtime that executes the *actions themselves*, not the `node-version`
+used to build the project. Resolved by keeping the action majors current — this workflow
+pins `checkout@v7`, `setup-node@v7`, `configure-pages@v6`, `upload-pages-artifact@v5`, and
+`deploy-pages@v5`. It is a warning, never the cause of a failed deploy.
+
+### White page, console 404s on `/assets/index-*.js`
+
+Base-path mismatch — see [How the base path works](#how-the-base-path-works). Almost
+always a custom domain added without switching the workflow to `npm run build:domain`.
 
 ---
 

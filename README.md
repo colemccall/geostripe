@@ -31,7 +31,7 @@ No accounts, no backend. Files are the sharing mechanism.
 
 ## Getting started
 
-Requires Node `^18 || ^20 || >=22` (Vite 6). CI builds on Node 22.
+Requires Node `^18 || ^20 || >=22` (Vite 6). CI builds on Node 24.
 
 ```bash
 npm install
