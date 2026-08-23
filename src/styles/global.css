@@ -1174,3 +1174,90 @@ button {
   opacity: 0.45;
   cursor: default;
 }
+
+/* -------------------------------------------------------------- map toolbar */
+
+/*
+ * The tool strip sits above the map rather than floating over it. Drawing needs a stable
+ * place to put contextual controls — the section picker, the running length, Finish —
+ * and a floating overlay would either cover the imagery you are tracing or jump around
+ * as its contents change width.
+ */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  padding: 7px 11px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+}
+
+.toolbar .segmented button {
+  font-family: inherit;
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+  padding: 5px 11px;
+}
+
+.toolbar .pill {
+  flex: none;
+  padding: 5px 10px;
+  white-space: nowrap;
+}
+
+.toolbar .btn {
+  flex: none;
+  padding: 5px 11px;
+  font-size: 12px;
+}
+
+.toolbar .btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* The tool hint over the map explains the current mode; keep it out of the imagery's way. */
+.map-overlay-tl {
+  max-width: min(330px, calc(100% - 90px));
+}
+
+/* ---------------------------------------------------------------- street rows */
+
+/*
+ * A street row is a card plus a column of per-street actions. The card stays a button so
+ * the whole row selects, and the actions sit outside it — nesting buttons is invalid HTML
+ * and makes the click target ambiguous.
+ */
+.street-card {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.street-card-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.street-card.is-active .street-card-main {
+  border-color: var(--accent-fill);
+  background: var(--sunk);
+  box-shadow: inset 3px 0 0 var(--accent-fill);
+}
+
+.street-card-tools {
+  display: grid;
+  grid-template-columns: repeat(2, 24px);
+  align-content: center;
+  gap: 2px;
+  flex: none;
+}
+
+.street-card-tools .icon-btn {
+  width: 24px;
+  height: 24px;
+  font-size: 12px;
+}

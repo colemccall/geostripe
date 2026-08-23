@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import {
   AttributionControl,
   Map as MapLibreMap,
@@ -6,7 +6,7 @@ import {
   ScaleControl,
   setWorkerUrl,
 } from 'maplibre-gl';
-import type { MapOptions } from 'maplibre-gl';
+import type { MapMouseEvent, MapOptions } from 'maplibre-gl';
 import type { FeatureCollection } from 'geojson';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
@@ -14,7 +14,9 @@ import { basemapById, tileUrlsFor, unconfiguredReason } from './basemaps';
 import type { BasemapId, TileSourceOptions } from './basemaps';
 import { buildDesignData, clipEastOf, clipLinesEastOf } from './designLayers';
 import type { DesignData } from './designLayers';
+import { lineLengthMeters } from '../geo/measure';
 import type { Street } from '../model/types';
+import type { Tool } from '../store/useEditorStore';
 import type { DisplayUnits } from '../lib/units';
 /**
  * Tell MapLibre where its worker actually is. Do not remove.
@@ -49,15 +51,34 @@ setWorkerUrl(`${import.meta.env.BASE_URL}maplibre/maplibre-gl-worker.mjs`);
  * Rotation is disabled on purpose. Plan-view street design has no use for a rotated
  * north, and holding the map north-up is what lets the before/after swipe clip against a
  * meridian rather than needing screen-space clipping MapLibre does not offer.
+ *
+ * Interaction state splits in two, deliberately:
+ *
+ *   - Anything a *frame* touches — the rubber-band point under the cursor, a vertex
+ *     mid-drag — lives in refs and goes straight to the GeoJSON sources. Routing 60 Hz
+ *     pointer moves through React state would re-render both rails to move one dot.
+ *   - Anything that *outlives* the gesture — a committed vertex, a finished centerline —
+ *     goes to the store, where undo can see it.
  */
 
 /** MapLibre 6 removed the default export and no longer re-exports StyleSpecification. */
 type MapStyle = NonNullable<MapOptions['style']>;
 
+type LngLat = [number, number];
+
 export interface MapView {
   lng: number;
   lat: number;
   zoom: number;
+}
+
+/** Imperative operations the surrounding UI needs — toolbar buttons, mostly. */
+export interface MapHandle {
+  finishDraw: () => void;
+  cancelDraw: () => void;
+  undoDraftPoint: () => void;
+  clearMeasure: () => void;
+  zoomTo: (centerline: readonly LngLat[]) => void;
 }
 
 interface Props {
@@ -66,13 +87,30 @@ interface Props {
   units: DisplayUnits;
   streets: readonly Street[];
   selectedStreetId: string | null;
+  tool: Tool;
   /** 0..1 across the viewport; null hides the divider and shows the full design. */
   swipe: number | null;
-  center: [number, number];
+  center: LngLat;
   zoom: number;
   onViewChange?: (view: MapView) => void;
   onSelectStreet?: (streetId: string) => void;
   onWarnings?: (warnings: DesignData['warnings']) => void;
+
+  // ---- drawing
+  /** Committed draft vertices and their running length, for the toolbar readout. */
+  onDraftChange?: (points: LngLat[], metres: number) => void;
+  onDrawComplete?: (points: LngLat[]) => void;
+
+  // ---- centerline editing
+  onGestureStart?: () => void;
+  onGestureEnd?: () => void;
+  onVertexMove?: (streetId: string, index: number, point: LngLat) => void;
+  onVertexInsert?: (streetId: string, afterIndex: number, point: LngLat) => void;
+  onVertexDelete?: (streetId: string, index: number) => void;
+
+  // ---- measuring
+  onMeasureChange?: (points: LngLat[], metres: number) => void;
+
   /**
    * How much geometry actually reached the map. Surfaced in the status bar because the
    * difference between "no bands generated" and "bands generated but not drawn" is
@@ -88,6 +126,9 @@ interface Props {
 }
 
 const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] };
+
+/** How close a click must land to a handle, in pixels, to count as hitting it. */
+const SNAP_PX = 14;
 
 function buildStyle(basemapId: BasemapId, options: TileSourceOptions): MapStyle {
   const basemap = basemapById(basemapId);
@@ -112,7 +153,17 @@ function buildStyle(basemapId: BasemapId, options: TileSourceOptions): MapStyle 
   };
 }
 
-const DESIGN_SOURCES = ['bands', 'markings', 'centerlines', 'vertices'] as const;
+const DESIGN_SOURCES = [
+  'bands',
+  'markings',
+  'centerlines',
+  'midpoints',
+  'vertices',
+  'draft',
+  'draft-points',
+  'measure',
+  'measure-points',
+] as const;
 
 /**
  * Add the design sources and layers. Idempotent — safe to call after every setStyle.
@@ -158,37 +209,51 @@ function addDesignLayers(map: MapLibreMap) {
   // aborts the rest of this function and leaves the whole design layer empty.
   // Yellow separates opposing directions, dashed white separates same-direction lanes.
   addLayerSafely(map, {
-      id: 'marking-opposing',
-      type: 'line',
-      source: 'markings',
-      filter: ['==', ['get', 'opposing'], true],
-      paint: { 'line-color': '#E8C45A', 'line-width': 1.4, 'line-opacity': 0.9 },
-    });
+    id: 'marking-opposing',
+    type: 'line',
+    source: 'markings',
+    filter: ['==', ['get', 'opposing'], true],
+    paint: { 'line-color': '#E8C45A', 'line-width': 1.4, 'line-opacity': 0.9 },
+  });
 
   addLayerSafely(map, {
-      id: 'marking-same',
-      type: 'line',
-      source: 'markings',
-      filter: ['!=', ['get', 'opposing'], true],
-      paint: {
-        'line-color': '#EDE9DC',
-        'line-width': 1.2,
-        'line-opacity': 0.8,
-        'line-dasharray': [3, 2.5],
-      },
-    });
+    id: 'marking-same',
+    type: 'line',
+    source: 'markings',
+    filter: ['!=', ['get', 'opposing'], true],
+    paint: {
+      'line-color': '#EDE9DC',
+      'line-width': 1.2,
+      'line-opacity': 0.8,
+      'line-dasharray': [3, 2.5],
+    },
+  });
 
   addLayerSafely(map, {
-      id: 'centerline-line',
-      type: 'line',
-      source: 'centerlines',
-      paint: {
-        'line-color': '#F2C14E',
-        'line-width': ['case', ['get', 'selected'], 2, 1.2],
-        'line-opacity': ['case', ['get', 'selected'], 0.95, 0.5],
-        'line-dasharray': [2, 2],
-      },
-    });
+    id: 'centerline-line',
+    type: 'line',
+    source: 'centerlines',
+    paint: {
+      'line-color': '#F2C14E',
+      'line-width': ['case', ['get', 'selected'], 2, 1.2],
+      'line-opacity': ['case', ['get', 'selected'], 0.95, 0.5],
+      'line-dasharray': [2, 2],
+    },
+  });
+
+  // Hollow, and smaller than a real vertex, so "add one here" reads differently from
+  // "move this one".
+  addLayerSafely(map, {
+    id: 'midpoint-point',
+    type: 'circle',
+    source: 'midpoints',
+    paint: {
+      'circle-radius': 3.2,
+      'circle-color': 'rgba(20,24,26,0.55)',
+      'circle-stroke-color': '#F2C14E',
+      'circle-stroke-width': 1.4,
+    },
+  });
 
   addLayerSafely(map, {
     id: 'vertex-point',
@@ -201,35 +266,234 @@ function addDesignLayers(map: MapLibreMap) {
       'circle-stroke-width': 1.6,
     },
   });
+
+  addLayerSafely(map, {
+    id: 'draft-line',
+    type: 'line',
+    source: 'draft',
+    paint: { 'line-color': '#6FD3C7', 'line-width': 2, 'line-dasharray': [1.5, 1.5] },
+  });
+
+  addLayerSafely(map, {
+    id: 'draft-vertex',
+    type: 'circle',
+    source: 'draft-points',
+    paint: {
+      'circle-radius': 4,
+      'circle-color': '#6FD3C7',
+      'circle-stroke-color': '#14181A',
+      'circle-stroke-width': 1.6,
+    },
+  });
+
+  addLayerSafely(map, {
+    id: 'measure-line',
+    type: 'line',
+    source: 'measure',
+    paint: { 'line-color': '#FF9E6D', 'line-width': 1.8, 'line-dasharray': [2, 1.5] },
+  });
+
+  addLayerSafely(map, {
+    id: 'measure-vertex',
+    type: 'circle',
+    source: 'measure-points',
+    paint: {
+      'circle-radius': 4,
+      'circle-color': '#FF9E6D',
+      'circle-stroke-color': '#14181A',
+      'circle-stroke-width': 1.6,
+    },
+  });
 }
 
 function setData(map: MapLibreMap, id: string, data: FeatureCollection) {
   const source = map.getSource(id);
-  if (source && 'setData' in source) (source as { setData: (d: FeatureCollection) => void }).setData(data);
+  if (source && 'setData' in source) {
+    (source as { setData: (d: FeatureCollection) => void }).setData(data);
+  }
 }
 
-export default function MapCanvas({
-  basemapId,
-  sourceOptions,
-  units,
-  streets,
-  selectedStreetId,
-  swipe,
-  center,
-  zoom,
-  onViewChange,
-  onSelectStreet,
-  onWarnings,
-  onRenderStats,
-}: Props) {
+function lineFC(points: readonly LngLat[]): FeatureCollection {
+  if (points.length < 2) return EMPTY;
+  return {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        properties: {},
+        geometry: { type: 'LineString', coordinates: [...points] },
+      },
+    ],
+  };
+}
+
+function pointsFC(points: readonly LngLat[]): FeatureCollection {
+  return {
+    type: 'FeatureCollection',
+    features: points.map((p, index) => ({
+      type: 'Feature',
+      id: index,
+      properties: { index },
+      geometry: { type: 'Point', coordinates: p },
+    })),
+  };
+}
+
+const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
+  {
+    basemapId,
+    sourceOptions,
+    units,
+    streets,
+    selectedStreetId,
+    tool,
+    swipe,
+    center,
+    zoom,
+    onViewChange,
+    onSelectStreet,
+    onWarnings,
+    onDraftChange,
+    onDrawComplete,
+    onGestureStart,
+    onGestureEnd,
+    onVertexMove,
+    onVertexInsert,
+    onVertexDelete,
+    onMeasureChange,
+    onRenderStats,
+  },
+  ref,
+) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const scaleRef = useRef<ScaleControl | null>(null);
   const [ready, setReady] = useState(false);
 
   // Latest values without making them effect dependencies, so the map is never rebuilt.
-  const latest = useRef({ streets, selectedStreetId, swipe, onViewChange, onSelectStreet, onWarnings, onRenderStats });
-  latest.current = { streets, selectedStreetId, swipe, onViewChange, onSelectStreet, onWarnings, onRenderStats };
+  const handlers = {
+    tool,
+    streets,
+    selectedStreetId,
+    swipe,
+    onViewChange,
+    onSelectStreet,
+    onWarnings,
+    onDraftChange,
+    onDrawComplete,
+    onGestureStart,
+    onGestureEnd,
+    onVertexMove,
+    onVertexInsert,
+    onVertexDelete,
+    onMeasureChange,
+    onRenderStats,
+  };
+  const latest = useRef(handlers);
+  latest.current = handlers;
+
+  // ---- gesture state. Refs, not state: these change once per animation frame.
+  const draftRef = useRef<LngLat[]>([]);
+  const hoverRef = useRef<LngLat | null>(null);
+  const measureRef = useRef<LngLat[]>([]);
+  const dragRef = useRef<{ streetId: string; index: number } | null>(null);
+  const statsTimer = useRef<number | null>(null);
+  const frameRef = useRef<number | null>(null);
+  const measureReportedAt = useRef(0);
+
+  const drawDraft = useCallback(() => {
+    const map = mapRef.current;
+    if (!map || !map.getSource('draft')) return;
+    const committed = draftRef.current;
+    const hover = hoverRef.current;
+    const rubber = hover && committed.length > 0 ? [...committed, hover] : committed;
+    setData(map, 'draft', lineFC(rubber));
+    setData(map, 'draft-points', pointsFC(committed));
+  }, []);
+
+  const drawMeasure = useCallback(() => {
+    const map = mapRef.current;
+    if (!map || !map.getSource('measure')) return;
+    const committed = measureRef.current;
+    const hover = hoverRef.current;
+    const rubber = hover && committed.length === 1 ? [...committed, hover] : committed;
+    setData(map, 'measure', lineFC(rubber));
+    setData(map, 'measure-points', pointsFC(committed));
+
+    // The line follows the cursor every frame; the React readout does not need to. A
+    // committed point always reports, so the final number is never a stale sample.
+    const now = performance.now();
+    if (committed.length >= 2 || now - measureReportedAt.current > 60) {
+      measureReportedAt.current = now;
+      latest.current.onMeasureChange?.(rubber, lineLengthMeters(rubber));
+    }
+  }, []);
+
+  const reportDraft = useCallback(() => {
+    latest.current.onDraftChange?.([...draftRef.current], lineLengthMeters(draftRef.current));
+  }, []);
+
+  const finishDraw = useCallback(() => {
+    const points = draftRef.current;
+    draftRef.current = [];
+    hoverRef.current = null;
+    drawDraft();
+    reportDraft();
+    // Two points is the minimum that describes a direction to offset from; anything less
+    // is a stray click, not a street.
+    if (points.length >= 2) latest.current.onDrawComplete?.(points);
+  }, [drawDraft, reportDraft]);
+
+  const cancelDraw = useCallback(() => {
+    draftRef.current = [];
+    hoverRef.current = null;
+    drawDraft();
+    reportDraft();
+  }, [drawDraft, reportDraft]);
+
+  const undoDraftPoint = useCallback(() => {
+    draftRef.current = draftRef.current.slice(0, -1);
+    drawDraft();
+    reportDraft();
+  }, [drawDraft, reportDraft]);
+
+  const clearMeasure = useCallback(() => {
+    measureRef.current = [];
+    hoverRef.current = null;
+    drawMeasure();
+  }, [drawMeasure]);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      finishDraw,
+      cancelDraw,
+      undoDraftPoint,
+      clearMeasure,
+      zoomTo: (centerline) => {
+        const map = mapRef.current;
+        if (!map || centerline.length === 0) return;
+        let minLng = Infinity;
+        let minLat = Infinity;
+        let maxLng = -Infinity;
+        let maxLat = -Infinity;
+        for (const [lng, lat] of centerline) {
+          minLng = Math.min(minLng, lng);
+          maxLng = Math.max(maxLng, lng);
+          minLat = Math.min(minLat, lat);
+          maxLat = Math.max(maxLat, lat);
+        }
+        map.fitBounds(
+          [
+            [minLng, minLat],
+            [maxLng, maxLat],
+          ],
+          { padding: 90, maxZoom: 19, duration: 600 },
+        );
+      },
+    }),
+    [finishDraw, cancelDraw, undoDraftPoint, clearMeasure],
+  );
 
   /** Rebuild derived geometry and push it to the map, applying the swipe clip. */
   const refresh = useCallback(() => {
@@ -265,11 +529,16 @@ export default function MapCanvas({
       setData(map, 'centerlines', clipLinesEastOf(data.centerlines, minLng));
     }
 
+    // Editing handles are never clipped: they are UI, not design, and a handle that
+    // disappears behind the swipe divider is a handle you cannot grab.
     setData(map, 'vertices', data.vertices);
+    setData(map, 'midpoints', data.midpoints);
 
-    // queryRenderedFeatures only reports once tiles are built, so sample shortly after.
+    // queryRenderedFeatures only reports once tiles are built, so sample shortly after —
+    // and only once the edits stop, or a drag would queue one probe per frame.
     const bandCount = data.bands.features.length;
-    window.setTimeout(() => {
+    if (statsTimer.current !== null) window.clearTimeout(statsTimer.current);
+    statsTimer.current = window.setTimeout(() => {
       let rendered = -1;
       try { rendered = map.queryRenderedFeatures({ layers: ['band-fill'] }).length; } catch { rendered = -2; }
       let sourceLoaded = 'n/a';
@@ -293,6 +562,22 @@ export default function MapCanvas({
   // refresh depend on itself.
   const refreshRef = useRef(refresh);
   refreshRef.current = refresh;
+
+  /**
+   * Coalesce refreshes to one per frame.
+   *
+   * Dragging a vertex writes to the store on every pointer move, and each write can reach
+   * here from two directions at once — the React effect below and the map's own `move`
+   * handler. Rebuilding the bands twice in a frame costs two full passes of offsetting
+   * and polygon cleanup for a picture the compositor draws once.
+   */
+  const scheduleRefresh = useCallback(() => {
+    if (frameRef.current !== null) return;
+    frameRef.current = requestAnimationFrame(() => {
+      frameRef.current = null;
+      refreshRef.current();
+    });
+  }, []);
 
   // ---- create once
   useEffect(() => {
@@ -330,7 +615,7 @@ export default function MapCanvas({
     map.on('move', () => {
       report();
       // The swipe boundary is a screen position, so it moves with the map.
-      if (latest.current.swipe !== null) refresh();
+      if (latest.current.swipe !== null) scheduleRefresh();
     });
 
     map.on('load', () => {
@@ -346,18 +631,159 @@ export default function MapCanvas({
       console.error('[GeoStripe] MapLibre error:', e.error?.message ?? e, e);
     });
 
-    map.on('click', 'band-fill', (e) => {
-      const streetId = e.features?.[0]?.properties?.['streetId'];
-      if (typeof streetId === 'string') latest.current.onSelectStreet?.(streetId);
-    });
-    map.on('mouseenter', 'band-fill', () => {
-      map.getCanvas().style.cursor = 'pointer';
-    });
-    map.on('mouseleave', 'band-fill', () => {
-      map.getCanvas().style.cursor = '';
+    // ------------------------------------------------------------------ pointer input
+
+    const near = (event: MapMouseEvent, point: LngLat | undefined) => {
+      if (!point) return false;
+      const a = map.project(point);
+      return Math.hypot(a.x - event.point.x, a.y - event.point.y) <= SNAP_PX;
+    };
+
+    map.on('click', (event) => {
+      const active = latest.current.tool;
+      const here: LngLat = [event.lngLat.lng, event.lngLat.lat];
+
+      if (active === 'draw') {
+        const draft = draftRef.current;
+        // Clicking the last point again — which is also what the second half of a
+        // double-click looks like — ends the line rather than stacking a duplicate.
+        if (draft.length >= 2 && (near(event, draft[draft.length - 1]) || near(event, draft[0]))) {
+          finishDraw();
+          return;
+        }
+        draftRef.current = [...draft, here];
+        drawDraft();
+        reportDraft();
+        return;
+      }
+
+      if (active === 'measure') {
+        // A third click starts a fresh measurement rather than extending a two-point one.
+        measureRef.current =
+          measureRef.current.length >= 2 ? [here] : [...measureRef.current, here];
+        drawMeasure();
+        return;
+      }
+
+      // Select. A click on bare imagery is deliberately NOT a deselect — losing the
+      // inspector every time you miss a band by two pixels is maddening.
+      //
+      // Wrapped because queryRenderedFeatures throws if the layer is not in the style yet,
+      // which is a real window right after a basemap switch.
+      try {
+        const hits = map.queryRenderedFeatures(event.point, { layers: ['band-fill'] });
+        const streetId = hits[0]?.properties?.['streetId'];
+        if (typeof streetId === 'string') latest.current.onSelectStreet?.(streetId);
+      } catch {
+        // No band layer yet; nothing to select.
+      }
     });
 
+    map.on('mousemove', (event) => {
+      const active = latest.current.tool;
+      if (active === 'draw' && draftRef.current.length > 0) {
+        hoverRef.current = [event.lngLat.lng, event.lngLat.lat];
+        drawDraft();
+      } else if (active === 'measure' && measureRef.current.length === 1) {
+        hoverRef.current = [event.lngLat.lng, event.lngLat.lat];
+        drawMeasure();
+      }
+    });
+
+    map.on('dblclick', (event) => {
+      if (latest.current.tool !== 'draw') return;
+      // The two clicks that make up the double-click already committed their vertices;
+      // this just closes the line out.
+      event.preventDefault();
+      finishDraw();
+    });
+
+    // ---- vertex dragging
+    //
+    // preventDefault on the mousedown is what stops MapLibre panning the map out from
+    // under the handle. The move/up listeners go on the map rather than the window
+    // because MapLibre already normalises its own event coordinates.
+    const onDragMove = (event: MapMouseEvent) => {
+      const drag = dragRef.current;
+      if (!drag) return;
+      latest.current.onVertexMove?.(drag.streetId, drag.index, [
+        event.lngLat.lng,
+        event.lngLat.lat,
+      ]);
+    };
+
+    const onDragEnd = () => {
+      if (!dragRef.current) return;
+      dragRef.current = null;
+      map.off('mousemove', onDragMove);
+      window.removeEventListener('mouseup', onDragEnd);
+      map.getCanvas().style.cursor = '';
+      map.dragPan.enable();
+      latest.current.onGestureEnd?.();
+    };
+
+    const beginDrag = (streetId: string, index: number) => {
+      dragRef.current = { streetId, index };
+      map.dragPan.disable();
+      map.getCanvas().style.cursor = 'grabbing';
+      map.on('mousemove', onDragMove);
+      // On the window, not the map: releasing the button outside the canvas — over a rail,
+      // or off the browser entirely — must still close the gesture. A map-only listener
+      // leaves the vertex stuck to the cursor and beginGesture unmatched forever.
+      window.addEventListener('mouseup', onDragEnd);
+    };
+
+    map.on('mousedown', 'vertex-point', (event) => {
+      if (latest.current.tool !== 'select') return;
+      const props = event.features?.[0]?.properties;
+      const streetId = props?.['streetId'];
+      const index = props?.['index'];
+      if (typeof streetId !== 'string' || typeof index !== 'number') return;
+
+      event.preventDefault();
+
+      // Alt-click removes. Held rather than a separate mode, because deleting a vertex is
+      // a one-off correction, not somewhere you stay.
+      if (event.originalEvent.altKey) {
+        latest.current.onVertexDelete?.(streetId, index);
+        return;
+      }
+
+      latest.current.onGestureStart?.();
+      beginDrag(streetId, index);
+    });
+
+    // Grabbing a midpoint inserts a real vertex there and drags it in the same motion, so
+    // "bend the street here" is one gesture and one undo step.
+    map.on('mousedown', 'midpoint-point', (event) => {
+      if (latest.current.tool !== 'select') return;
+      const props = event.features?.[0]?.properties;
+      const streetId = props?.['streetId'];
+      const index = props?.['index'];
+      if (typeof streetId !== 'string' || typeof index !== 'number') return;
+
+      event.preventDefault();
+      latest.current.onGestureStart?.();
+      latest.current.onVertexInsert?.(streetId, index, [event.lngLat.lng, event.lngLat.lat]);
+      beginDrag(streetId, index + 1);
+    });
+
+    const setCursor = (value: string) => () => {
+      if (latest.current.tool === 'select' && !dragRef.current) {
+        map.getCanvas().style.cursor = value;
+      }
+    };
+    map.on('mouseenter', 'vertex-point', setCursor('grab'));
+    map.on('mouseleave', 'vertex-point', setCursor(''));
+    map.on('mouseenter', 'midpoint-point', setCursor('copy'));
+    map.on('mouseleave', 'midpoint-point', setCursor(''));
+    map.on('mouseenter', 'band-fill', setCursor('pointer'));
+    map.on('mouseleave', 'band-fill', setCursor(''));
+
     return () => {
+      window.removeEventListener('mouseup', onDragEnd);
+      if (statsTimer.current !== null) window.clearTimeout(statsTimer.current);
+      if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
       map.remove();
       mapRef.current = null;
       scaleRef.current = null;
@@ -366,6 +792,46 @@ export default function MapCanvas({
     // Created once; every prop change below is applied to the live map instead.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ---- keyboard, while drawing or measuring
+  useEffect(() => {
+    if (tool === 'select') return;
+
+    function onKey(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        if (tool === 'draw') cancelDraw();
+        else clearMeasure();
+      } else if (tool === 'draw' && event.key === 'Enter') {
+        event.preventDefault();
+        finishDraw();
+      } else if (tool === 'draw' && (event.key === 'Backspace' || event.key === 'Delete')) {
+        event.preventDefault();
+        undoDraftPoint();
+      }
+    }
+
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [tool, cancelDraw, clearMeasure, finishDraw, undoDraftPoint]);
+
+  // ---- tool changes: cursor, double-click zoom, and clearing whatever was in flight
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const drawing = tool !== 'select';
+    map.getCanvas().style.cursor = drawing ? 'crosshair' : '';
+    // Double-click means "finish the line" while drawing, so it must not also zoom.
+    if (drawing) map.doubleClickZoom.disable();
+    else map.doubleClickZoom.enable();
+
+    if (tool !== 'draw') cancelDraw();
+    if (tool !== 'measure') clearMeasure();
+  }, [tool, cancelDraw, clearMeasure]);
 
   // ---- basemap switching
   //
@@ -390,8 +856,8 @@ export default function MapCanvas({
 
   // ---- design data
   useEffect(() => {
-    if (ready) refresh();
-  }, [streets, selectedStreetId, swipe, ready, refresh]);
+    if (ready) scheduleRefresh();
+  }, [streets, selectedStreetId, swipe, ready, scheduleRefresh]);
 
   // ---- scale bar unit follows the app
   useEffect(() => {
@@ -410,4 +876,6 @@ export default function MapCanvas({
       )}
     </div>
   );
-}
+});
+
+export default MapCanvas;

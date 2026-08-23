@@ -2,6 +2,7 @@ import * as polyclip from 'polyclip-ts';
 import type { Feature, FeatureCollection, MultiPolygon, Polygon } from 'geojson';
 import type { Street } from '../model/types';
 import { bandsForStreet, markingsForStreet } from '../geo/banding';
+import { midpoint } from '../geo/measure';
 import type { CurvatureWarning } from '../geo/curvature';
 
 /**
@@ -17,6 +18,8 @@ export interface DesignData {
   markings: FeatureCollection;
   centerlines: FeatureCollection;
   vertices: FeatureCollection;
+  /** Half-way handles on the selected centerline; dragging one inserts a vertex. */
+  midpoints: FeatureCollection;
   warnings: { streetId: string; streetName: string; warnings: CurvatureWarning[] }[];
 }
 
@@ -27,6 +30,7 @@ export function buildDesignData(streets: readonly Street[], selectedStreetId: st
   const markings = empty();
   const centerlines = empty();
   const vertices = empty();
+  const midpoints = empty();
   const warnings: DesignData['warnings'] = [];
 
   for (const street of streets) {
@@ -58,11 +62,21 @@ export function buildDesignData(streets: readonly Street[], selectedStreetId: st
           properties: { streetId: street.id, index },
           geometry: { type: 'Point', coordinates: position },
         });
+
+        // `index` names the segment this handle splits, so inserting after it is exact.
+        const next = street.centerline[index + 1];
+        if (!next) return;
+        midpoints.features.push({
+          type: 'Feature',
+          id: `${street.id}:m${index}`,
+          properties: { streetId: street.id, index },
+          geometry: { type: 'Point', coordinates: midpoint(position, next) },
+        });
       });
     }
   }
 
-  return { bands, markings, centerlines, vertices, warnings };
+  return { bands, markings, centerlines, vertices, midpoints, warnings };
 }
 
 /**

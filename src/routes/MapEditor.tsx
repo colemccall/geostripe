@@ -1,18 +1,28 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
-import { useEditorStore, selectedStreet, anchorModeOf } from '../store/useEditorStore';
-import type { AnchorMode } from '../store/useEditorStore';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useEditorStore,
+  selectedStreet,
+  anchorModeOf,
+  DRAFT_SECTION,
+} from '../store/useEditorStore';
+import type { AnchorMode, Tool } from '../store/useEditorStore';
 import { checkFit, resolveAnchorOffset, totalWidth } from '../model/section';
 import { displayToMetres, formatWidth, stepFor } from '../lib/units';
+import { EDITOR_VERSION } from '../lib/version';
 import { PRIMITIVES } from '../library/primitives';
-import { TEMPLATES, templateTotalWidth } from '../library/templates';
+import { TEMPLATES, instantiateTemplate, templateTotalWidth } from '../library/templates';
 import { basemapById } from '../map/basemaps';
 import MapCanvas from '../map/MapCanvas';
-import type { MapView } from '../map/MapCanvas';
+import type { MapHandle, MapView } from '../map/MapCanvas';
 import type { DesignData } from '../map/designLayers';
 import { describeWarnings } from '../geo/curvature';
+import { lineLengthMeters } from '../geo/measure';
+import { downloadText, pickTextFile } from '../model/assetFile';
+import { parseProject, projectFilename, serializeProject } from '../model/project';
 import { DEMO_CENTER, DEMO_ZOOM } from '../demo/washingtonPark';
 import CrossSectionSvg from '../components/CrossSectionSvg';
 import ComponentStack from '../components/ComponentStack';
+import PrimitivePalette from '../components/PrimitivePalette';
 import NoticeBar from '../components/NoticeBar';
 
 /**
@@ -21,10 +31,38 @@ import NoticeBar from '../components/NoticeBar';
  * Streets render as real measured polygons over the imagery. The swipe divider shows the
  * design against the untouched street, which is the comparison the whole tool exists to
  * make: does this fit in the width that is already there?
+ *
+ * The map is modal — select, draw, measure — and this component owns the mode while
+ * MapCanvas owns the pointer mechanics. Gestures that span many frames (dragging a
+ * vertex) go through the store's live setters bracketed by beginGesture/endGesture, so a
+ * drag lands in history as one step rather than two hundred.
  */
+
+const TOOLS: { id: Tool; label: string; key: string; hint: string }[] = [
+  {
+    id: 'select',
+    label: 'Select',
+    key: 'V',
+    hint: 'Click a band to select it. Drag a vertex to reshape, alt-click one to remove it, drag a hollow handle to add one.',
+  },
+  {
+    id: 'draw',
+    label: 'Draw street',
+    key: 'D',
+    hint: 'Click along the centerline. Enter or double-click finishes it, Backspace removes the last point, Esc cancels.',
+  },
+  {
+    id: 'measure',
+    label: 'Measure',
+    key: 'M',
+    hint: 'Click two points to measure the real street — usually kerb to kerb.',
+  },
+];
+
 export default function MapEditor() {
   const streets = useEditorStore((s) => s.streets);
   const units = useEditorStore((s) => s.units);
+  const projectName = useEditorStore((s) => s.projectName);
   const selectedComponentId = useEditorStore((s) => s.selectedComponentId);
   const selectedStreetId = useEditorStore((s) => s.selectedStreetId);
   const basemapId = useEditorStore((s) => s.basemapId);
@@ -33,11 +71,15 @@ export default function MapEditor() {
   const arcgisApiKey = useEditorStore((s) => s.arcgisApiKey);
   const swipe = useEditorStore((s) => s.swipe);
   const notice = useEditorStore((s) => s.notice);
+  const tool = useEditorStore((s) => s.tool);
+  const drawSectionId = useEditorStore((s) => s.drawSectionId);
+  const draftSection = useEditorStore((s) => s.draftSection);
   const street = useEditorStore(selectedStreet);
 
   const {
     selectStreet,
     selectComponent,
+    addComponent,
     setWidth,
     setDirection,
     moveComponent,
@@ -47,12 +89,31 @@ export default function MapEditor() {
     setExistingWidth,
     setSwipe,
     setNotice,
+    setProjectName,
+    setTool,
+    setDrawSectionId,
+    addStreet,
+    renameStreet,
+    toggleStreetVisible,
+    duplicateStreet,
+    removeStreet,
+    loadStreets,
     clearStreets,
     loadDemo,
+    beginGesture,
+    endGesture,
+    moveVertexLive,
+    insertVertexLive,
+    removeVertex,
   } = useEditorStore.getState();
 
   const [view, setView] = useState<MapView | null>(null);
   const [warnings, setWarnings] = useState<DesignData['warnings']>([]);
+  const [draft, setDraft] = useState<{ points: number; metres: number }>({
+    points: 0,
+    metres: 0,
+  });
+  const [measure, setMeasure] = useState<{ points: number; metres: number } | null>(null);
   const [renderStats, setRenderStats] = useState<{
     bands: number;
     drawn: boolean;
@@ -61,6 +122,7 @@ export default function MapEditor() {
     layerCount: number;
   } | null>(null);
   const mapWrapRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<MapHandle | null>(null);
 
   // Memoised so MapCanvas's basemap effect does not see a new object every render.
   const sourceOptions = useMemo(
@@ -73,6 +135,29 @@ export default function MapEditor() {
   const available = street?.existingWidthMeters ?? 0;
   const fit = section ? checkFit(section.components, available || total) : null;
   const basemap = basemapById(basemapId);
+  const activeTool = TOOLS.find((t) => t.id === tool) ?? TOOLS[0]!;
+
+  /** The section a newly drawn street gets — also the fallback for a bare line import. */
+  const drawingSection = useMemo(() => {
+    const template = TEMPLATES.find((t) => t.id === drawSectionId);
+    return template ? instantiateTemplate(template) : draftSection;
+  }, [drawSectionId, draftSection]);
+
+  // Single-key tool shortcuts, the way every map editor does it. Skipped while typing,
+  // and while a modifier is held so they never shadow Ctrl+Z or a browser shortcut.
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      const match = TOOLS.find((t) => t.key.toLowerCase() === event.key.toLowerCase());
+      if (!match) return;
+      event.preventDefault();
+      setTool(match.id);
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [setTool]);
 
   const startSwipeDrag = useCallback(
     (event: React.PointerEvent) => {
@@ -95,57 +180,189 @@ export default function MapEditor() {
     [setSwipe],
   );
 
+  // -------------------------------------------------------------------- project file
+
+  function handleSave() {
+    if (streets.length === 0) {
+      setNotice({
+        kind: 'warning',
+        title: 'Nothing to save yet',
+        details: ['Draw a street first.'],
+      });
+      return;
+    }
+    downloadText(
+      projectFilename(projectName),
+      serializeProject(streets, { name: projectName, editorVersion: EDITOR_VERSION }),
+      'application/geo+json',
+    );
+    setNotice({
+      kind: 'success',
+      title: `Saved ${streets.length} street${streets.length === 1 ? '' : 's'}`,
+      details: [
+        'Centerlines carry their cross-section; the band polygons travel with them for QGIS.',
+      ],
+    });
+  }
+
+  async function handleOpen() {
+    const text = await pickTextFile('application/geo+json,application/json,.geojson,.json');
+    if (text === null) return;
+
+    const result = parseProject(text, {
+      sectionName: drawingSection.name,
+      components: drawingSection.components.map((c) => ({
+        componentType: c.componentType,
+        widthMeters: c.widthMeters,
+        direction: c.direction,
+      })),
+    });
+
+    if (!result.ok) {
+      setNotice({ kind: 'error', title: 'That file could not be loaded', details: result.errors });
+      return;
+    }
+
+    loadStreets(result.streets);
+    mapRef.current?.zoomTo(result.streets[0]?.centerline ?? []);
+    setNotice({
+      kind: result.warnings.length ? 'warning' : 'success',
+      title: `Loaded ${result.streets.length} street${result.streets.length === 1 ? '' : 's'}`,
+      details: result.warnings,
+    });
+  }
+
+  // ------------------------------------------------------------------------ rendering
+
   return (
     <div className="workspace-grid">
       {/* ---------------------------------------------------------------- left rail */}
       <aside className="rail">
         <section className="panel">
           <header className="panel-head">
+            <span className="label">Project</span>
+          </header>
+          <input
+            className="text-input"
+            value={projectName}
+            aria-label="Project name"
+            onChange={(e) => setProjectName(e.target.value)}
+          />
+          <div className="btn-row" style={{ marginTop: 8 }}>
+            <button type="button" className="btn btn-solid" onClick={handleSave}>
+              Save .geojson
+            </button>
+            <button type="button" className="btn btn-ghost" onClick={handleOpen}>
+              Open…
+            </button>
+          </div>
+          <p className="hint">
+            Plain GeoJSON — editable by hand, openable in QGIS, and still fully parametric
+            when you load it back.
+          </p>
+        </section>
+
+        <section className="panel">
+          <header className="panel-head">
             <span className="label">Streets</span>
             <span className="label mono">{streets.length}</span>
           </header>
+
           {streets.length === 0 ? (
             <p className="empty-note">
-              No streets. Load the Washington Park example to see what the tool makes.
+              No streets yet. Choose <b>Draw street</b> above the map and click along a
+              centerline, or load the Washington Park example.
             </p>
           ) : (
             <ul className="cards">
               {streets.map((s) => (
                 <li key={s.id}>
-                  <button
-                    type="button"
-                    className={`card${s.id === selectedStreetId ? ' is-active' : ''}`}
-                    onClick={() => selectStreet(s.id)}
-                  >
-                    <span className="card-title">{s.name}</span>
-                    <span className="chip-row" aria-hidden="true">
-                      {s.section.components.map((c) => (
-                        <i
-                          key={c.id}
-                          style={{
-                            flexGrow: c.widthMeters,
-                            background: c.colorOverride ?? PRIMITIVES[c.componentType].color,
-                          }}
-                        />
-                      ))}
-                    </span>
-                    <span className="card-meta">
-                      <span>{s.section.components.length} bands</span>
-                      <span className="mono">
-                        {formatWidth(totalWidth(s.section.components), units, { withUnit: true })}
+                  <div className={`street-card${s.id === selectedStreetId ? ' is-active' : ''}`}>
+                    <button
+                      type="button"
+                      className="card street-card-main"
+                      onClick={() => selectStreet(s.id)}
+                      onDoubleClick={() => mapRef.current?.zoomTo(s.centerline)}
+                    >
+                      <span className="card-title">{s.name}</span>
+                      <span className="chip-row" aria-hidden="true">
+                        {s.section.components.map((c) => (
+                          <i
+                            key={c.id}
+                            style={{
+                              flexGrow: c.widthMeters,
+                              background: c.colorOverride ?? PRIMITIVES[c.componentType].color,
+                            }}
+                          />
+                        ))}
                       </span>
-                    </span>
-                  </button>
+                      <span className="card-meta">
+                        <span>
+                          {s.section.components.length} bands ·{' '}
+                          {formatWidth(lineLengthMeters(s.centerline), units, {
+                            decimals: 0,
+                            withUnit: true,
+                          })}{' '}
+                          long
+                        </span>
+                        <span className="mono">
+                          {formatWidth(totalWidth(s.section.components), units, {
+                            withUnit: true,
+                          })}
+                        </span>
+                      </span>
+                    </button>
+
+                    <div className="street-card-tools">
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        title={s.visible ? 'Hide' : 'Show'}
+                        aria-label={s.visible ? `Hide ${s.name}` : `Show ${s.name}`}
+                        onClick={() => toggleStreetVisible(s.id)}
+                      >
+                        {s.visible ? '◉' : '○'}
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        title="Zoom to"
+                        aria-label={`Zoom to ${s.name}`}
+                        onClick={() => mapRef.current?.zoomTo(s.centerline)}
+                      >
+                        ⤢
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        title="Duplicate"
+                        aria-label={`Duplicate ${s.name}`}
+                        onClick={() => duplicateStreet(s.id)}
+                      >
+                        ⧉
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        title="Delete"
+                        aria-label={`Delete ${s.name}`}
+                        onClick={() => removeStreet(s.id)}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </div>
                 </li>
               ))}
             </ul>
           )}
+
           <div className="btn-row">
             <button type="button" className="btn btn-ghost" onClick={loadDemo}>
-              Reload example
+              Load example
             </button>
             <button type="button" className="btn btn-ghost" onClick={clearStreets}>
-              Clear
+              Clear all
             </button>
           </div>
         </section>
@@ -153,6 +370,7 @@ export default function MapEditor() {
         <section className="panel">
           <header className="panel-head">
             <span className="label">Apply a template</span>
+            <span className="label">to the selected street</span>
           </header>
           <ul className="cards">
             {TEMPLATES.map((t) => (
@@ -192,19 +410,130 @@ export default function MapEditor() {
       <main className="stage">
         <NoticeBar notice={notice} onDismiss={() => setNotice(null)} />
 
+        <div className="toolbar">
+          <div className="segmented" role="group" aria-label="Map tool">
+            {TOOLS.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                aria-pressed={tool === t.id}
+                title={`${t.hint} (${t.key})`}
+                onClick={() => setTool(t.id)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {tool === 'draw' && (
+            <>
+              <label className="control">
+                <span className="label">Section</span>
+                <select
+                  className="select"
+                  value={drawSectionId}
+                  onChange={(e) => setDrawSectionId(e.target.value)}
+                >
+                  {TEMPLATES.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.label}
+                    </option>
+                  ))}
+                  <option value={DRAFT_SECTION}>Asset builder — {draftSection.name}</option>
+                </select>
+              </label>
+              <span className="pill pill-note mono">
+                {draft.points} pt ·{' '}
+                {formatWidth(draft.metres, units, { decimals: 0, withUnit: true })}
+              </span>
+              <button
+                type="button"
+                className="btn btn-solid"
+                disabled={draft.points < 2}
+                onClick={() => mapRef.current?.finishDraw()}
+              >
+                Finish
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={draft.points === 0}
+                onClick={() => mapRef.current?.undoDraftPoint()}
+              >
+                Undo point
+              </button>
+            </>
+          )}
+
+          {tool === 'measure' && (
+            <>
+              <span className="pill pill-note mono">
+                {measure && measure.points >= 2
+                  ? formatWidth(measure.metres, units, { withUnit: true })
+                  : 'click two points'}
+              </span>
+              <button
+                type="button"
+                className="btn btn-solid"
+                disabled={!street || !measure || measure.points < 2 || measure.metres <= 0}
+                onClick={() => {
+                  if (!street || !measure) return;
+                  setExistingWidth(street.id, measure.metres);
+                  setNotice({
+                    kind: 'success',
+                    title: `Right-of-way set to ${formatWidth(measure.metres, units, {
+                      withUnit: true,
+                    })}`,
+                  });
+                }}
+              >
+                Use as right-of-way
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => mapRef.current?.clearMeasure()}
+              >
+                Clear
+              </button>
+            </>
+          )}
+
+          <div className="spacer" />
+
+          <button
+            type="button"
+            className="btn btn-pill"
+            aria-pressed={swipe !== null}
+            onClick={() => setSwipe(swipe === null ? 0.5 : null)}
+          >
+            {swipe === null ? 'Compare with existing' : 'Show full design'}
+          </button>
+        </div>
+
         <div className="map-wrap" ref={mapWrapRef}>
           <MapCanvas
+            ref={mapRef}
             basemapId={basemapId}
             sourceOptions={sourceOptions}
             units={units}
             streets={streets}
             selectedStreetId={selectedStreetId}
+            tool={tool}
             swipe={swipe}
             center={DEMO_CENTER}
             zoom={DEMO_ZOOM}
             onViewChange={setView}
             onSelectStreet={selectStreet}
             onWarnings={setWarnings}
+            onDraftChange={(points, metres) => setDraft({ points: points.length, metres })}
+            onDrawComplete={(points) => addStreet(points)}
+            onGestureStart={beginGesture}
+            onGestureEnd={endGesture}
+            onVertexMove={moveVertexLive}
+            onVertexInsert={insertVertexLive}
+            onVertexDelete={removeVertex}
+            onMeasureChange={(points, metres) => setMeasure({ points: points.length, metres })}
             onRenderStats={setRenderStats}
           />
 
@@ -232,16 +561,12 @@ export default function MapEditor() {
             </div>
           )}
 
-          <div className="map-overlay-tl">
-            <button
-              type="button"
-              className="btn btn-pill"
-              aria-pressed={swipe !== null}
-              onClick={() => setSwipe(swipe === null ? 0.5 : null)}
-            >
-              {swipe === null ? 'Compare with existing' : 'Show full design'}
-            </button>
-          </div>
+          {/* Only while a modal tool is active — a permanent hint just covers imagery. */}
+          {tool !== 'select' && (
+            <div className="map-overlay-tl">
+              <div className="pill pill-note">{activeTool.hint}</div>
+            </div>
+          )}
 
           {warnings.length > 0 && (
             <div className="map-overlay-tr">
@@ -255,7 +580,7 @@ export default function MapEditor() {
 
         <footer className="statusbar">
           {[
-            ['Cursor', view ? `${view.lat.toFixed(5)}, ${view.lng.toFixed(5)}` : '—'],
+            ['Center', view ? `${view.lat.toFixed(5)}, ${view.lng.toFixed(5)}` : '—'],
             ['Zoom', view ? `z${view.zoom.toFixed(1)}` : '—'],
             ['Imagery', basemap.label],
             ['Street', street?.name ?? '—'],
@@ -289,10 +614,34 @@ export default function MapEditor() {
       <aside className="rail rail-right">
         {!street || !section ? (
           <section className="panel">
-            <p className="empty-note">Select a street to edit its cross-section.</p>
+            <p className="empty-note">
+              Select a street to edit its cross-section, or draw a new one.
+            </p>
           </section>
         ) : (
           <>
+            <section className="panel">
+              <header className="panel-head">
+                <span className="label">Street</span>
+                <span className="label mono">
+                  {formatWidth(lineLengthMeters(street.centerline), units, {
+                    decimals: 0,
+                    withUnit: true,
+                  })}
+                </span>
+              </header>
+              <input
+                className="text-input"
+                value={street.name}
+                aria-label="Street name"
+                onChange={(e) => renameStreet(street.id, e.target.value)}
+              />
+              <p className="hint">
+                {street.centerline.length} centerline points. Drag one on the map to reshape,
+                alt-click to remove it, or drag a hollow handle between two to add one.
+              </p>
+            </section>
+
             <section className="panel">
               <header className="panel-head">
                 <span className="label">Fit check</span>
@@ -350,7 +699,8 @@ export default function MapEditor() {
                   }}
                 />
                 <span className="hint">
-                  Curb-to-curb of the real street. The redesign is honest only if this is.
+                  Curb-to-curb of the real street — the Measure tool fills this in. The
+                  redesign is honest only if this is.
                 </span>
               </label>
             </section>
@@ -371,6 +721,10 @@ export default function MapEditor() {
                 <option value="leftEdge">Left edge of section</option>
                 {anchorModeOf(section) === 'custom' && <option value="custom">Custom offset</option>}
               </select>
+              <p className="hint">
+                Where the drawn line sits within the section. Travelway centre lands it on the
+                double-yellow you can actually see on the imagery.
+              </p>
             </section>
 
             <section className="panel">
@@ -388,6 +742,16 @@ export default function MapEditor() {
                 onMove={(id, delta) => moveComponent('street', id, delta)}
                 onRemove={(id) => removeComponent('street', id)}
               />
+            </section>
+
+            <section className="panel">
+              <header className="panel-head">
+                <span className="label">Add a band</span>
+              </header>
+              <PrimitivePalette units={units} onAdd={(type) => addComponent('street', type)} />
+              <p className="hint">
+                Added just inside the right-hand kerb. Reorder with the arrows above.
+              </p>
             </section>
 
             <section className="panel">

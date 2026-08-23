@@ -1,0 +1,219 @@
+import { describe, expect, it } from 'vitest';
+import { parseProject, serializeProject, toProjectGeoJSON } from './project';
+import type { ImportDefaults } from './project';
+import { createDemoStreets } from '../demo/washingtonPark';
+import { totalWidth } from './section';
+import type { Street } from './types';
+
+/**
+ * The project round-trip.
+ *
+ * This is the test that guards the promise the whole tool makes: a design you download is
+ * still a *design* when it comes back, not a picture of one. If a reopened file lost its
+ * widths, its component order, or its anchor, everything downstream — the fit check, the
+ * inspector, editing at all — would be quietly wrong while still looking right on screen.
+ */
+
+const META = { name: 'Test project', editorVersion: '0.0.0-test' };
+
+const DEFAULTS: ImportDefaults = {
+  sectionName: 'Fallback section',
+  components: [
+    { componentType: 'travelLane', widthMeters: 3 },
+    { componentType: 'travelLane', widthMeters: 3 },
+  ],
+};
+
+function roundTrip(streets: Street[]): Street[] {
+  const result = parseProject(serializeProject(streets, META), DEFAULTS);
+  if (!result.ok) throw new Error(`parse failed: ${result.errors.join(' | ')}`);
+  return result.streets;
+}
+
+describe('project round-trip', () => {
+  const original = createDemoStreets();
+
+  it('preserves every centerline coordinate exactly', () => {
+    const loaded = roundTrip(original);
+    expect(loaded).toHaveLength(original.length);
+    loaded.forEach((street, i) => {
+      expect(street.centerline).toEqual(original[i]!.centerline);
+    });
+  });
+
+  it('preserves names, widths, types, directions and order', () => {
+    const loaded = roundTrip(original);
+
+    loaded.forEach((street, i) => {
+      const before = original[i]!;
+      expect(street.name).toBe(before.name);
+      expect(street.section.name).toBe(before.section.name);
+      expect(street.section.components.map((c) => c.componentType)).toEqual(
+        before.section.components.map((c) => c.componentType),
+      );
+      expect(street.section.components.map((c) => c.direction)).toEqual(
+        before.section.components.map((c) => c.direction),
+      );
+      // Widths are rounded to 0.1 mm on write, which is far below anything a person can
+      // draw or measure but keeps the file readable.
+      street.section.components.forEach((c, j) => {
+        expect(c.widthMeters).toBeCloseTo(before.section.components[j]!.widthMeters, 4);
+      });
+      expect(totalWidth(street.section.components)).toBeCloseTo(
+        totalWidth(before.section.components),
+        3,
+      );
+    });
+  });
+
+  it('preserves the anchor and the measured right-of-way', () => {
+    const loaded = roundTrip(original);
+    loaded.forEach((street, i) => {
+      expect(street.section.anchorOffsetMeters).toBe(original[i]!.section.anchorOffsetMeters);
+      expect(street.existingWidthMeters).toBeCloseTo(original[i]!.existingWidthMeters ?? 0, 4);
+    });
+  });
+
+  it('mints fresh runtime ids rather than trusting the file', () => {
+    const loaded = roundTrip(original);
+    const before = new Set(original.map((s) => s.id));
+    for (const street of loaded) expect(before.has(street.id)).toBe(false);
+  });
+
+  it('survives a second round-trip unchanged', () => {
+    const once = roundTrip(original);
+    const twice = roundTrip(once);
+    expect(twice.map((s) => s.centerline)).toEqual(once.map((s) => s.centerline));
+    expect(twice.map((s) => s.section.components.map((c) => c.widthMeters))).toEqual(
+      once.map((s) => s.section.components.map((c) => c.widthMeters)),
+    );
+  });
+});
+
+describe('derived geometry', () => {
+  const original = createDemoStreets();
+
+  it('writes band polygons for external readers', () => {
+    const file = toProjectGeoJSON(original, META);
+    const bands = file.features.filter((f) => f.properties?.['geostripe'] === 'band');
+    const expected = original.reduce((n, s) => n + s.section.components.length, 0);
+    expect(bands).toHaveLength(expected);
+    expect(bands[0]!.geometry.type).toMatch(/Polygon/);
+  });
+
+  it('discards them on load rather than reading them back as streets', () => {
+    const loaded = roundTrip(original);
+    // Without the discard this would be streets + every band.
+    expect(loaded).toHaveLength(original.length);
+  });
+
+  it('reports the discard so the count is never a surprise', () => {
+    const result = parseProject(serializeProject(original, META), DEFAULTS);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.warnings.join(' ')).toMatch(/discarded and rebuilt/);
+  });
+});
+
+describe('graceful failure', () => {
+  it('rejects text that is not JSON', () => {
+    const result = parseProject('<html>nope</html>', DEFAULTS);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors[0]).toMatch(/not valid JSON/);
+  });
+
+  it('rejects JSON that is not a FeatureCollection', () => {
+    const result = parseProject('{"type":"Feature"}', DEFAULTS);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors[0]).toMatch(/FeatureCollection/);
+  });
+
+  it('skips one bad component type and keeps the rest of the file', () => {
+    const good = createDemoStreets()[0]!;
+    const file = toProjectGeoJSON([good], META);
+    const broken = structuredClone(file);
+    // A second street whose section names a type this build has never heard of.
+    broken.features.push({
+      type: 'Feature',
+      properties: {
+        geostripe: 'street',
+        name: 'From the future',
+        components: [{ componentType: 'hyperloopBay', widthMeters: 4 }],
+      },
+      geometry: { type: 'LineString', coordinates: [[-84.5, 39.1], [-84.5, 39.101]] },
+    });
+
+    const result = parseProject(JSON.stringify(broken), DEFAULTS);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.streets).toHaveLength(1);
+    expect(result.streets[0]!.name).toBe(good.name);
+    expect(result.warnings.join(' ')).toMatch(/unknown component type/);
+  });
+
+  it('reports when a file has polygons but no centerlines', () => {
+    const file = toProjectGeoJSON(createDemoStreets(), META);
+    const bandsOnly = {
+      type: 'FeatureCollection',
+      features: file.features.filter((f) => f.properties?.['geostripe'] === 'band'),
+    };
+    const result = parseProject(JSON.stringify(bandsOnly), DEFAULTS);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.join(' ')).toMatch(/No street centerlines/);
+  });
+});
+
+describe('importing lines from elsewhere', () => {
+  // The point of this path: trace a way in OSM or QGIS, drop it in, design on top of it.
+  const plainLines = JSON.stringify({
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        properties: { name: 'Vine Street' },
+        geometry: {
+          type: 'LineString',
+          coordinates: [
+            [-84.5186, 39.1095],
+            [-84.5186, 39.1115],
+          ],
+        },
+      },
+    ],
+  });
+
+  it('imports a bare LineString with the fallback section', () => {
+    const result = parseProject(plainLines, DEFAULTS);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.streets).toHaveLength(1);
+    expect(result.streets[0]!.name).toBe('Vine Street');
+    expect(result.streets[0]!.section.name).toBe(DEFAULTS.sectionName);
+    expect(result.streets[0]!.section.components).toHaveLength(2);
+  });
+
+  it('says so, rather than pretending the section came from the file', () => {
+    const result = parseProject(plainLines, DEFAULTS);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.warnings.join(' ')).toMatch(/plain LineString/);
+  });
+
+  it('ignores points and polygons that are not ours', () => {
+    const mixed = JSON.stringify({
+      type: 'FeatureCollection',
+      features: [
+        JSON.parse(plainLines).features[0],
+        { type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [-84.5, 39.1] } },
+      ],
+    });
+    const result = parseProject(mixed, DEFAULTS);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.streets).toHaveLength(1);
+    expect(result.warnings.join(' ')).toMatch(/skipped/);
+  });
+});

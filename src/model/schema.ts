@@ -13,7 +13,8 @@ import { newId } from './types';
 
 export const ASSET_FILE_VERSION = 1;
 
-const componentSchema = z.object({
+/** One band, as it appears in both asset files and project files. */
+export const componentSchema = z.object({
   componentType: z.enum(COMPONENT_TYPES),
   widthMeters: z.number().finite().positive().max(100),
   direction: z.enum(DIRECTIONS).optional(),

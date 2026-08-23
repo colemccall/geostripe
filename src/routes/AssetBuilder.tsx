@@ -1,4 +1,4 @@
-import { PRIMITIVE_ORDER, PRIMITIVES } from '../library/primitives';
+import { PRIMITIVES } from '../library/primitives';
 import { TEMPLATES, templateTotalWidth } from '../library/templates';
 import { useEditorStore, anchorModeOf } from '../store/useEditorStore';
 import type { AnchorMode } from '../store/useEditorStore';
@@ -13,6 +13,7 @@ import {
 import { formatWidth } from '../lib/units';
 import CrossSectionSvg from '../components/CrossSectionSvg';
 import ComponentStack from '../components/ComponentStack';
+import PrimitivePalette from '../components/PrimitivePalette';
 import NoticeBar from '../components/NoticeBar';
 
 /**
@@ -83,23 +84,7 @@ export default function AssetBuilder() {
           <header className="panel-head">
             <span className="label">Lane primitives</span>
           </header>
-          <ul className="prims">
-            {PRIMITIVE_ORDER.map((type) => {
-              const spec = PRIMITIVES[type];
-              return (
-                <li key={type}>
-                  <button type="button" className="prim" onClick={() => addComponent('draft', type)}>
-                    <span className="swatch" style={{ background: spec.color }} />
-                    <span className="prim-name">{spec.label}</span>
-                    <span className="prim-width mono">{formatWidth(spec.defaultWidthMeters, units)}</span>
-                    <span className="prim-add" aria-hidden="true">
-                      +
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+          <PrimitivePalette units={units} onAdd={(type) => addComponent('draft', type)} />
           <p className="hint">
             Defaults come from NACTO guidance and are starting values, never constraints.
           </p>

@@ -102,24 +102,38 @@ src/
   App.tsx                 HashRouter + lazy route table
   lib/
     units.ts              Metres <-> feet; storage is always metres
+    version.ts            Editor version, stamped into exported projects
+  geo/                    Pure. No React, no MapLibre, no lng/lat past the boundary.
+    projection.ts         Local metric tangent plane — the cos(latitude) fix
+    offset.ts             Polyline offsetting, miter joins with a bevel fallback
+    banding.ts            Centerline + widths -> band polygons and lane markings
+    curvature.ts          Warns where a bend is tighter than the offset distance
+    measure.ts            Ground distance, length, midpoint, bearing
+    geo.test.ts           29 tests, measured with an independent haversine
   library/
     primitives.ts         Lane primitives, NACTO-derived defaults, material colours
     templates.ts          Starter cross-sections, defined as primitive lists
   model/
-    types.ts              CrossSection, SectionComponent
+    types.ts              Street, CrossSection, SectionComponent
     section.ts            Cross-section arithmetic — widths, anchor, boundary offsets
     section.test.ts       17 tests pinning the anchor semantics
     schema.ts             Zod validation for the asset interchange format
     assetFile.ts          Download / upload plumbing
+    project.ts            Project GeoJSON: write bands, read only centerlines
+    project.test.ts       15 tests on the round-trip and on partial-load reporting
   store/
-    useEditorStore.ts     Zustand store with snapshot undo/redo
+    useEditorStore.ts     Zustand store, snapshot undo/redo, gesture bracketing
+    useEditorStore.test.ts  10 tests on history granularity and aliasing
   map/
     basemaps.ts           Imagery sources, verified against the live services
-    MapCanvas.tsx         MapLibre wrapper
+    designLayers.ts       Document -> map layers, plus the swipe clip
+    MapCanvas.tsx         MapLibre wrapper and all pointer interaction
+    worker.guard.test.ts  Source-level guard on the MapLibre worker configuration
   components/
     AppShell.tsx          Chrome — units, imagery picker, undo/redo
     CrossSectionSvg.tsx   Shared elevation renderer, both pages
     ComponentStack.tsx    Shared editable stack, both pages
+    PrimitivePalette.tsx  Shared add-a-band palette, both pages
     NoticeBar.tsx         File-operation feedback
   routes/
     MapEditor.tsx         "/"
@@ -129,6 +143,7 @@ src/
 
 scripts/
   prep-pages.mjs          Repeatable build + prep for each deploy target
+  sync-maplibre-worker.mjs  Copies MapLibre's worker into public/ verbatim
 
 .env, .env.pages, .env.domain    Base path per target (tracked; not secrets)
 ```
@@ -146,27 +161,43 @@ state.
 
 ## Status
 
-Everything that does not require geodesy is built and working.
+The editor works end to end: draw a street, design its cross-section, check it against
+the width that is really there, and save it as GeoJSON you can reopen and keep editing.
 
 #### Done
 
-- Asset Builder (`/builder`) — lane primitive library, editable component stack with
-  reorder and direction, live cross-section elevation with engineering dimension lines,
-  travelway-anchored centerline marker, asset JSON download and upload with Zod
-  validation and readable per-field errors
-- Map Editor (`/`) — live satellite imagery with a source picker (Esri, USGS NAIP,
-  custom XYZ), scale bar, attribution, cursor and zoom readout, imagery toggle,
-  right-of-way fit check, and the shared cross-section inspector
-- 8 starter cross-section templates, feet/metres toggle, undo/redo with Ctrl+Z
-- 17 unit tests covering cross-section arithmetic and anchor semantics
+- **Geometry engine** — local metric tangent plane, polyline offsetting with miter joins
+  and a bevel fallback, cross-section banding, curvature warnings. Pure, headless, and
+  gated on tests asserting a 3.0 m band measures 3.0 m on every bearing, at 39°N and at
+  69°N alike. Adjacent bands share boundary coordinates exactly, so there are no slivers.
+- **Map Editor** (`/`) — satellite imagery with a source picker (USGS NAIP by default,
+  Esri World Imagery, Esri Clarity, Esri Wayback with a vintage picker, custom XYZ),
+  three tools:
+  - **Select** — click a band to select its street; drag a centerline vertex to reshape,
+    alt-click to remove one, drag a hollow midpoint handle to insert one. A whole drag is
+    a single undo step.
+  - **Draw street** — click along a centerline, Enter or double-click to finish, Esc to
+    cancel, Backspace to drop the last point. The new street gets the template you pick,
+    or whatever is open in the Asset Builder.
+  - **Measure** — click two points and push the result straight into the fit check.
+- **Project save/load** — plain GeoJSON. Centerlines carry their cross-section and are the
+  only thing read back; the derived band polygons ride along for QGIS and are regenerated
+  on load, which is what keeps a reopened project parametric rather than frozen. A plain
+  LineString with no GeoStripe properties imports as a centerline you can design on, so a
+  way traced in OSM or QGIS drops straight in.
+- **Before/after swipe** — clips the design against a meridian, exact because the map is
+  held north-up.
+- **Asset Builder** (`/builder`) — lane primitive library, editable component stack, live
+  cross-section elevation with dimension lines, asset JSON round-trip with Zod validation
+  and readable per-field errors.
+- 8 starter cross-section templates, feet/metres toggle, undo/redo with Ctrl+Z.
+- **77 unit tests** across geometry, cross-section arithmetic, the project round-trip, and
+  store history.
 
-**Next — the geometry engine.** Local metric projection, polyline offsetting,
-cross-section banding, and curvature warnings, built headless and unit-tested before any
-drawing UI, because it is the whole technical risk. Once it lands, the Map Editor gets
-centerline drawing and the rendered design layer.
+#### Not built yet
 
-**After that:** GeoJSON project save/load round-trip, before/after swipe, crosswalks,
-roundabouts.
+Crosswalks, roundabouts, intersection trimming (crossing streets simply overlap for now,
+resolved by draw order), snapping, and touch support for vertex dragging.
 
 ### Why the geometry is its own phase
 
@@ -177,8 +208,37 @@ street's bands come out narrow by `cos(latitude)` — at Cincinnati a 3.0 m lane
 compare two streets. `@turf/buffer` is unaffected (it projects to azimuthal equidistant),
 which makes the trap worse: the naive first step looks perfect.
 
-All geometry will therefore happen in a local metric tangent plane, in a pure module,
-gated on a test asserting that a 3.0 m band measures 3.0 m whichever way the street runs.
+All geometry therefore happens in a local metric tangent plane, in a pure module, gated on
+a test asserting that a 3.0 m band measures 3.0 m whichever way the street runs.
+
+### The project file
+
+```jsonc
+{
+  "type": "FeatureCollection",
+  "metadata": { "geostripeProject": 1, "name": "…", "editorVersion": "…" },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "geostripe": "street",          // read back on load
+        "name": "Race Street",
+        "existingWidthMeters": 16.5,
+        "anchorOffsetMeters": null,     // null = derive the travelway midpoint
+        "components": [
+          { "componentType": "sidewalk", "widthMeters": 2.4, "direction": "none" },
+          { "componentType": "travelLane", "widthMeters": 3.0, "direction": "forward" }
+        ]
+      },
+      "geometry": { "type": "LineString", "coordinates": [[-84.5, 39.1], …] }
+    },
+    { "properties": { "geostripe": "band", … } }   // derived; discarded and rebuilt on load
+  ]
+}
+```
+
+Widths are metres everywhere in the file. Feet exist only at the display boundary — a
+stored value is never a converted one.
 
 ---
 
