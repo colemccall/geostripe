@@ -2,28 +2,31 @@ import { create } from 'zustand';
 import type { ComponentType, Direction } from '../library/primitives';
 import { PRIMITIVES } from '../library/primitives';
 import { TEMPLATES, instantiateTemplate } from '../library/templates';
-import type { CrossSection } from '../model/types';
+import type { CrossSection, SectionComponent, Street } from '../model/types';
 import { newId } from '../model/types';
-import { autoAnchorOffset, geometricCentreOffset, totalWidth } from '../model/section';
+import { autoAnchorOffset, geometricCentreOffset } from '../model/section';
 import type { DisplayUnits } from '../lib/units';
 import type { BasemapId } from '../map/basemaps';
+import { DEFAULT_VINTAGE } from '../map/basemaps';
+import { createDemoStreets } from '../demo/washingtonPark';
 
 /**
  * Editor state.
  *
- * Undo/redo is built in from the start rather than retrofitted — bolting a command
- * history onto an established store means rewriting every mutation, and the whole
- * premise here is that designs stay editable. Every change to the section funnels
- * through `commit`, which is the only place history is recorded.
+ * Undo/redo is built in rather than retrofitted: every mutation funnels through `commit`,
+ * which is the only place history is recorded. Snapshots rather than patches — a project
+ * is a handful of numbers and strings, so copying it is free and a snapshot cannot drift
+ * out of sync the way a mis-applied patch can.
  *
- * History uses snapshots rather than patches. A cross-section is a handful of numbers
- * and strings, so copying it is free, and snapshots cannot drift out of sync with the
- * state the way a mis-applied patch can. If this ever holds a full multi-street project,
- * revisit — not before.
+ * Two edit targets, because the two pages edit different things: the Map Editor works on
+ * the selected street's section, the Asset Builder on a standalone draft that has no
+ * centerline. Passing the target explicitly keeps the store from having to know which
+ * page is mounted.
  */
 
 const HISTORY_LIMIT = 100;
 
+export type EditTarget = 'street' | 'draft';
 export type AnchorMode = 'travelway' | 'geometric' | 'leftEdge' | 'custom';
 
 export interface Notice {
@@ -32,77 +35,116 @@ export interface Notice {
   details?: string[];
 }
 
-interface EditorState {
-  // ---- shared chrome
+interface Snapshot {
+  streets: Street[];
+  draftSection: CrossSection;
+}
+
+interface EditorState extends Snapshot {
+  // ---- chrome
   units: DisplayUnits;
   basemapId: BasemapId;
   customTileUrl: string;
+  waybackRelease: string;
+  arcgisApiKey: string;
 
-  // ---- the section being edited
-  section: CrossSection;
+  // ---- selection
+  selectedStreetId: string | null;
   selectedComponentId: string | null;
 
-  /** Measured curb-to-curb + walks of the real street, for the fit check. */
-  measuredRowMeters: number;
+  /** Swipe divider position, 0..1 across the map. null = off. */
+  swipe: number | null;
 
-  // ---- history
-  past: CrossSection[];
-  future: CrossSection[];
-
+  past: Snapshot[];
+  future: Snapshot[];
   notice: Notice | null;
 
-  // ---- actions
+  // ---- chrome actions
   setUnits: (units: DisplayUnits) => void;
   setBasemap: (id: BasemapId) => void;
   setCustomTileUrl: (url: string) => void;
-  setMeasuredRow: (metres: number) => void;
+  setWaybackRelease: (release: string) => void;
+  setArcgisApiKey: (key: string) => void;
+  setSwipe: (value: number | null) => void;
   setNotice: (notice: Notice | null) => void;
 
-  select: (id: string | null) => void;
-  rename: (name: string) => void;
-  addComponent: (type: ComponentType, index?: number) => void;
-  removeComponent: (id: string) => void;
-  setWidth: (id: string, metres: number) => void;
-  setDirection: (id: string, direction: Direction) => void;
-  moveComponent: (id: string, delta: number) => void;
-  setAnchorMode: (mode: AnchorMode) => void;
+  // ---- selection actions
+  selectStreet: (id: string | null) => void;
+  selectComponent: (id: string | null) => void;
 
-  loadSection: (section: CrossSection) => void;
-  loadTemplate: (templateId: string) => void;
+  // ---- section editing, on either target
+  addComponent: (target: EditTarget, type: ComponentType, index?: number) => void;
+  removeComponent: (target: EditTarget, id: string) => void;
+  setWidth: (target: EditTarget, id: string, metres: number) => void;
+  setDirection: (target: EditTarget, id: string, direction: Direction) => void;
+  moveComponent: (target: EditTarget, id: string, delta: number) => void;
+  setAnchorMode: (target: EditTarget, mode: AnchorMode) => void;
+  renameSection: (target: EditTarget, name: string) => void;
+  applyTemplate: (target: EditTarget, templateId: string) => void;
+  loadSection: (target: EditTarget, section: CrossSection) => void;
+
+  // ---- street-level
+  setExistingWidth: (streetId: string, metres: number) => void;
+  setCenterline: (streetId: string, centerline: [number, number][]) => void;
+  removeStreet: (streetId: string) => void;
+  clearStreets: () => void;
+  loadDemo: () => void;
 
   undo: () => void;
   redo: () => void;
-  canUndo: () => boolean;
-  canRedo: () => boolean;
 }
 
-const initialSection = instantiateTemplate(TEMPLATES[1]!);
+const initialStreets = createDemoStreets();
 
 export const useEditorStore = create<EditorState>((set, get) => {
-  /** The single funnel for section mutations — records history, clears redo. */
-  const commit = (next: CrossSection) => {
-    const { section, past } = get();
+  const snapshot = (): Snapshot => {
+    const { streets, draftSection } = get();
+    return { streets, draftSection };
+  };
+
+  const commit = (next: Partial<Snapshot>) => {
+    const previous = snapshot();
     set({
-      section: next,
-      past: [...past, section].slice(-HISTORY_LIMIT),
+      ...next,
+      past: [...get().past, previous].slice(-HISTORY_LIMIT),
       future: [],
     });
   };
 
-  const mutateComponents = (
-    fn: (components: CrossSection['components']) => CrossSection['components'],
-  ) => {
-    const { section } = get();
-    commit({ ...section, components: fn(section.components) });
+  /** Apply a transform to whichever section the target names. */
+  const editSection = (target: EditTarget, fn: (section: CrossSection) => CrossSection) => {
+    if (target === 'draft') {
+      commit({ draftSection: fn(get().draftSection) });
+      return;
+    }
+    const { streets, selectedStreetId } = get();
+    const id = selectedStreetId ?? streets[0]?.id;
+    if (!id) return;
+    commit({
+      streets: streets.map((s) => (s.id === id ? { ...s, section: fn(s.section) } : s)),
+    });
   };
+
+  const editComponents = (
+    target: EditTarget,
+    fn: (components: SectionComponent[]) => SectionComponent[],
+  ) => editSection(target, (section) => ({ ...section, components: fn(section.components) }));
 
   return {
     units: 'ft',
-    basemapId: 'esri',
+    basemapId: 'usgsNaip',
     customTileUrl: '',
-    section: initialSection,
+    waybackRelease: DEFAULT_VINTAGE,
+    arcgisApiKey: '',
+
+    streets: initialStreets,
+    draftSection: instantiateTemplate(TEMPLATES[1]!),
+
+    selectedStreetId: initialStreets[0]?.id ?? null,
     selectedComponentId: null,
-    measuredRowMeters: 18.6,
+    // Demo opens with the swipe on, so the redesign reads against the real street.
+    swipe: 0.5,
+
     past: [],
     future: [],
     notice: null,
@@ -110,47 +152,48 @@ export const useEditorStore = create<EditorState>((set, get) => {
     setUnits: (units) => set({ units }),
     setBasemap: (basemapId) => set({ basemapId }),
     setCustomTileUrl: (customTileUrl) => set({ customTileUrl }),
-    setMeasuredRow: (measuredRowMeters) => set({ measuredRowMeters }),
+    setWaybackRelease: (waybackRelease) => set({ waybackRelease }),
+    setArcgisApiKey: (arcgisApiKey) => set({ arcgisApiKey }),
+    setSwipe: (swipe) => set({ swipe }),
     setNotice: (notice) => set({ notice }),
 
-    select: (selectedComponentId) => set({ selectedComponentId }),
+    selectStreet: (selectedStreetId) => set({ selectedStreetId, selectedComponentId: null }),
+    selectComponent: (selectedComponentId) => set({ selectedComponentId }),
 
-    rename: (name) => commit({ ...get().section, name }),
-
-    addComponent: (type, index) =>
-      mutateComponents((components) => {
+    addComponent: (target, type, index) =>
+      editComponents(target, (components) => {
         const spec = PRIMITIVES[type];
-        const entry = {
+        const entry: SectionComponent = {
           id: newId('cmp'),
           componentType: type,
           widthMeters: spec.defaultWidthMeters,
           direction: spec.defaultDirection,
         };
-        // Default insertion sits just inside the right-hand kerb rather than outside the
-        // sidewalk, which is almost never what someone means by "add a lane".
+        // Insert just inside the right-hand kerb rather than outside the footway, which
+        // is almost never what someone means by "add a lane".
         const at = index ?? Math.max(components.length - 1, 0);
         const next = [...components];
         next.splice(at, 0, entry);
         return next;
       }),
 
-    removeComponent: (id) => {
-      mutateComponents((components) => components.filter((c) => c.id !== id));
+    removeComponent: (target, id) => {
+      editComponents(target, (components) => components.filter((c) => c.id !== id));
       if (get().selectedComponentId === id) set({ selectedComponentId: null });
     },
 
-    setWidth: (id, metres) =>
-      mutateComponents((components) =>
+    setWidth: (target, id, metres) =>
+      editComponents(target, (components) =>
         components.map((c) => (c.id === id ? { ...c, widthMeters: metres } : c)),
       ),
 
-    setDirection: (id, direction) =>
-      mutateComponents((components) =>
+    setDirection: (target, id, direction) =>
+      editComponents(target, (components) =>
         components.map((c) => (c.id === id ? { ...c, direction } : c)),
       ),
 
-    moveComponent: (id, delta) =>
-      mutateComponents((components) => {
+    moveComponent: (target, id, delta) =>
+      editComponents(target, (components) => {
         const from = components.findIndex((c) => c.id === id);
         if (from < 0) return components;
         const to = from + delta;
@@ -161,57 +204,92 @@ export const useEditorStore = create<EditorState>((set, get) => {
         return next;
       }),
 
-    setAnchorMode: (mode) => {
-      const { section } = get();
-      const offset =
-        mode === 'travelway'
-          ? null
-          : mode === 'geometric'
-            ? geometricCentreOffset(section.components)
-            : mode === 'leftEdge'
-              ? 0
-              : (section.anchorOffsetMeters ?? autoAnchorOffset(section.components));
-      commit({ ...section, anchorOffsetMeters: offset });
-    },
+    setAnchorMode: (target, mode) =>
+      editSection(target, (section) => ({
+        ...section,
+        anchorOffsetMeters:
+          mode === 'travelway'
+            ? null
+            : mode === 'geometric'
+              ? geometricCentreOffset(section.components)
+              : mode === 'leftEdge'
+                ? 0
+                : (section.anchorOffsetMeters ?? autoAnchorOffset(section.components)),
+      })),
 
-    loadSection: (section) => {
-      commit(section);
-      set({ selectedComponentId: null });
-    },
+    renameSection: (target, name) => editSection(target, (section) => ({ ...section, name })),
 
-    loadTemplate: (templateId) => {
+    applyTemplate: (target, templateId) => {
       const def = TEMPLATES.find((t) => t.id === templateId);
       if (!def) return;
-      commit(instantiateTemplate(def));
+      const fresh = instantiateTemplate(def);
+      editSection(target, (section) => ({ ...fresh, id: section.id }));
       set({ selectedComponentId: null });
+    },
+
+    loadSection: (target, section) => {
+      editSection(target, () => section);
+      set({ selectedComponentId: null });
+    },
+
+    setExistingWidth: (streetId, metres) =>
+      commit({
+        streets: get().streets.map((s) =>
+          s.id === streetId ? { ...s, existingWidthMeters: metres } : s,
+        ),
+      }),
+
+    setCenterline: (streetId, centerline) =>
+      commit({
+        streets: get().streets.map((s) => (s.id === streetId ? { ...s, centerline } : s)),
+      }),
+
+    removeStreet: (streetId) => {
+      commit({ streets: get().streets.filter((s) => s.id !== streetId) });
+      if (get().selectedStreetId === streetId) {
+        set({ selectedStreetId: get().streets[0]?.id ?? null, selectedComponentId: null });
+      }
+    },
+
+    clearStreets: () => {
+      commit({ streets: [] });
+      set({ selectedStreetId: null, selectedComponentId: null });
+    },
+
+    loadDemo: () => {
+      const streets = createDemoStreets();
+      commit({ streets });
+      set({ selectedStreetId: streets[0]?.id ?? null, selectedComponentId: null, swipe: 0.5 });
     },
 
     undo: () => {
-      const { past, section, future } = get();
+      const { past, future } = get();
       const previous = past[past.length - 1];
       if (!previous) return;
       set({
-        section: previous,
+        ...previous,
         past: past.slice(0, -1),
-        future: [section, ...future].slice(0, HISTORY_LIMIT),
+        future: [snapshot(), ...future].slice(0, HISTORY_LIMIT),
       });
     },
 
     redo: () => {
-      const { future, section, past } = get();
+      const { future, past } = get();
       const next = future[0];
       if (!next) return;
       set({
-        section: next,
-        past: [...past, section].slice(-HISTORY_LIMIT),
+        ...next,
+        past: [...past, snapshot()].slice(-HISTORY_LIMIT),
         future: future.slice(1),
       });
     },
-
-    canUndo: () => get().past.length > 0,
-    canRedo: () => get().future.length > 0,
   };
 });
+
+/** The section the Map Editor is currently editing. */
+export function selectedStreet(state: EditorState): Street | undefined {
+  return state.streets.find((s) => s.id === state.selectedStreetId) ?? state.streets[0];
+}
 
 /** Current anchor mode, inferred from the stored offset. */
 export function anchorModeOf(section: CrossSection): AnchorMode {
@@ -220,8 +298,4 @@ export function anchorModeOf(section: CrossSection): AnchorMode {
   if (Math.abs(offset - geometricCentreOffset(section.components)) < 1e-6) return 'geometric';
   if (Math.abs(offset) < 1e-6) return 'leftEdge';
   return 'custom';
-}
-
-export function sectionWidth(section: CrossSection): number {
-  return totalWidth(section.components);
 }

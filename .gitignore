@@ -27,3 +27,6 @@ Thumbs.db
 # build configuration (VITE_BASE), not secrets, and are deliberately tracked.
 .env.local
 .env.*.local
+
+# Synced from node_modules by scripts/sync-maplibre-worker.mjs
+public/maplibre/

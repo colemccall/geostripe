@@ -1075,3 +1075,102 @@ button {
   color: var(--ink-dim);
   font-size: 13px;
 }
+
+/* ------------------------------------------------------------ before/after swipe */
+
+/*
+ * The divider is UI only — the actual clipping happens in the data, by intersecting the
+ * design polygons against a meridian. That works because map rotation is disabled, so a
+ * vertical line on screen is always a line of constant longitude.
+ */
+.swipe-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 6;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--accent-fill);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.swipe-handle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--accent-fill);
+  color: var(--accent-ink);
+  font-size: 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+
+.swipe-tag {
+  position: absolute;
+  top: 14px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(12, 16, 18, 0.78);
+  color: #edeff0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.swipe-tag-left {
+  right: 10px;
+}
+
+.swipe-tag-right {
+  left: 10px;
+}
+
+.map-overlay-tr {
+  position: absolute;
+  top: 11px;
+  right: 52px;
+  z-index: 5;
+  max-width: min(330px, calc(100% - 80px));
+}
+
+.pill-warn {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  border-left: 3px solid var(--warn-fill);
+}
+
+.pill-warn strong {
+  color: var(--warn);
+  font-size: 11px;
+}
+
+.pill-warn span {
+  color: var(--ink-2);
+  line-height: 1.4;
+}
+
+.btn-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.btn-row .btn {
+  flex: 1;
+}
+
+.card:disabled {
+  opacity: 0.45;
+  cursor: default;
+}

@@ -24,7 +24,7 @@ import NoticeBar from '../components/NoticeBar';
  * becomes real geometry only when placed on a street in the Map Editor.
  */
 export default function AssetBuilder() {
-  const section = useEditorStore((s) => s.section);
+  const section = useEditorStore((s) => s.draftSection);
   const units = useEditorStore((s) => s.units);
   const selectedId = useEditorStore((s) => s.selectedComponentId);
   const notice = useEditorStore((s) => s.notice);
@@ -35,11 +35,11 @@ export default function AssetBuilder() {
     setWidth,
     setDirection,
     moveComponent,
-    select,
-    rename,
+    selectComponent,
+    renameSection,
     setAnchorMode,
     loadSection,
-    loadTemplate,
+    applyTemplate,
     setNotice,
   } = useEditorStore.getState();
 
@@ -62,7 +62,7 @@ export default function AssetBuilder() {
       return;
     }
 
-    loadSection(result.section);
+    loadSection('draft', result.section);
     setNotice({
       kind: result.warnings.length ? 'warning' : 'success',
       title: `Loaded “${result.section.name}”`,
@@ -88,7 +88,7 @@ export default function AssetBuilder() {
               const spec = PRIMITIVES[type];
               return (
                 <li key={type}>
-                  <button type="button" className="prim" onClick={() => addComponent(type)}>
+                  <button type="button" className="prim" onClick={() => addComponent('draft', type)}>
                     <span className="swatch" style={{ background: spec.color }} />
                     <span className="prim-name">{spec.label}</span>
                     <span className="prim-width mono">{formatWidth(spec.defaultWidthMeters, units)}</span>
@@ -112,7 +112,7 @@ export default function AssetBuilder() {
           <ul className="cards">
             {TEMPLATES.map((t) => (
               <li key={t.id}>
-                <button type="button" className="card" onClick={() => loadTemplate(t.id)}>
+                <button type="button" className="card" onClick={() => applyTemplate('draft', t.id)}>
                   <span className="card-title">{t.label}</span>
                   <span className="chip-row" aria-hidden="true">
                     {t.specs.map(([type, , w], i) => (
@@ -156,7 +156,7 @@ export default function AssetBuilder() {
               units={units}
               variant="full"
               selectedId={selectedId}
-              onSelect={select}
+              onSelect={selectComponent}
             />
           </div>
 
@@ -194,7 +194,7 @@ export default function AssetBuilder() {
             <input
               className="text-input"
               value={section.name}
-              onChange={(e) => rename(e.target.value)}
+              onChange={(e) => renameSection('draft', e.target.value)}
             />
           </label>
           <label className="field">
@@ -202,7 +202,7 @@ export default function AssetBuilder() {
             <select
               className="text-input"
               value={anchorMode}
-              onChange={(e) => setAnchorMode(e.target.value as AnchorMode)}
+              onChange={(e) => setAnchorMode('draft', e.target.value as AnchorMode)}
             >
               <option value="travelway">
                 Travelway centre — {formatWidth(autoAnchorOffset(section.components), units, { withUnit: true })} from left
@@ -227,11 +227,11 @@ export default function AssetBuilder() {
             components={section.components}
             units={units}
             selectedId={selectedId}
-            onSelect={select}
-            onWidth={setWidth}
-            onDirection={setDirection}
-            onMove={moveComponent}
-            onRemove={removeComponent}
+            onSelect={selectComponent}
+            onWidth={(id, m) => setWidth('draft', id, m)}
+            onDirection={(id, d) => setDirection('draft', id, d)}
+            onMove={(id, delta) => moveComponent('draft', id, delta)}
+            onRemove={(id) => removeComponent('draft', id)}
           />
         </section>
 

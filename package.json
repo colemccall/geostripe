@@ -20,11 +20,16 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "predev": "node scripts/sync-maplibre-worker.mjs",
+    "prebuild": "node scripts/sync-maplibre-worker.mjs",
+    "prebuild:pages": "node scripts/sync-maplibre-worker.mjs",
+    "prebuild:domain": "node scripts/sync-maplibre-worker.mjs"
   },
   "dependencies": {
     "immer": "^11.1.18",
     "maplibre-gl": "^6.5.0",
+    "polyclip-ts": "^0.16.8",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^7.1.3",

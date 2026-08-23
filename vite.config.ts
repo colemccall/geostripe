@@ -24,6 +24,12 @@ export default defineConfig(({ mode }) => {
   return {
     base,
     plugins: [react()],
+    // MapLibre instantiates its worker with `{ type: 'module' }`, so the bundle it loads
+    // has to actually be an ES module. Vite's default worker format is 'iife', which
+    // loads without complaint but leaves the worker inert: GeoJSON sources are parsed in
+    // the worker, so every vector layer silently renders nothing while raster imagery
+    // (main thread) looks perfectly healthy.
+    worker: { format: 'es' },
     optimizeDeps: {
       // MapLibre 6 ships as three sibling ESM files and locates its worker at runtime
       // with `new Worker(new URL('./maplibre-gl-worker.mjs', import.meta.url))`.

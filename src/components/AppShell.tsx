@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useEffect } from 'react';
-import { BASEMAPS } from '../map/basemaps';
+import { BASEMAPS, WAYBACK_VINTAGES, basemapById } from '../map/basemaps';
 import type { BasemapId } from '../map/basemaps';
 import { useEditorStore } from '../store/useEditorStore';
 import type { DisplayUnits } from '../lib/units';
@@ -16,10 +16,20 @@ export default function AppShell() {
   const units = useEditorStore((s) => s.units);
   const basemapId = useEditorStore((s) => s.basemapId);
   const customTileUrl = useEditorStore((s) => s.customTileUrl);
+  const waybackRelease = useEditorStore((s) => s.waybackRelease);
+  const arcgisApiKey = useEditorStore((s) => s.arcgisApiKey);
   const past = useEditorStore((s) => s.past);
   const future = useEditorStore((s) => s.future);
 
-  const { setUnits, setBasemap, setCustomTileUrl, undo, redo } = useEditorStore.getState();
+  const {
+    setUnits,
+    setBasemap,
+    setCustomTileUrl,
+    setWaybackRelease,
+    setArcgisApiKey,
+    undo,
+    redo,
+  } = useEditorStore.getState();
   const location = useLocation();
   const onMap = location.pathname === '/';
 
@@ -85,21 +95,52 @@ export default function AppShell() {
               className="select"
               value={basemapId}
               onChange={(e) => setBasemap(e.target.value as BasemapId)}
+              title={basemapById(basemapId).detail}
             >
               {BASEMAPS.map((b) => (
                 <option key={b.id} value={b.id}>
-                  {b.label} — {b.licence}
+                  {b.label}
                 </option>
               ))}
             </select>
+
+            {/* Wayback is the answer to "this capture is a low-sun winter satellite pass". */}
+            {basemapById(basemapId).hasVintage && (
+              <select
+                className="select mono"
+                value={waybackRelease}
+                onChange={(e) => setWaybackRelease(e.target.value)}
+                aria-label="Imagery capture date"
+              >
+                {WAYBACK_VINTAGES.map((v) => (
+                  <option key={v.release} value={v.release}>
+                    {v.label}
+                    {v.note ? ` · ${v.note}` : ''}
+                  </option>
+                ))}
+              </select>
+            )}
+
             {basemapId === 'custom' && (
               <input
                 className="select mono"
-                style={{ width: 230 }}
+                style={{ width: 220 }}
                 placeholder="https://…/{z}/{x}/{y}.png"
                 value={customTileUrl}
                 onChange={(e) => setCustomTileUrl(e.target.value)}
                 aria-label="Custom XYZ tile URL"
+              />
+            )}
+
+            {basemapById(basemapId).requiresKey && (
+              <input
+                className="select mono"
+                style={{ width: 200 }}
+                type="password"
+                placeholder="ArcGIS API key"
+                value={arcgisApiKey}
+                onChange={(e) => setArcgisApiKey(e.target.value)}
+                aria-label="ArcGIS API key"
               />
             )}
           </div>

@@ -40,6 +40,24 @@ export interface CrossSection {
   anchorOffsetMeters: number | null;
 }
 
+/**
+ * A street placed on the map: a drawn centerline plus the cross-section applied to it.
+ *
+ * The centerline is the parametric truth. Band polygons are derived from it on every
+ * render and never stored here, so editing a width or dragging a vertex regenerates the
+ * geometry rather than mutating it.
+ */
+export interface Street {
+  id: string;
+  name: string;
+  /** WGS84 [lng, lat] pairs. */
+  centerline: [number, number][];
+  section: CrossSection;
+  /** Measured curb-to-curb of the real street, for the fit check. */
+  existingWidthMeters?: number;
+  visible: boolean;
+}
+
 export function newId(prefix: string): string {
   const rand =
     typeof crypto !== 'undefined' && 'randomUUID' in crypto
