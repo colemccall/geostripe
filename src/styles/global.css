@@ -680,10 +680,29 @@ button {
   min-height: 0;
 }
 
-.map-host,
-.map-canvas {
+.map-host {
   position: absolute;
   inset: 0;
+}
+
+/*
+ * MapLibre stamps `maplibregl-map` onto whatever container it is given, and its own
+ * stylesheet sets `.maplibregl-map { position: relative }`. That is the same specificity
+ * as a bare `.map-canvas`, and MapLibre's CSS arrives in the lazily-loaded map chunk —
+ * i.e. AFTER this file — so it would win, `inset` would stop applying, and the container
+ * would collapse to zero height. The map then renders nothing at all: black canvas, no
+ * visible controls, no interaction.
+ *
+ * Two independent defences, because this failure is silent:
+ *   - the child combinator raises specificity to (0,2,0) so this rule wins the cascade
+ *   - explicit width/height mean the box is correctly sized even if `position` is
+ *     overridden again by some future version
+ */
+.map-host > .map-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
 }
 
 .map-empty {

@@ -150,6 +150,13 @@ export default function MapCanvas({
       report();
     });
 
+    // MapLibre routes tile, source and style failures to this event and swallows them
+    // otherwise — without it a broken imagery source is indistinguishable from a working
+    // one that happens to be dark, which is exactly how a blank map hides its cause.
+    map.on('error', (e) => {
+      console.error('[GeoStripe] MapLibre error:', e.error?.message ?? e, e);
+    });
+
     return () => {
       map.remove();
       mapRef.current = null;
@@ -162,9 +169,18 @@ export default function MapCanvas({
   }, []);
 
   // ---- basemap switching
+  //
+  // `ready` has to be a dependency (the map must exist before setStyle), but that means
+  // this fires the instant load completes — re-setting the style the map just finished
+  // building and refetching every tile. The ref skips that first run so only a genuine
+  // basemap change reaches setStyle.
+  const appliedBasemapRef = useRef(`${basemapId}|${customTileUrl}`);
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
+    const key = `${basemapId}|${customTileUrl}`;
+    if (appliedBasemapRef.current === key) return;
+    appliedBasemapRef.current = key;
     map.setStyle(buildStyle(basemapId, customTileUrl));
   }, [basemapId, customTileUrl, ready]);
 
