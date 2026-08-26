@@ -13,7 +13,12 @@ import type { ComponentType, Direction } from '../library/primitives';
  *
  * Centerlines are hand-placed from the park's block geometry rather than imported from
  * OpenStreetMap — good to a few metres, which is fine for a demo, and every vertex is
- * draggable. Widths are illustrative, not surveyed.
+ * draggable.
+ *
+ * Every width here is stated explicitly rather than inherited. Primitive defaults are
+ * as-built typicals — 11 ft lanes, because that is what is on the ground — and both of
+ * these streets are redesigns, so they carry the narrower numbers they are arguing for.
+ * Illustrative, not surveyed.
  */
 
 type Spec = readonly [ComponentType, Direction] | readonly [ComponentType, Direction, number];
@@ -57,10 +62,10 @@ export function createDemoStreets(): Street[] {
       ],
       [
         ['sidewalk', 'none', 2.4],
-        ['bikeLaneProtected', 'backward'],
-        ['travelLane', 'backward'],
-        ['travelLane', 'forward'],
-        ['bikeLaneProtected', 'forward'],
+        ['bikeLaneProtected', 'backward', 2.4],
+        ['travelLane', 'backward', 3.0],
+        ['travelLane', 'forward', 3.0],
+        ['bikeLaneProtected', 'forward', 2.4],
         ['sidewalk', 'none', 2.4],
       ],
       16.5,
@@ -77,12 +82,12 @@ export function createDemoStreets(): Street[] {
         [-84.51645, 39.10883],
       ],
       [
-        ['sidewalk', 'none', 3.0],
-        ['parkingLaneParallel', 'none'],
-        ['travelLane', 'backward'],
-        ['travelLane', 'forward'],
-        ['parkingLaneParallel', 'none'],
-        ['sidewalk', 'none', 3.0],
+        ['sidewalk', 'none', 2.4],
+        ['parkingLaneParallel', 'none', 2.1],
+        ['travelLane', 'backward', 3.0],
+        ['travelLane', 'forward', 3.0],
+        ['parkingLaneParallel', 'none', 2.1],
+        ['sidewalk', 'none', 2.4],
       ],
       15.2,
     ),

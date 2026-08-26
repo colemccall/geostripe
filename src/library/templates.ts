@@ -6,6 +6,11 @@ import { newId } from '../model/types';
 /**
  * Starter cross-sections.
  *
+ * Widths resolve from the primitive library, whose defaults are as-built typicals — what
+ * you would measure on the ground. A template that is *about* narrowing therefore has to
+ * state its lane widths explicitly, or a road diet would inherit 11 ft lanes and appear to
+ * change nothing. The "existing" template deliberately does inherit them.
+ *
  * Each is defined purely as an ordered list of primitives — widths resolve from the
  * primitive library at instantiation, so there is no second dimension table to keep in
  * sync, and editing a primitive's default updates every template that uses it.
@@ -45,9 +50,9 @@ export const TEMPLATES: readonly TemplateDef[] = [
     specs: [
       ['sidewalk', 'none'],
       ['bikeLaneProtected', 'backward'],
-      ['travelLane', 'backward'],
-      ['turnLane', 'both'],
-      ['travelLane', 'forward'],
+      ['travelLane', 'backward', 3.0],
+      ['turnLane', 'both', 3.0],
+      ['travelLane', 'forward', 3.0],
       ['bikeLaneProtected', 'forward'],
       ['sidewalk', 'none'],
     ],
@@ -59,8 +64,8 @@ export const TEMPLATES: readonly TemplateDef[] = [
     specs: [
       ['sidewalk', 'none'],
       ['busLane', 'backward'],
-      ['travelLane', 'backward'],
-      ['travelLane', 'forward'],
+      ['travelLane', 'backward', 3.0],
+      ['travelLane', 'forward', 3.0],
       ['busLane', 'forward'],
       ['sidewalk', 'none'],
     ],
@@ -73,8 +78,8 @@ export const TEMPLATES: readonly TemplateDef[] = [
       ['sidewalk', 'none'],
       ['bikeLaneConventional', 'backward'],
       ['parkingLaneParallel', 'none'],
-      ['travelLane', 'backward'],
-      ['travelLane', 'forward'],
+      ['travelLane', 'backward', 3.0],
+      ['travelLane', 'forward', 3.0],
       ['parkingLaneParallel', 'none'],
       ['bikeLaneConventional', 'forward'],
       ['sidewalk', 'none'],
@@ -87,9 +92,9 @@ export const TEMPLATES: readonly TemplateDef[] = [
     specs: [
       ['sidewalk', 'none'],
       ['bikeLaneBuffered', 'backward'],
-      ['travelLane', 'backward'],
+      ['travelLane', 'backward', 3.0],
       ['median', 'none'],
-      ['travelLane', 'forward'],
+      ['travelLane', 'forward', 3.0],
       ['bikeLaneBuffered', 'forward'],
       ['sidewalk', 'none'],
     ],
@@ -101,8 +106,8 @@ export const TEMPLATES: readonly TemplateDef[] = [
     specs: [
       ['sidewalk', 'none'],
       ['parkingLaneParallel', 'none'],
-      ['travelLane', 'backward'],
-      ['travelLane', 'forward'],
+      ['travelLane', 'backward', 2.9],
+      ['travelLane', 'forward', 2.9],
       ['parkingLaneParallel', 'none'],
       ['sidewalk', 'none'],
     ],
@@ -116,8 +121,8 @@ export const TEMPLATES: readonly TemplateDef[] = [
     specs: [
       ['sidewalk', 'none', 3.7],
       ['parkingLaneParallel', 'none'],
-      ['travelLane', 'backward'],
-      ['travelLane', 'forward'],
+      ['travelLane', 'backward', 3.0],
+      ['travelLane', 'forward', 3.0],
       ['bikeLaneProtected', 'forward'],
       ['sidewalk', 'none', 1.5],
     ],
@@ -129,8 +134,8 @@ export const TEMPLATES: readonly TemplateDef[] = [
     specs: [
       ['sidewalk', 'none'],
       ['bikeLaneProtected', 'forward'],
-      ['travelLane', 'forward'],
-      ['travelLane', 'forward'],
+      ['travelLane', 'forward', 3.0],
+      ['travelLane', 'forward', 3.0],
       ['parkingLaneParallel', 'none'],
       ['sidewalk', 'none'],
     ],
