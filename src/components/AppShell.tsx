@@ -5,6 +5,7 @@ import type { BasemapId } from '../map/basemaps';
 import { useEditorStore } from '../store/useEditorStore';
 import type { DisplayUnits } from '../lib/units';
 import { BUILD_ID, BUILT_AT } from '../lib/version';
+import UpdateNotice from './UpdateNotice';
 
 /**
  * Persistent chrome shared by both routes.
@@ -59,6 +60,7 @@ export default function AppShell() {
           <span className="brand-ver" title={BUILT_AT ? `Built ${BUILT_AT} UTC` : undefined}>
             v0.1 · {BUILD_ID}
           </span>
+          <UpdateNotice />
         </div>
 
         <nav className="tabs" aria-label="Workspace">

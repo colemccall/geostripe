@@ -93,6 +93,17 @@ interface EditorState extends Snapshot {
    * junction unless you put one there.
    */
   junctionMode: 'auto' | 'nodes';
+  /**
+   * How the next point placed joins the last one, while drawing.
+   *
+   * Not a property of any street — it is the state of the pen. A single street is normally
+   * drawn with it toggled several times: straight down a block, curved round the bend,
+   * straight again. What it leaves behind IS stored: each point placed in straight mode
+   * becomes a pinned corner on the finished street.
+   */
+  segmentMode: 'straight' | 'curved';
+  /** Radius for the curved segments of whatever is being drawn now. */
+  drawRadiusMeters: number;
   // ---- chrome
   /** Names the downloaded file and is written into its metadata. Not undoable. */
   projectName: string;
@@ -200,6 +211,8 @@ interface EditorState extends Snapshot {
    */
   materialiseNodes: () => number;
   setJunctionMode: (mode: 'auto' | 'nodes') => void;
+  setSegmentMode: (mode: 'straight' | 'curved') => void;
+  setDrawRadius: (metres: number) => void;
   /** Drop every selection. What Escape does, and what clicking bare ground does. */
   clearSelection: () => void;
   resetJunction: (key: string) => void;
@@ -259,7 +272,11 @@ interface EditorState extends Snapshot {
   loadDemo: () => void;
 
   /** Create a street from a freshly drawn centerline. Returns its id. */
-  addStreet: (centerline: [number, number][], name?: string) => string;
+  addStreet: (
+    centerline: [number, number][],
+    curve?: CurveSettings,
+    name?: string,
+  ) => string;
   renameStreet: (streetId: string, name: string) => void;
   /** 0 at grade, +1 overpass, -1 tunnel. */
   setStreetLevel: (streetId: string, level: number) => void;
@@ -392,6 +409,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
     nodes: [],
     selectedNodeId: null,
     junctionMode: 'auto',
+    segmentMode: 'straight',
+    drawRadiusMeters: DEFAULT_CURVE.radiusMeters,
 
     tool: 'select',
     drawSectionId: TEMPLATES[1]!.id,
@@ -529,6 +548,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     setJunctionMode: (junctionMode) => set({ junctionMode }),
+    setSegmentMode: (segmentMode) => set({ segmentMode }),
+    setDrawRadius: (drawRadiusMeters) => set({ drawRadiusMeters }),
 
     clearSelection: () =>
       set({
@@ -746,7 +767,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       set({ selectedStreetId: streets[0]?.id ?? null, selectedComponentId: null, swipe: 0.5 });
     },
 
-    addStreet: (centerline, name) => {
+    addStreet: (centerline, curve, name) => {
       const { streets, drawSectionId, draftSection } = get();
       const template = TEMPLATES.find((t) => t.id === drawSectionId);
       const section =
@@ -760,6 +781,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
         centerline,
         section,
         visible: true,
+        // Only when it says something. A street drawn entirely straight is a polyline,
+        // and carrying an inert curve setting on it would put noise in every saved file.
+        ...(curve && curve.mode !== 'straight' ? { curve } : {}),
       };
 
       commit({ streets: [...streets, street] });

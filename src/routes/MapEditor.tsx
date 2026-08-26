@@ -128,6 +128,8 @@ export default function MapEditor() {
   const nodes = useEditorStore((s) => s.nodes);
   const selectedNodeId = useEditorStore((s) => s.selectedNodeId);
   const junctionMode = useEditorStore((s) => s.junctionMode);
+  const segmentMode = useEditorStore((s) => s.segmentMode);
+  const drawRadiusMeters = useEditorStore((s) => s.drawRadiusMeters);
   // Subscribed rather than read once: the dock's undo button has to grey out the moment
   // there is nothing left to undo, which is a re-render, not a snapshot.
   const canUndo = useEditorStore((s) => s.past.length > 0);
@@ -186,6 +188,8 @@ export default function MapEditor() {
     moveNodeLive,
     materialiseNodes,
     setJunctionMode,
+    setSegmentMode,
+    setDrawRadius,
     clearSelection,
     beginGesture,
     endGesture,
@@ -278,14 +282,26 @@ export default function MapEditor() {
       if (event.ctrlKey || event.metaKey || event.altKey) return;
       const target = event.target as HTMLElement | null;
       if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
-      const match = TOOLS.find((t) => t.key.toLowerCase() === event.key.toLowerCase());
+      // The pen's shape, while it is in use. Checked before the tool keys so that S and C
+      // mean "straight" and "curve" in the middle of drawing a line rather than jumping to
+      // another tool and throwing the line away.
+      const key = event.key.toLowerCase();
+      if (tool === 'draw' || tool === 'area') {
+        if (key === 's' || key === 'c') {
+          event.preventDefault();
+          setSegmentMode(key === 's' ? 'straight' : 'curved');
+          return;
+        }
+      }
+
+      const match = TOOLS.find((t) => t.key.toLowerCase() === key);
       if (!match) return;
       event.preventDefault();
       setTool(match.id);
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [setTool]);
+  }, [setTool, setSegmentMode, tool]);
 
   const startSwipeDrag = useCallback(
     (event: React.PointerEvent) => {
@@ -850,10 +866,52 @@ export default function MapEditor() {
                     <option value={DRAFT_SECTION}>Asset builder — {draftSection.name}</option>
                   </select>
                 </label>
-                <span className="pill pill-note mono">
-                  {draft.points} pt ·{' '}
-                  {formatWidth(draft.metres, units, { decimals: 0, withUnit: true })}
-                </span>
+                <div className="segmented" role="group" aria-label="Segment shape">
+                  {(
+                    [
+                      ['straight', 'Straight', 'S'],
+                      ['curved', 'Arc', 'C'],
+                    ] as const
+                  ).map(([mode, label, key]) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      aria-pressed={segmentMode === mode}
+                      title={
+                        mode === 'straight'
+                          ? 'Each point placed stays a hard corner (S)'
+                          : 'The line curves through each point placed, at the radius below (C)'
+                      }
+                      onClick={() => setSegmentMode(mode)}
+                    >
+                      {label} <span className="dock-key mono">{key}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {segmentMode === 'curved' && (
+                  <label className="control">
+                    <span className="label">Radius ({units})</span>
+                    <input
+                      className="text-input mono"
+                      style={{ width: 72 }}
+                      type="number"
+                      min={1}
+                      step={stepFor(units)}
+                      value={formatWidth(drawRadiusMeters, units, { decimals: 0 })}
+                      onChange={(e) => {
+                        const value = Number(e.target.value);
+                        if (!Number.isFinite(value) || value <= 0) return;
+                        setDrawRadius(displayToMetres(value, units));
+                      }}
+                    />
+                  </label>
+                )}
+
+                  <span className="pill pill-note mono">
+                    {draft.points} pt ·{' '}
+                    {formatWidth(draft.metres, units, { decimals: 0, withUnit: true })}
+                  </span>
                 <button
                   type="button"
                   className="btn btn-solid"
@@ -1074,7 +1132,17 @@ export default function MapEditor() {
             imageryOpacity={imageryOpacity}
             selectedJunctionKey={selectedJunctionKey}
             onDraftChange={(points, metres) => setDraft({ points: points.length, metres })}
-            onDrawComplete={(points) => addStreet(points)}
+            segmentMode={segmentMode}
+            drawRadiusMeters={drawRadiusMeters}
+            onDrawComplete={(points, sharpVertices) =>
+              addStreet(points, {
+                // Every point pinned means the line is straight throughout, and saying so
+                // keeps a plain polyline out of the curve machinery entirely.
+                mode: sharpVertices.length === points.length ? 'straight' : 'rounded',
+                radiusMeters: drawRadiusMeters,
+                ...(sharpVertices.length > 0 ? { sharpVertices } : {}),
+              })
+            }
             onGestureStart={beginGesture}
             onGestureEnd={endGesture}
             areas={areas}

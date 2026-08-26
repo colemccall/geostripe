@@ -20,6 +20,8 @@ import type { JunctionOverride } from '../geo/derived';
 import { distanceMeters, lineLengthMeters } from '../geo/measure';
 import { snapPoint } from '../geo/snap';
 import type { SnapResult } from '../geo/snap';
+import { DEFAULT_CURVE, tessellate } from '../geo/curve';
+import type { CurveSettings } from '../geo/curve';
 import type { Area, JunctionNode, Street } from '../model/types';
 import type { Tool } from '../store/useEditorStore';
 import type { DisplayUnits } from '../lib/units';
@@ -144,7 +146,25 @@ interface Props {
   // ---- drawing
   /** Committed draft vertices and their running length, for the toolbar readout. */
   onDraftChange?: (points: LngLat[], metres: number) => void;
-  onDrawComplete?: (points: LngLat[]) => void;
+  /**
+   * The drawn line, plus which of its points were placed as hard corners.
+   *
+   * Two lists rather than one, because a control point and its cornering are separate
+   * facts: the point is where the street goes, the flag is how it gets there. Keeping them
+   * apart is what lets a finished street be switched wholesale between straight and curved
+   * without losing which corners were deliberately kept sharp.
+   */
+  onDrawComplete?: (points: LngLat[], sharpVertices: number[]) => void;
+  /**
+   * How the NEXT point placed joins the last one.
+   *
+   * 'straight' pins it as a hard corner; 'curved' lets the arc run through it. Toggled
+   * while drawing, so one street can be straight down a block and swing round a bend
+   * without stopping and starting again.
+   */
+  segmentMode?: 'straight' | 'curved';
+  /** Corner radius for the curved segments of the line being drawn. */
+  drawRadiusMeters?: number;
 
   // ---- centerline editing
   onGestureStart?: () => void;
@@ -573,6 +593,8 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     imageryOpacity,
     onDraftChange,
     onDrawComplete,
+    segmentMode,
+    drawRadiusMeters,
     onGestureStart,
     onGestureEnd,
     onVertexMove,
@@ -623,6 +645,8 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     imageryOpacity,
     onDraftChange,
     onDrawComplete,
+    segmentMode,
+    drawRadiusMeters,
     onGestureStart,
     onGestureEnd,
     onVertexMove,
@@ -637,6 +661,8 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
 
   // ---- gesture state. Refs, not state: these change once per animation frame.
   const draftRef = useRef<LngLat[]>([]);
+  /** Which draft points were placed in straight mode, and so stay hard corners. */
+  const draftSharpRef = useRef<number[]>([]);
   const hoverRef = useRef<LngLat | null>(null);
   const measureRef = useRef<LngLat[]>([]);
   const dragRef = useRef<{ kind: EntityKind; streetId: string; index: number } | null>(null);
@@ -653,11 +679,35 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     const open = hover && committed.length > 0 ? [...committed, hover] : committed;
     // An area closes back to its first point while you draw it, so the shape you are
     // about to get is the shape you can see.
+    const closed = latest.current.tool === 'area' && open.length > 2 ? [...open, open[0]!] : open;
+
+    // Preview the ARC, not the control polygon. Drawing a bend and seeing a chain of
+    // straight lines means judging the result in your head, which is exactly what the
+    // curve feature exists to stop.
+    const settings = draftCurveSettings();
     const rubber =
-      latest.current.tool === 'area' && open.length > 2 ? [...open, open[0]!] : open;
+      settings.mode === 'straight' || closed.length < 3
+        ? closed
+        : tessellate(closed, {
+            ...settings,
+            // The hovering point is the one under the cursor and has no flag yet; treat it
+            // as an endpoint, which is what it will be if the line finishes here.
+            sharpVertices: settings.sharpVertices,
+          });
+
     setData(map, 'draft', lineFC(rubber));
     setData(map, 'draft-points', pointsFC(committed));
   }, []);
+
+  /** The curve the draft is being drawn with, from the current tool settings. */
+  const draftCurveSettings = (): CurveSettings => {
+    const mode = latest.current.segmentMode ?? 'straight';
+    return {
+      mode: mode === 'curved' ? 'rounded' : 'straight',
+      radiusMeters: latest.current.drawRadiusMeters ?? DEFAULT_CURVE.radiusMeters,
+      sharpVertices: [...draftSharpRef.current],
+    };
+  };
 
   const drawMeasure = useCallback(() => {
     const map = mapRef.current;
@@ -683,8 +733,10 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
 
   const finishDraw = useCallback(() => {
     const points = draftRef.current;
+    const sharp = draftSharpRef.current;
     const forArea = latest.current.tool === 'area';
     draftRef.current = [];
+    draftSharpRef.current = [];
     hoverRef.current = null;
     drawDraft();
     reportDraft();
@@ -698,18 +750,23 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     }
     // Two points is the minimum that describes a direction to offset from; anything less
     // is a stray click, not a street.
-    if (points.length >= 2) latest.current.onDrawComplete?.(points);
+    if (points.length >= 2) latest.current.onDrawComplete?.(points, sharp);
   }, [drawDraft, reportDraft]);
 
   const cancelDraw = useCallback(() => {
     draftRef.current = [];
+    draftSharpRef.current = [];
     hoverRef.current = null;
     drawDraft();
     reportDraft();
   }, [drawDraft, reportDraft]);
 
   const undoDraftPoint = useCallback(() => {
+    const dropped = draftRef.current.length - 1;
     draftRef.current = draftRef.current.slice(0, -1);
+    // The flag belongs to the point that just went, so it has to go with it — otherwise
+    // the indices shift and a later point inherits a corner it was never given.
+    draftSharpRef.current = draftSharpRef.current.filter((index) => index !== dropped);
     drawDraft();
     reportDraft();
   }, [drawDraft, reportDraft]);
@@ -1087,6 +1144,11 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
         // centerlines really meet, so a vertex that lands where it was aimed is the
         // difference between a junction at the crossing and one at a near miss.
         const snapped = snapFor(event, draft[draft.length - 1] ?? null).point;
+        // A point placed in straight mode is pinned as a hard corner, so the arc does not
+        // round off a junction you meant to be square.
+        if ((latest.current.segmentMode ?? 'straight') === 'straight') {
+          draftSharpRef.current = [...draftSharpRef.current, draft.length];
+        }
         draftRef.current = [...draft, snapped];
         drawDraft();
         reportDraft();

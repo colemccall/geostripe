@@ -229,6 +229,11 @@ the width that is really there, and save it as GeoJSON you can reopen and keep e
   lane-use arrow follows. A turn pocket is applied to the leg *before* any geometry is
   built, so it moves the kerb, the corner return and the crossing with it — and the crossing
   distance the inspector reports goes up by exactly what the pocket costs.
+- **Straight segments and arcs, while you draw.** The pen has a shape: `S` places hard
+  corners, `C` curves through each point at a stated radius, and you toggle between them
+  mid-line — straight down the block, round the bend, straight again. The rubber band
+  previews the *arc*, not the control polygon, so a bend is judged on screen rather than in
+  your head. A line drawn entirely straight is stored as a plain polyline.
 - **Intersections you place.** The `Intersection` tool drops a node where you click, and
   from then on that node is in charge: the junction is *at* it, keyed by *it*, and you can
   select it, drag it, name it, disable it or delete it. Dragging one carries along any
@@ -267,7 +272,7 @@ the width that is really there, and save it as GeoJSON you can reopen and keep e
   inside the neighbour suppressed. One slider moves the threshold in both directions.
 - **Grade separation** — `level` marks a street as a tunnel or an overpass, and streets at
   different levels do not form junctions.
-- **763 unit tests** across geometry, curves, junction detection, intersection geometry,
+- **766 unit tests** across geometry, curves, junction detection, intersection geometry,
   complex and staggered junctions, merges, snapping, road markings, the memoisation that
   keeps dragging affordable, cross-section arithmetic, the dimensional audit, the asset
   catalogue, the project round-trip, and store history.
@@ -320,6 +325,7 @@ junction detection.
 | T | Library browser — a two-level tree, search, recents, per-band actions | done |
 | U | On-map controls — dock, context bar, selection strip, layer switches | done |
 | V | Placed intersections — nodes you own, drag, disable, delete | done |
+| W | Straight/arc segments while drawing, and a stale-build notice | done |
 | G | Protected (Dutch) intersection, incl. the corner refuge island | next |
 | H | Roundabout, as a junction form | planned |
 | P | Signal phasing — which movements run together, and the conflicts left over | planned |
@@ -355,6 +361,10 @@ Worth recording, because these are the calls that would be quietly re-litigated 
   special cases and produces the nose for free.
 - **A vertex beats an edge** (S), even when the edge is marginally nearer. An existing
   control point is a decision somebody made; a point on a segment is not.
+- **The pen has a shape, the street has a curve** (W). A control point and its cornering
+  are separate facts, so they are stored separately: the point is where the street goes,
+  the pin is how it gets there. That is what lets a finished street be switched wholesale
+  between straight and curved without losing which corners were deliberately kept square.
 - **Both junction models, and neither wins quietly** (V). Detection is still the default,
   because a design has to work before anyone has thought about intersections. A node is
   authoritative in its own neighbourhood and the crossing there is dropped — two junctions
