@@ -1,5 +1,7 @@
 import type { ComponentType, Direction } from '../library/primitives';
 import type { CurveSettings } from '../geo/curve';
+import type { GlyphId } from '../geo/glyphs';
+import type { StripeStyle } from '../geo/markings';
 import type { LandcoverType } from '../library/landcover';
 
 /**
@@ -18,6 +20,21 @@ export interface SectionComponent {
    * leaving saved files frozen at the old palette.
    */
   colorOverride?: string;
+  /**
+   * Pavement symbol repeated along this band in plan view. Absent takes the type's
+   * default (a bicycle in a bike lane, a diamond in a bus lane); `'none'` says the user
+   * deliberately wants it bare, which is a different statement and has to be storable.
+   */
+  glyph?: GlyphId | 'none';
+  glyphSpacingMeters?: number;
+  /**
+   * The longitudinal stripe on this component's LEFT edge, overriding the convention
+   * derived from the two components either side of it.
+   *
+   * Named for the edge rather than for the pair, so a boundary can never end up carrying
+   * two overrides that disagree.
+   */
+  stripeLeft?: StripeStyle;
 }
 
 /**

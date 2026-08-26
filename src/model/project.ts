@@ -4,9 +4,10 @@ import { COMPONENT_TYPES, PRIMITIVES } from '../library/primitives';
 import type { ComponentType, Direction } from '../library/primitives';
 import { bandsForStreet } from '../geo/banding';
 import { componentSchema } from './schema';
-import type { Area, Street } from './types';
+import type { Area, SectionComponent, Street } from './types';
 import { newId } from './types';
 import type { JunctionOverride } from '../geo/derived';
+import { MOVEMENTS } from '../geo/markings';
 import { closeRing, resolveCenterline, resolveRing } from '../geo/curve';
 import type { CurveSettings } from '../geo/curve';
 import { LANDCOVER_TYPES } from '../library/landcover';
@@ -110,6 +111,21 @@ const featureCollectionSchema = z.object({
                       .optional(),
                     stopBar: z.boolean().optional(),
                     stopOffsetMeters: z.number().finite().min(0).max(300).nullable().optional(),
+                    lanes: z
+                      .array(z.array(z.enum(MOVEMENTS)).max(4).nullable())
+                      .max(64)
+                      .optional(),
+                    flare: z
+                      .object({
+                        side: z.enum(['left', 'right']),
+                        componentType: z.enum(COMPONENT_TYPES),
+                        widthMeters: z.number().finite().min(0).max(20),
+                        storageMeters: z.number().finite().min(0).max(400),
+                        taperMeters: z.number().finite().min(0).max(200),
+                        movements: z.array(z.enum(MOVEMENTS)).max(4).optional(),
+                      })
+                      .nullable()
+                      .optional(),
                   })
                   .nullable(),
               )
@@ -231,6 +247,9 @@ export function toProjectGeoJSON(
           widthMeters: round(c.widthMeters),
           direction: c.direction,
           ...(c.colorOverride ? { colorOverride: c.colorOverride } : {}),
+          ...(c.glyph ? { glyph: c.glyph } : {}),
+          ...(c.glyphSpacingMeters ? { glyphSpacingMeters: round(c.glyphSpacingMeters) } : {}),
+          ...(c.stripeLeft ? { stripeLeft: c.stripeLeft } : {}),
         })),
       },
       geometry: { type: 'LineString', coordinates: street.centerline },
@@ -294,12 +313,7 @@ export function projectFilename(name: string): string {
 
 // ---------------------------------------------------------------------------- reading
 
-interface ParsedComponent {
-  componentType: ComponentType;
-  widthMeters: number;
-  direction: Direction;
-  colorOverride?: string;
-}
+type ParsedComponent = Omit<SectionComponent, 'id'>;
 
 /** Section applied to a LineString that carries no GeoStripe properties of its own. */
 export interface ImportDefaults {
@@ -335,7 +349,7 @@ function makeStreet(
       id: newId('sec'),
       name: sectionName,
       anchorOffsetMeters,
-      components: components.map((c) => ({ id: newId('cmp'), ...c })),
+      components: components.map<SectionComponent>((c) => ({ id: newId('cmp'), ...c })),
     },
   };
 }
@@ -491,6 +505,9 @@ export function parseProject(text: string, defaults: ImportDefaults): ProjectPar
           widthMeters: c.widthMeters,
           direction: c.direction ?? PRIMITIVES[c.componentType].defaultDirection,
           ...(c.colorOverride ? { colorOverride: c.colorOverride } : {}),
+          ...(c.glyph ? { glyph: c.glyph as NonNullable<SectionComponent['glyph']> } : {}),
+          ...(c.glyphSpacingMeters ? { glyphSpacingMeters: c.glyphSpacingMeters } : {}),
+          ...(c.stripeLeft ? { stripeLeft: c.stripeLeft } : {}),
         })),
         data.anchorOffsetMeters ?? null,
         data.existingWidthMeters,

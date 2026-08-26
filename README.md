@@ -108,11 +108,19 @@ src/
     offset.ts             Polyline offsetting, miter joins with a bevel fallback
     banding.ts            Centerline + widths -> band polygons and lane markings
     curvature.ts          Warns where a bend is tighter than the offset distance
+    curve.ts              Arcs and splines: control points -> the line everything uses
+    junctions.ts          Junction detection; identity that survives every edit
+    intersection.ts       Curb returns, crossings, corner treatments, trimming boundaries
+    glyphs.ts             Pavement symbols, authored in metres in a lane-local frame
+    markings.ts           Stripes, repeating lane symbols, junction approach arrows
+    derived.ts            The memoised pipeline everything on the map comes out of
     measure.ts            Ground distance, length, midpoint, bearing
     geo.test.ts           29 tests, measured with an independent haversine
   library/
-    primitives.ts         Lane primitives, NACTO-derived defaults, material colours
-    templates.ts          Starter cross-sections, defined as primitive lists
+    primitives.ts         96 lane primitives across 10 categories, with as-built defaults
+    templates.ts          157 cross-section presets; systematic families are generated
+    landcover.ts          Land-cover materials for non-street polygons
+    catalogue.test.ts     Integrity of a library too long to review by eye
   model/
     types.ts              Street, CrossSection, SectionComponent
     section.ts            Cross-section arithmetic — widths, anchor, boundary offsets
@@ -197,13 +205,35 @@ the width that is really there, and save it as GeoJSON you can reopen and keep e
 - **Land cover** — closed polygons carrying a material (grass, plaza, water, canopy,
   parking lot and more), drawn beneath the design so a redesign can cover the imagery it
   replaces rather than just annotate it.
-- **53 lane primitives and 68 cross-section presets**, each categorised and searchable by
+- **96 lane primitives and 157 cross-section presets**, each categorised and searchable by
   label, category, purpose, and — for presets — by the components they contain.
+- **Paths as first-class alignments** — greenways, side paths, rail trails, boardwalks,
+  towpaths, separated walking-and-cycling corridors. A path has no roadway at all, so it is
+  not a narrow street: the anchor falls back to the geometric centre and nothing in the
+  junction code treats it as carriageway.
+- **Road markings.** Longitudinal stripes are derived from what sits either side of each
+  boundary — double yellow between opposing directions, dashed white between same-direction
+  lanes, solid against a bike lane or parking, nothing at a kerb — and any boundary can be
+  overridden. Pavement symbols repeat along a band: bicycles in a bike lane, diamonds in a
+  bus lane, sharrows in a shared lane, alternating arrows in a two-way left-turn lane. Every
+  glyph is authored in real metres, and one too wide for its lane is suppressed rather than
+  drawn spilling over the stripe.
+- **Lane assignment and turn pockets.** Each junction approach lists its own lanes, in the
+  order the driver sees them, and each one carries the movements it is allowed to make; the
+  lane-use arrow follows. A turn pocket is applied to the leg *before* any geometry is
+  built, so it moves the kerb, the corner return and the crossing with it — and the crossing
+  distance the inspector reports goes up by exactly what the pocket costs.
+- **Junctions that are not a tidy four-way.** Five and six legs, acute corners, and the
+  staggered intersection: two T-junctions close enough that a driver reads them as one
+  place. Those stay two junctions on purpose — averaging them would put both side streets
+  somewhere neither of them is — and the pair is reported, with any crossing that would land
+  inside the neighbour suppressed. One slider moves the threshold in both directions.
 - **Grade separation** — `level` marks a street as a tunnel or an overpass, and streets at
   different levels do not form junctions.
-- **442 unit tests** across geometry, curves, junction detection, intersection geometry,
-  the memoisation that keeps dragging affordable, cross-section arithmetic, the dimensional
-  audit, the asset catalogue, the project round-trip, and store history.
+- **716 unit tests** across geometry, curves, junction detection, intersection geometry,
+  complex and staggered junctions, road markings, the memoisation that keeps dragging
+  affordable, cross-section arithmetic, the dimensional audit, the asset catalogue, the
+  project round-trip, and store history.
 
 - **Intersections** — detected automatically wherever centerlines cross, with no node to
   place or maintain. Each junction carries its legs sorted by bearing and a corner between
@@ -244,13 +274,39 @@ junction detection.
 | F | Corner treatments — bulb-outs, daylighting | done |
 | J | Curved alignments — arcs and splines | done |
 | K | Land cover polygons | done |
-| L | Asset library — 53 primitives, 68 presets, grade separation | done |
+| L | Asset library — 96 primitives, 157 presets, grade separation | done |
+| M | Paths and shared-use paths as their own kind of alignment | done |
+| N | Road markings — stripes, lane symbols, lane-use arrows | done |
+| O | Complex junctions — 5/6-way, staggered pairs, lane assignment, turn pockets | done |
 | G | Protected (Dutch) intersection, incl. the corner refuge island | next |
 | H | Roundabout, as a junction form | planned |
+| P | Signal phasing — which movements run together, and the conflicts left over | planned |
 | I | Swept-path / design-vehicle check | stretch |
+| Q | Text pavement markings (ONLY, BUS, STOP) — needs glyph outlines, not a font | stretch |
 
 Also outstanding, smaller: endpoint and angle snapping while drawing, touch support for
-vertex dragging (mouse only today), and point components such as trees and signals.
+vertex dragging (mouse only today), point components such as trees and signals, and
+asymmetric template generators (everything generated today is mirrored about the
+centerline, so "parking on one side" is still hand-authored).
+
+### What each of the finished phases actually decided
+
+Worth recording, because these are the calls that would be quietly re-litigated otherwise.
+
+- **Junctions are derived, never authored** (A). Identity is the set of streets that meet
+  there plus an ordinal, so customisation survives dragging the crossing, inserting a
+  vertex, or reversing a centerline.
+- **The stacking order is the boolean** (C). Roadway is cut at the kerb-to-kerb box and
+  everything else at the wider footprint, drawn underneath — so the corner sidewalk appears
+  with no per-corner polygon computed anywhere.
+- **Curves resolve before everything** (J), junction detection included. Detecting against
+  the control polygon would place junctions where the pavement never reaches.
+- **A path is not a narrow street** (M). It has no roadway, so it gets no kerb line, no
+  travelway anchor, and no carriageway treatment at a junction.
+- **Nothing is assigned by default** (O). An unassigned lane gets no arrow. Painting a
+  guess on the road and calling it a design is the failure mode this tool exists against;
+  the conventional assignment is one button away and labelled as a convention.
+- **A staggered pair stays two junctions** (O), reported rather than merged.
 
 Deliberately out of scope for v1: image/PNG export, accounts, a backend, 3D, and traffic
 simulation.

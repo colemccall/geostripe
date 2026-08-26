@@ -171,6 +171,85 @@ describe('intersection settings', () => {
   });
 });
 
+describe('markings, through the file', () => {
+  const marked: Street[] = createDemoStreets().map((street, i) =>
+    i === 0
+      ? {
+          ...street,
+          section: {
+            ...street.section,
+            components: street.section.components.map((component, j) =>
+              j === 1
+                ? { ...component, glyph: 'none' as const, stripeLeft: 'centreDashed' as const }
+                : j === 2
+                  ? { ...component, glyph: 'sharrow' as const, glyphSpacingMeters: 18 }
+                  : component,
+            ),
+          },
+        }
+      : street,
+  );
+
+  it('round-trips a chosen symbol, its spacing, and a stripe override', () => {
+    const loaded = roundTrip(marked);
+    const components = loaded[0]!.section.components;
+    expect(components[2]!.glyph).toBe('sharrow');
+    expect(components[2]!.glyphSpacingMeters).toBe(18);
+    expect(components[1]!.stripeLeft).toBe('centreDashed');
+  });
+
+  it('keeps "no symbol" distinct from "never had one"', () => {
+    // The distinction the whole three-state control rests on. If `'none'` collapsed to
+    // absent on save, a deliberately bare lane would grow its bicycles back on reload.
+    const loaded = roundTrip(marked);
+    expect(loaded[0]!.section.components[1]!.glyph).toBe('none');
+    expect(loaded[0]!.section.components[0]!.glyph).toBeUndefined();
+  });
+
+  it('writes nothing for a band nobody has marked', () => {
+    const file = JSON.parse(serializeProject(createDemoStreets(), META)) as {
+      features: { properties: Record<string, unknown> }[];
+    };
+    const street = file.features.find((f) => f.properties['geostripe'] === 'street')!;
+    for (const component of street.properties['components'] as Record<string, unknown>[]) {
+      expect(component['glyph']).toBeUndefined();
+      expect(component['stripeLeft']).toBeUndefined();
+    }
+  });
+});
+
+describe('lane assignment and turn pockets, through the file', () => {
+  const original = createDemoStreets();
+  const key = `${[...original.map((s) => s.id)].sort().join('~')}#0`;
+  const overrides = {
+    [key]: {
+      legs: [
+        {
+          lanes: [null, ['left' as const, 'through' as const], ['through' as const, 'right' as const]],
+          flare: {
+            side: 'right' as const,
+            componentType: 'turnPocket' as const,
+            widthMeters: 3.05,
+            storageMeters: 30,
+            taperMeters: 15,
+            movements: ['right' as const],
+          },
+        },
+        null,
+        null,
+        null,
+      ],
+    },
+  };
+
+  it('round-trips both, because a junction design is worth as much as a street one', () => {
+    const result = parseProject(serializeProject(original, META, overrides), DEFAULTS);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.junctionOverrides[key]).toEqual(overrides[key]);
+  });
+});
+
 describe('curved alignments', () => {
   const curved: Street[] = createDemoStreets().map((street, i) =>
     i === 0

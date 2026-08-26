@@ -1470,3 +1470,93 @@ button {
   border-radius: 2px;
   vertical-align: baseline;
 }
+
+/* ---------------------------------------------- markings, lanes and movements */
+
+/*
+ * The markings sub-row spans the whole grid rather than sitting in a column: it only
+ * appears for the selected band, and it needs the full width for three labelled controls.
+ */
+.row-markings {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 74px;
+  gap: 7px;
+  margin-top: 6px;
+  padding-top: 7px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.row-markings .field:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+
+.lane-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lane-rows li {
+  display: grid;
+  grid-template-columns: 15px minmax(0, 1fr) 52px auto;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 6px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--panel-2);
+}
+
+.lane-name {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lane-width {
+  font-size: 11px;
+  color: var(--ink-dim);
+  text-align: right;
+}
+
+.movement-row {
+  display: flex;
+  gap: 3px;
+}
+
+.movement {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  line-height: 1;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel);
+  color: var(--ink-dim);
+  cursor: pointer;
+  transition: 0.12s;
+}
+
+.movement:hover {
+  border-color: var(--accent-fill);
+  color: var(--ink);
+}
+
+/* Assigned movements read as filled, because the arrow really is on the road. */
+.movement[aria-pressed='true'] {
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
+  color: var(--accent-ink);
+}
+
+.hint-warn {
+  border-left: 2px solid var(--warn);
+  padding-left: 8px;
+}

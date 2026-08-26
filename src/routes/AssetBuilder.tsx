@@ -34,6 +34,7 @@ export default function AssetBuilder() {
     removeComponent,
     setWidth,
     setDirection,
+    setComponentMarkings,
     moveComponent,
     selectComponent,
     renameSection,
@@ -194,6 +195,7 @@ export default function AssetBuilder() {
             onDirection={(id, d) => setDirection('draft', id, d)}
             onMove={(id, delta) => moveComponent('draft', id, delta)}
             onRemove={(id) => removeComponent('draft', id)}
+            onMarkings={(id, patch) => setComponentMarkings('draft', id, patch)}
           />
         </section>
 

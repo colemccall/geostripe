@@ -2,7 +2,7 @@ import * as polyclip from 'polyclip-ts';
 import type { Feature, FeatureCollection, MultiPolygon, Polygon } from 'geojson';
 import type { Area, Street } from '../model/types';
 import { deriveProject } from '../geo/derived';
-import type { JunctionOverride } from '../geo/derived';
+import type { DerivedProject, JunctionOverride } from '../geo/derived';
 import type { JunctionGeometry } from '../geo/intersection';
 import { midpoint } from '../geo/measure';
 import { closeRing, resolveCenterline, resolveRing } from '../geo/curve';
@@ -39,7 +39,16 @@ export interface DesignData {
   /** Land cover, drawn beneath everything else in the design. */
   areas: FeatureCollection;
   bands: FeatureCollection;
+  /** Longitudinal stripes — lane lines, centre lines, edge lines. */
   markings: FeatureCollection;
+  /**
+   * Pavement symbols: repeating lane stamps and junction approach arrows in one source.
+   *
+   * One collection rather than two because they are the same material drawn the same way,
+   * and splitting them would mean two identical layers whose only difference is where the
+   * geometry came from.
+   */
+  stamps: FeatureCollection;
   centerlines: FeatureCollection;
   vertices: FeatureCollection;
   /** Half-way handles on the selected centerline; dragging one inserts a vertex. */
@@ -54,6 +63,8 @@ export interface DesignData {
   crossings: FeatureCollection;
   /** Stop lines across each leg of the selected junction. */
   stopLines: FeatureCollection;
+  /** Junctions close enough that their geometry interacts. */
+  offsetPairs: DerivedProject['offsetPairs'];
   warnings: { streetId: string; streetName: string; warnings: CurvatureWarning[] }[];
   junctions: JunctionSummary[];
   junctionWarnings: string[];
@@ -67,6 +78,7 @@ export interface BuildOptions {
   overrides?: Readonly<Record<string, JunctionOverride>>;
   defaultCornerRadiusMeters?: number;
   trimAtJunctions?: boolean;
+  junctionMergeSlackMeters?: number;
   selectedJunctionKey?: string | null;
 }
 
@@ -78,6 +90,7 @@ export function buildDesignData(
   const areas = empty();
   const bands = empty();
   const markings = empty();
+  const stamps = empty();
   const centerlines = empty();
   const vertices = empty();
   const midpoints = empty();
@@ -143,6 +156,7 @@ export function buildDesignData(
     overrides: options.overrides,
     defaultCornerRadiusMeters: options.defaultCornerRadiusMeters,
     trimAtJunctions: options.trimAtJunctions,
+    junctionMergeSlackMeters: options.junctionMergeSlackMeters,
   });
 
   for (const street of streets) {
@@ -152,6 +166,7 @@ export function buildDesignData(
     if (geometry) {
       bands.features.push(...geometry.bands);
       markings.features.push(...geometry.markings);
+      stamps.features.push(...geometry.stamps);
     }
 
     const selected = street.id === selectedStreetId;
@@ -197,6 +212,10 @@ export function buildDesignData(
   }
 
   crossings.features.push(...derived.crossings);
+  stamps.features.push(...derived.approachStamps);
+  // Turn pockets are bands: they are roadway, they carry a component type, and they should
+  // read as part of the street rather than as decoration belonging to the junction.
+  bands.features.push(...derived.flares);
 
   const junctions: JunctionSummary[] = [];
 
@@ -259,6 +278,7 @@ export function buildDesignData(
     areas,
     bands,
     markings,
+    stamps,
     centerlines,
     vertices,
     midpoints,
@@ -270,6 +290,7 @@ export function buildDesignData(
     warnings: derived.warnings,
     junctions,
     junctionWarnings: derived.junctionWarnings,
+    offsetPairs: derived.offsetPairs,
   };
 }
 

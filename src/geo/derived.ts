@@ -1,6 +1,16 @@
 import * as polyclip from 'polyclip-ts';
 import type { Feature, MultiPolygon, Polygon } from 'geojson';
-import { bandsForStreet, markingsForStreet } from './banding';
+import { bandsForStreet } from './banding';
+import {
+  approachStamps,
+  arrowForMovements,
+  laneStampsForStreet,
+  stampGlyph,
+  stripesForStreet,
+} from './markings';
+import type { Movement } from './markings';
+import { GLYPHS } from './glyphs';
+import type { GlyphId } from './glyphs';
 import type { BandFeature } from './banding';
 import { detectJunctions } from './junctions';
 import { pruneResolvedCache, resolveCenterline } from './curve';
@@ -15,8 +25,9 @@ import type {
   CornerInput,
 } from './intersection';
 import type { CurvatureWarning } from './curvature';
-import type { LocalPlane } from './projection';
+import type { LngLat, LocalPlane, PlanePoint } from './projection';
 import { PRIMITIVES } from '../library/primitives';
+import type { ComponentType } from '../library/primitives';
 import type { CrossSection, Street } from '../model/types';
 
 /**
@@ -38,7 +49,10 @@ import type { CrossSection, Street } from '../model/types';
 
 export interface StreetGeometry {
   bands: Feature[];
+  /** Longitudinal stripes: lane lines, centre lines, edge lines. */
   markings: Feature[];
+  /** Repeating pavement symbols along the street — bicycles, diamonds, sharrows. */
+  stamps: Feature[];
   warnings: CurvatureWarning[];
 }
 
@@ -53,6 +67,15 @@ export interface DerivedProject {
   junctionGeometry: JunctionGeometry[];
   /** Crosswalk stripes, edge lines, raised tables and stop bars, ready to draw. */
   crossings: Feature[];
+  /** Lane-use arrows on junction approaches, and the turn pockets they belong to. */
+  approachStamps: Feature[];
+  /** Extra approach lanes added at a junction, drawn as bands. */
+  flares: Feature[];
+  /**
+   * Junctions close enough that their geometry interacts — a staggered pair of T's, or a
+   * crossing right beside a slip road. Reported rather than silently merged.
+   */
+  offsetPairs: OffsetPair[];
   plane: LocalPlane;
   warnings: { streetId: string; streetName: string; warnings: CurvatureWarning[] }[];
   junctionWarnings: string[];
@@ -66,11 +89,49 @@ export interface CornerOverride {
   daylightMeters?: number;
 }
 
+/**
+ * An extra lane added at one approach only — a turn pocket, in the general case.
+ *
+ * `side` is the *approaching driver's*, not the leg's. A leg points away from the
+ * junction, so its outward left is the approaching driver's right; stating the side in
+ * driver terms is the only way a "right-turn pocket" means what it says. The conversion
+ * happens in exactly one place, where the geometry is built.
+ */
+export interface ApproachFlare {
+  side: 'left' | 'right';
+  componentType: ComponentType;
+  widthMeters: number;
+  /** Full-width storage, measured back from the stop line. */
+  storageMeters: number;
+  taperMeters: number;
+  /** Movements the added lane serves. Drives its arrow. */
+  movements?: Movement[];
+}
+
 /** Persisted per-leg customisation. */
 export interface LegOverride {
   crosswalk?: CrosswalkSpec | null;
   stopBar?: boolean;
   stopOffsetMeters?: number | null;
+  /**
+   * Movements permitted from each lane of the approach, indexed by component index.
+   *
+   * Sparse and explicit: an unassigned lane gets no arrow, because guessing what a lane is
+   * for and then painting the guess on the road is exactly the kind of confident fiction
+   * this tool exists to avoid. `conventionalAssignment` fills it in on request.
+   */
+  lanes?: (Movement[] | null)[];
+  flare?: ApproachFlare | null;
+}
+
+/** Two junctions whose footprints reach each other. */
+export interface OffsetPair {
+  keys: [string, string];
+  /** Centre to centre. For a staggered T-junction this is the stagger. */
+  separationMeters: number;
+  /** How much they overlap: positive means the two boxes genuinely intersect. */
+  overlapMeters: number;
+  sharedStreetIds: string[];
 }
 
 /**
@@ -90,6 +151,15 @@ export interface DeriveOptions {
   defaultCornerRadiusMeters?: number;
   /** Off by default so the feature can be turned off wholesale if it misbehaves. */
   trimAtJunctions?: boolean;
+  /**
+   * Slack on the radius at which nearby crossings are treated as one junction.
+   *
+   * The automatic radius comes from the streets themselves, which is right almost always.
+   * This is the knob for the two cases it cannot know about: a plaza where three streets
+   * meet across twenty metres and is one junction, and a pair of T's ten metres apart that
+   * are two. Negative pushes them apart, positive pulls them together.
+   */
+  junctionMergeSlackMeters?: number;
 }
 
 // ------------------------------------------------------------------------ raw bands
@@ -100,6 +170,7 @@ interface RawEntry {
   section: CrossSection;
   bands: BandFeature[];
   markings: Feature[];
+  stamps: Feature[];
   warnings: CurvatureWarning[];
 }
 
@@ -125,7 +196,8 @@ function rawFor(street: Street): RawEntry {
     curve: street.curve,
     section: street.section,
     bands: result.bands,
-    markings: markingsForStreet(street.id, line, street.section),
+    markings: stripesForStreet(street.id, line, street.section),
+    stamps: laneStampsForStreet(street.id, line, street.section),
     warnings: result.warnings,
   };
   rawCache.set(street.id, entry);
@@ -369,6 +441,167 @@ function pointInRing(point: [number, number], ring: Ring): boolean {
   return inside;
 }
 
+
+// ----------------------------------------------------------------------- approach flares
+
+/**
+ * Widen a leg by its approach flare, before any junction geometry is built.
+ *
+ * A turn pocket is not decoration bolted onto the side of a finished junction: it makes
+ * the approach wider, which moves the kerb, which moves the corner return, which lengthens
+ * the crossing. Applying it here means every one of those follows for free — including the
+ * crossing distance the inspector reports, so adding a right-turn pocket visibly costs the
+ * pedestrian the metres it really costs them.
+ *
+ * A leg points AWAY from the junction, so the approaching driver's right is the leg's
+ * outward left. That inversion happens here and nowhere else.
+ */
+function withFlares(junction: Junction, override: JunctionOverride | undefined): Junction {
+  const legs = override?.legs;
+  if (!legs || !legs.some((leg) => leg?.flare && leg.flare.widthMeters > 0)) return junction;
+
+  return {
+    ...junction,
+    legs: junction.legs.map((leg, i) => {
+      const flare = legs[i]?.flare;
+      if (!flare || flare.widthMeters <= 0) return leg;
+      const onLeft = flare.side === 'right';
+      const width = flare.widthMeters;
+      return {
+        ...leg,
+        halfLeft: leg.halfLeft + (onLeft ? width : 0),
+        halfRight: leg.halfRight + (onLeft ? 0 : width),
+        travelwayHalfLeft: leg.travelwayHalfLeft + (onLeft ? width : 0),
+        travelwayHalfRight: leg.travelwayHalfRight + (onLeft ? 0 : width),
+      };
+    }),
+  };
+}
+
+/** Gap between the stop line and the back of an approach arrow. */
+const FLARE_ARROW_GAP_METRES = 2.0;
+
+/**
+ * The pocket itself: full width from the stop line back through the storage length, then
+ * a taper closing onto the running edge of the street.
+ *
+ * `baseHalf` is the leg's half-width BEFORE the flare, which is where the street's own
+ * bands stop. The pocket fills exactly the gap between that and the widened junction box,
+ * so the two meet with no sliver and no overlap.
+ */
+function flareGeometry(
+  plane: LocalPlane,
+  origin: PlanePoint,
+  bearing: number,
+  baseHalf: number,
+  onLeft: boolean,
+  stopOffsetMeters: number,
+  flare: ApproachFlare,
+): { ring: LngLat[]; arrow: LngLat[][][] | null; glyph: GlyphId | null } {
+  const d: PlanePoint = { x: Math.cos(bearing), y: Math.sin(bearing) };
+  const n: PlanePoint = onLeft ? { x: -d.y, y: d.x } : { x: d.y, y: -d.x };
+  const at = (along: number, across: number): PlanePoint => ({
+    x: origin.x + d.x * along + n.x * across,
+    y: origin.y + d.y * along + n.y * across,
+  });
+
+  const width = flare.widthMeters;
+  const storage = Math.max(0, flare.storageMeters);
+  const taper = Math.max(0.5, flare.taperMeters);
+  const stop = stopOffsetMeters;
+
+  const ring = [
+    at(stop, baseHalf),
+    at(stop, baseHalf + width),
+    at(stop + storage, baseHalf + width),
+    at(stop + storage + taper, baseHalf),
+    at(stop, baseHalf),
+  ].map((p) => plane.toLngLat(p));
+
+  const glyph = flare.movements?.length ? arrowForMovements(flare.movements) : null;
+  if (!glyph) return { ring, arrow: null, glyph: null };
+
+  const spec = GLYPHS[glyph];
+  if (spec.widthMeters > width - 0.15 || spec.lengthMeters + FLARE_ARROW_GAP_METRES > storage) {
+    return { ring, arrow: null, glyph: null };
+  }
+
+  const centre = at(stop + FLARE_ARROW_GAP_METRES + spec.lengthMeters / 2, baseHalf + width / 2);
+  return {
+    ring,
+    arrow: stampGlyph(spec.build(width), centre, { x: -d.x, y: -d.y }, plane),
+    glyph,
+  };
+}
+
+// ------------------------------------------------------------------- offset junctions
+
+/** How far a junction reaches from its own centre. */
+function junctionReach(entry: JunctionGeometry, plane: LocalPlane): number {
+  const centre = plane.toPlane(entry.centre);
+  let reach = 0;
+  for (const point of entry.footprint) {
+    const p = plane.toPlane(point);
+    reach = Math.max(reach, Math.hypot(p.x - centre.x, p.y - centre.y));
+  }
+  return reach;
+}
+
+/**
+ * Junctions whose geometry reaches into each other.
+ *
+ * The case this exists for is the staggered intersection — two T-junctions ten or twenty
+ * metres apart on the same through street, which is a single place to a driver and two
+ * junctions to the detector. Merging them would be wrong: their side streets meet the
+ * through street at genuinely different points, and one shared centre would draw both legs
+ * from somewhere neither of them is. So they stay separate, and this reports the fact,
+ * suppresses the markings that would land inside the neighbour, and leaves the call to the
+ * person looking at it.
+ *
+ * A shared street is required. Two unrelated junctions that happen to be close are just
+ * close, and there is nothing to say about them.
+ */
+function findOffsetPairs(
+  geometry: readonly JunctionGeometry[],
+  junctions: readonly Junction[],
+  plane: LocalPlane,
+): OffsetPair[] {
+  const reaches = geometry.map((entry) => junctionReach(entry, plane));
+  const centres = geometry.map((entry) => plane.toPlane(entry.centre));
+  const pairs: OffsetPair[] = [];
+
+  for (let i = 0; i < geometry.length; i++) {
+    for (let j = i + 1; j < geometry.length; j++) {
+      const shared = junctions[i]!.streetIds.filter((id) => junctions[j]!.streetIds.includes(id));
+      if (shared.length === 0) continue;
+
+      const separation = Math.hypot(centres[i]!.x - centres[j]!.x, centres[i]!.y - centres[j]!.y);
+      const overlap = reaches[i]! + reaches[j]! - separation;
+      if (overlap <= 0) continue;
+
+      pairs.push({
+        keys: [geometry[i]!.key, geometry[j]!.key],
+        separationMeters: separation,
+        overlapMeters: overlap,
+        sharedStreetIds: shared,
+      });
+    }
+  }
+
+  return pairs;
+}
+
+/** Centroid of a ring, for the "is this marking inside the neighbouring junction" test. */
+function ringCentroid(ring: readonly (readonly number[])[]): [number, number] {
+  let x = 0;
+  let y = 0;
+  for (const point of ring) {
+    x += point[0]!;
+    y += point[1]!;
+  }
+  return [x / ring.length, y / ring.length];
+}
+
 interface TrimEntry {
   bands: BandFeature[];
   trimKey: string;
@@ -387,13 +620,24 @@ export function deriveProject(
     overrides,
     defaultCornerRadiusMeters = DEFAULT_CORNER_RADIUS_METRES,
     trimAtJunctions = true,
+    junctionMergeSlackMeters = 0,
   } = options;
 
   const visible = streets.filter((s) => s.visible);
-  const { junctions, plane } = detectJunctions(streets);
+  const byId = new Map(streets.map((street) => [street.id, street]));
+  const { junctions, plane } = detectJunctions(streets, {
+    mergeSlackMeters: junctionMergeSlackMeters,
+  });
+
+  // Flares widen the legs, so they have to be applied before the geometry is built rather
+  // than drawn over it afterwards. The cache signature already covers leg half-widths, so
+  // a pocket appearing or changing width invalidates exactly the junction it belongs to.
+  const flared = trimAtJunctions
+    ? junctions.map((junction) => withFlares(junction, overrides?.[junction.key]))
+    : junctions;
 
   const entries = trimAtJunctions
-    ? junctions.map((junction) =>
+    ? flared.map((junction) =>
         geometryFor(junction, plane, overrides?.[junction.key], defaultCornerRadiusMeters),
       )
     : [];
@@ -479,7 +723,17 @@ export function deriveProject(
     const markings: Feature[] = [];
     for (const marking of raw.markings) markings.push(...clipLineOutside(marking, pavedHoles));
 
-    const result: StreetGeometry = { bands, markings, warnings: raw.warnings };
+    // A symbol is either on the road or it is not — clipping one in half would read as a
+    // rendering fault rather than as a junction. Drop any whose centre lands in the box.
+    const stamps = raw.stamps.filter((stamp) => {
+      if (stamp.geometry.type !== 'MultiPolygon') return true;
+      const first = stamp.geometry.coordinates[0]?.[0];
+      if (!first) return false;
+      const centre = ringCentroid(first);
+      return !pavedHoles.some((hole) => pointInRing(centre, hole));
+    });
+
+    const result: StreetGeometry = { bands, markings, stamps, warnings: raw.warnings };
     trimCache.set(street.id, { bands: raw.bands, trimKey, result });
     byStreet.set(street.id, result);
   }
@@ -494,9 +748,34 @@ export function deriveProject(
     if (!liveJunctions.has(key)) geometryCache.delete(key);
   }
 
+  const offsetPairs = trimAtJunctions ? findOffsetPairs(geometry, flared, plane) : [];
+
+  // Which other junctions each one has to keep out of. Only offset neighbours, because
+  // that is the only case where one junction's paint can land inside another's box.
+  const neighbours = new Map<string, Ring[]>();
+  for (const pair of offsetPairs) {
+    for (const [self, other] of [
+      [pair.keys[0], pair.keys[1]],
+      [pair.keys[1], pair.keys[0]],
+    ]) {
+      const ring = geometry.find((entry) => entry.key === other)?.paved;
+      if (!ring || ring.length <= 3) continue;
+      const list = neighbours.get(self!);
+      if (list) list.push(ring as Ring);
+      else neighbours.set(self!, [ring as Ring]);
+    }
+  }
+
   const crossings: Feature[] = [];
   for (const entry of geometry) {
+    const forbidden = neighbours.get(entry.key) ?? [];
     entry.crossings.forEach((part, index) => {
+      // A crosswalk or stop bar that falls inside the junction next door is not a crossing,
+      // it is paint in the middle of an intersection. Suppressed rather than drawn.
+      if (forbidden.length > 0) {
+        const centre = ringCentroid(part.ring);
+        if (forbidden.some((ring) => pointInRing(centre, ring))) return;
+      }
       crossings.push({
         type: 'Feature',
         id: `${entry.key}:x${index}`,
@@ -511,14 +790,112 @@ export function deriveProject(
     });
   }
 
+  // ---- approach lanes: the arrows on each lane, and the pockets some of them sit in.
+  const approach: Feature[] = [];
+  const flares: Feature[] = [];
+
+  geometry.forEach((entry, index) => {
+    const junction = junctions[index]!;
+    const override = overrides?.[entry.key];
+    const origin = plane.toPlane(entry.centre);
+
+    entry.legs.forEach((legGeometry, legIndex) => {
+      const leg = junction.legs[legIndex];
+      const street = byId.get(legGeometry.streetId);
+      if (!leg || !street) return;
+      const legOverride = override?.legs?.[legIndex];
+
+      const lanes = legOverride?.lanes;
+      if (lanes && lanes.length > 0) {
+        for (const stamp of approachStamps({
+          plane,
+          origin,
+          bearing: leg.bearing,
+          sense: leg.sense,
+          stopOffsetMeters: legGeometry.stopOffsetMeters,
+          legLengthMeters: leg.lengthMeters,
+          section: street.section,
+          lanes,
+        })) {
+          approach.push({
+            type: 'Feature',
+            id: `${entry.key}:arrow${legIndex}:${stamp.componentIndex}`,
+            properties: {
+              junctionKey: entry.key,
+              legIndex,
+              glyph: stamp.glyph,
+              color: PAINT_COLOR,
+            },
+            geometry: { type: 'MultiPolygon', coordinates: stamp.polygons },
+          });
+        }
+      }
+
+      const flare = legOverride?.flare;
+      if (!flare || flare.widthMeters <= 0) return;
+
+      const onLeft = flare.side === 'right';
+      const built = flareGeometry(
+        plane,
+        origin,
+        leg.bearing,
+        onLeft ? leg.travelwayHalfLeft : leg.travelwayHalfRight,
+        onLeft,
+        legGeometry.stopOffsetMeters,
+        flare,
+      );
+
+      flares.push({
+        type: 'Feature',
+        id: `${entry.key}:flare${legIndex}`,
+        properties: {
+          featureClass: 'band',
+          junctionKey: entry.key,
+          legIndex,
+          streetId: legGeometry.streetId,
+          componentType: flare.componentType,
+          color: PRIMITIVES[flare.componentType].color,
+          level: street.level ?? 0,
+        },
+        geometry: { type: 'Polygon', coordinates: [built.ring] },
+      });
+
+      if (built.arrow && built.glyph) {
+        approach.push({
+          type: 'Feature',
+          id: `${entry.key}:flarearrow${legIndex}`,
+          properties: {
+            junctionKey: entry.key,
+            legIndex,
+            glyph: built.glyph,
+            color: PAINT_COLOR,
+          },
+          geometry: { type: 'MultiPolygon', coordinates: built.arrow },
+        });
+      }
+    });
+  });
+
+  const offsetWarnings = offsetPairs.map(
+    (pair) =>
+      `Two junctions sit ${pair.separationMeters.toFixed(0)} m apart on ${
+        pair.sharedStreetIds.length === 1 ? 'a shared street' : 'shared streets'
+      } and their footprints overlap by ${pair.overlapMeters.toFixed(
+        0,
+      )} m. That is a staggered intersection: it is drawn as two, and the crossings that would land inside the other one are suppressed.`,
+  );
+
   return {
     byStreet,
-    junctions,
+    junctions: flared,
     junctionGeometry: geometry,
     crossings,
+    approachStamps: approach,
+    flares,
+    offsetPairs,
     plane,
     warnings,
-    junctionWarnings: [...new Set(geometry.flatMap((g) => g.warnings))],
+    junctionWarnings: [...new Set([...geometry.flatMap((g) => g.warnings), ...offsetWarnings])],
   };
 }
 

@@ -9,6 +9,8 @@ import {
 } from '../geo/intersection';
 import { displayToMetres, formatWidth, stepFor } from '../lib/units';
 import type { DisplayUnits } from '../lib/units';
+import ApproachEditor from './ApproachEditor';
+import type { CrossSection } from '../model/types';
 
 /**
  * The intersection inspector.
@@ -27,6 +29,10 @@ interface Props {
   junction: JunctionSummary;
   units: DisplayUnits;
   streetNames: Readonly<Record<string, string>>;
+  /** Each participating street's cross-section, so a leg can list its own lanes. */
+  sections: Readonly<Record<string, CrossSection>>;
+  /** Junctions this one overlaps — a staggered pair reads as one place to a driver. */
+  offsetNeighbours?: readonly { key: string; separationMeters: number }[];
   override: JunctionOverride | undefined;
   onCorner: (cornerIndex: number, patch: Partial<CornerOverride>) => void;
   onLeg: (legIndex: number, patch: Partial<LegOverride>) => void;
@@ -68,6 +74,8 @@ export default function JunctionInspector({
   junction,
   units,
   streetNames,
+  sections,
+  offsetNeighbours = [],
   override,
   onCorner,
   onLeg,
@@ -88,6 +96,24 @@ export default function JunctionInspector({
     const angle = Math.atan2(b[1] - a[1], b[0] - a[0]);
     return (angle - Math.PI / 2 + Math.PI * 2) % (Math.PI * 2);
   });
+
+  /**
+   * Is there another leg roughly opposite this one?
+   *
+   * The through movement is not a property of the approach, it is a property of the
+   * junction: a leg can only go straight on if something continues on the far side. At a
+   * T-junction stem there is nothing there, which is exactly the case a lane-assignment UI
+   * has to know about. Thirty degrees of slack, because a junction is rarely square.
+   */
+  const hasOppositeLeg = (index: number): boolean => {
+    const from = bearings[index];
+    if (from === undefined) return true;
+    return bearings.some((other, i) => {
+      if (i === index || other === undefined) return false;
+      const delta = Math.abs(((other - from + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+      return delta < (30 * Math.PI) / 180;
+    });
+  };
 
   const widest = Math.max(...legs.map((l) => l.crossingDistanceWithoutBulbsMeters), 1);
   const totalSaved = legs.reduce(
@@ -159,6 +185,17 @@ export default function JunctionInspector({
             <circle cx={SIZE / 2} cy={SIZE / 2} r={5} className="wheel-hub" />
           </svg>
         </div>
+
+        {offsetNeighbours.length > 0 && (
+          <p className="hint hint-warn">
+            {offsetNeighbours.length === 1
+              ? `Another junction sits ${offsetNeighbours[0]!.separationMeters.toFixed(0)} m away and the two overlap.`
+              : `${offsetNeighbours.length} other junctions sit close enough to overlap this one.`}{' '}
+            That is a staggered intersection. It is drawn as separate junctions on purpose —
+            averaging them into one would put both side streets somewhere neither of them
+            is — and any crossing that would land inside the neighbour is suppressed.
+          </p>
+        )}
 
         <ul className="leg-list">
           {legs.map((entry, i) => {
@@ -349,6 +386,20 @@ export default function JunctionInspector({
             />
             <span>Stop bar</span>
           </label>
+
+          {sections[leg.streetId] && (
+            <ApproachEditor
+              units={units}
+              section={sections[leg.streetId]!}
+              sense={leg.sense}
+              // Straight on exists only if some other leg points roughly opposite this one.
+              // At the stem of a T there is nowhere to go straight, and offering the
+              // movement would let you paint an arrow into a building.
+              hasThroughMovement={hasOppositeLeg(activeLeg)}
+              override={legOverride}
+              onChange={(patch) => onLeg(activeLeg, patch)}
+            />
+          )}
         </section>
       )}
 
