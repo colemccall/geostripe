@@ -104,12 +104,17 @@ interface Props {
   selectedAreaId?: string | null;
   onSelectJunction?: (key: string) => void;
   onWarnings?: (warnings: DesignData['warnings']) => void;
-  onJunctions?: (junctions: DesignData['junctions'], warnings: string[]) => void;
+  onJunctions?: (
+    junctions: DesignData['junctions'],
+    warnings: string[],
+    offsetPairs: DesignData['offsetPairs'],
+  ) => void;
 
   // ---- junctions
   junctionOverrides?: Readonly<Record<string, JunctionOverride>>;
   defaultCornerRadiusMeters?: number;
   trimAtJunctions?: boolean;
+  junctionMergeSlackMeters?: number;
   selectedJunctionKey?: string | null;
 
   // ---- drawing
@@ -180,6 +185,7 @@ const DESIGN_SOURCES = [
   'stop-lines',
   'bands',
   'markings',
+  'stamps',
   'centerlines',
   'midpoints',
   'vertices',
@@ -281,27 +287,41 @@ function addDesignLayers(map: MapLibreMap) {
 
   // Two layers rather than one with an expression: `line-dasharray` is not a data-driven
   // property in MapLibre, and feeding it a `case` expression makes addLayer throw — which
-  // aborts the rest of this function and leaves the whole design layer empty.
-  // Yellow separates opposing directions, dashed white separates same-direction lanes.
+  // aborts the rest of this function and leaves the whole design layer empty. So the split
+  // is solid / dashed, the one thing that CANNOT travel on the feature, and colour and
+  // width travel on the feature so every stripe style is covered by these two.
   addLayerSafely(map, {
-    id: 'marking-opposing',
+    id: 'marking-solid',
     type: 'line',
     source: 'markings',
-    filter: ['==', ['get', 'opposing'], true],
-    paint: { 'line-color': '#E8C45A', 'line-width': 1.4, 'line-opacity': 0.9 },
+    filter: ['!=', ['get', 'dashed'], true],
+    paint: {
+      'line-color': ['get', 'color'],
+      'line-width': ['coalesce', ['get', 'lineWidth'], 1.2],
+      'line-opacity': 0.9,
+    },
   });
 
   addLayerSafely(map, {
-    id: 'marking-same',
+    id: 'marking-dashed',
     type: 'line',
     source: 'markings',
-    filter: ['!=', ['get', 'opposing'], true],
+    filter: ['==', ['get', 'dashed'], true],
     paint: {
-      'line-color': '#EDE9DC',
-      'line-width': 1.2,
-      'line-opacity': 0.8,
+      'line-color': ['get', 'color'],
+      'line-width': ['coalesce', ['get', 'lineWidth'], 1.1],
+      'line-opacity': 0.85,
       'line-dasharray': [3, 2.5],
     },
+  });
+
+  // Pavement symbols sit above the stripes and below the editing handles: they are paint
+  // on the road, and nothing that is paint should ever cover a control point.
+  addLayerSafely(map, {
+    id: 'stamp-fill',
+    type: 'fill',
+    source: 'stamps',
+    paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.94 },
   });
 
   addLayerSafely(map, {
@@ -469,6 +489,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     junctionOverrides,
     defaultCornerRadiusMeters,
     trimAtJunctions,
+    junctionMergeSlackMeters,
     selectedJunctionKey,
     onDraftChange,
     onDrawComplete,
@@ -506,6 +527,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     junctionOverrides,
     defaultCornerRadiusMeters,
     trimAtJunctions,
+    junctionMergeSlackMeters,
     selectedJunctionKey,
     onDraftChange,
     onDrawComplete,
@@ -668,14 +690,16 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
       overrides: latest.current.junctionOverrides,
       defaultCornerRadiusMeters: latest.current.defaultCornerRadiusMeters,
       trimAtJunctions: latest.current.trimAtJunctions,
+      junctionMergeSlackMeters: latest.current.junctionMergeSlackMeters,
       selectedJunctionKey: latest.current.selectedJunctionKey,
     });
     warn?.(data.warnings);
-    reportJunctions?.(data.junctions, data.junctionWarnings);
+    reportJunctions?.(data.junctions, data.junctionWarnings, data.offsetPairs);
 
     if (sw === null) {
       setData(map, 'bands', data.bands);
       setData(map, 'markings', data.markings);
+      setData(map, 'stamps', data.stamps);
       setData(map, 'centerlines', data.centerlines);
       setData(map, 'junction-paved', data.junctionPaved);
       setData(map, 'junction-footprint', data.junctionFootprint);
@@ -686,6 +710,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
       const minLng = map.unproject([x, map.getContainer().clientHeight / 2]).lng;
       setData(map, 'bands', clipEastOf(data.bands, minLng));
       setData(map, 'markings', clipLinesEastOf(data.markings, minLng));
+      setData(map, 'stamps', clipEastOf(data.stamps, minLng));
       setData(map, 'centerlines', clipLinesEastOf(data.centerlines, minLng));
       setData(map, 'junction-paved', clipEastOf(data.junctionPaved, minLng));
       setData(map, 'junction-footprint', clipEastOf(data.junctionFootprint, minLng));
@@ -1069,6 +1094,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     junctionOverrides,
     defaultCornerRadiusMeters,
     trimAtJunctions,
+    junctionMergeSlackMeters,
     selectedJunctionKey,
   ]);
 

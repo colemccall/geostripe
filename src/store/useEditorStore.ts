@@ -90,6 +90,14 @@ interface EditorState extends Snapshot {
   selectedJunctionKey: string | null;
   defaultCornerRadiusMeters: number;
   trimAtJunctions: boolean;
+  /**
+   * Slack on the radius at which nearby crossings become one junction.
+   *
+   * A view setting, not part of the document: it changes how the same streets are read,
+   * the way the trim toggle does, and putting it in the undo history would mean nudging a
+   * slider buried every real edit behind it.
+   */
+  junctionMergeSlackMeters: number;
 
   // ---- selection
   selectedStreetId: string | null;
@@ -121,6 +129,7 @@ interface EditorState extends Snapshot {
   selectJunction: (key: string | null) => void;
   setDefaultCornerRadius: (metres: number) => void;
   setTrimAtJunctions: (value: boolean) => void;
+  setJunctionMergeSlack: (metres: number) => void;
   /** Merge a patch into one corner's settings. A field left out is left alone. */
   updateCorner: (key: string, cornerIndex: number, patch: Partial<CornerOverride>) => void;
   /** Merge a patch into one leg's settings. */
@@ -136,6 +145,19 @@ interface EditorState extends Snapshot {
   removeComponent: (target: EditTarget, id: string) => void;
   setWidth: (target: EditTarget, id: string, metres: number) => void;
   setDirection: (target: EditTarget, id: string, direction: Direction) => void;
+  /**
+   * The paint on one band: its repeating symbol and the stripe on its left edge.
+   *
+   * A patch rather than three setters, because these three fields are always edited from
+   * the same panel and a caller that sets one usually clears another — `glyph: undefined`
+   * has to be expressible, and `undefined` means "back to the type's default" while
+   * `'none'` means "deliberately bare".
+   */
+  setComponentMarkings: (
+    target: EditTarget,
+    id: string,
+    patch: Pick<Partial<SectionComponent>, 'glyph' | 'glyphSpacingMeters' | 'stripeLeft'>,
+  ) => void;
   moveComponent: (target: EditTarget, id: string, delta: number) => void;
   setAnchorMode: (target: EditTarget, mode: AnchorMode) => void;
   renameSection: (target: EditTarget, name: string) => void;
@@ -295,6 +317,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     selectedJunctionKey: null,
     defaultCornerRadiusMeters: DEFAULT_CORNER_RADIUS_METRES,
     trimAtJunctions: true,
+    junctionMergeSlackMeters: 0,
 
     selectedStreetId: initialStreets[0]?.id ?? null,
     selectedAreaId: null,
@@ -322,6 +345,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     selectJunction: (selectedJunctionKey) => set({ selectedJunctionKey }),
     setDefaultCornerRadius: (defaultCornerRadiusMeters) => set({ defaultCornerRadiusMeters }),
     setTrimAtJunctions: (trimAtJunctions) => set({ trimAtJunctions }),
+    setJunctionMergeSlack: (junctionMergeSlackMeters) => set({ junctionMergeSlackMeters }),
 
     updateCorner: (key, cornerIndex, patch) => {
       const existing = get().junctionOverrides[key];
@@ -388,6 +412,20 @@ export const useEditorStore = create<EditorState>((set, get) => {
     setDirection: (target, id, direction) =>
       editComponents(target, (components) =>
         components.map((c) => (c.id === id ? { ...c, direction } : c)),
+      ),
+
+    setComponentMarkings: (target, id, patch) =>
+      editComponents(target, (components) =>
+        components.map((c) => {
+          if (c.id !== id) return c;
+          const next = { ...c, ...patch };
+          // An explicitly undefined key has to actually leave the object, or "back to the
+          // default" would serialise as the value it was overriding.
+          for (const key of ['glyph', 'glyphSpacingMeters', 'stripeLeft'] as const) {
+            if (key in patch && patch[key] === undefined) delete next[key];
+          }
+          return next;
+        }),
       ),
 
     moveComponent: (target, id, delta) =>

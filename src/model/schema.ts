@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { COMPONENT_TYPES, DIRECTIONS, PRIMITIVES } from '../library/primitives';
-import type { CrossSection } from './types';
+import { GLYPH_IDS } from '../geo/glyphs';
+import { STRIPE_STYLES } from '../geo/markings';
+import type { CrossSection, SectionComponent } from './types';
 import { newId } from './types';
 
 /**
@@ -19,6 +21,14 @@ export const componentSchema = z.object({
   widthMeters: z.number().finite().positive().max(100),
   direction: z.enum(DIRECTIONS).optional(),
   colorOverride: z.string().optional(),
+  /**
+   * Markings. Both are overrides of a derived default, so absent and present-but-equal to
+   * the default mean different things and both have to survive a round trip: `'none'` is
+   * "I removed the bicycle", not "there was never one".
+   */
+  glyph: z.enum(['none', ...GLYPH_IDS]).optional(),
+  glyphSpacingMeters: z.number().finite().min(2).max(400).optional(),
+  stripeLeft: z.enum(STRIPE_STYLES).optional(),
 });
 
 export const assetFileSchema = z.object({
@@ -85,6 +95,9 @@ export function parseAssetFile(text: string): ParseResult {
       widthMeters: c.widthMeters,
       direction: c.direction ?? spec.defaultDirection,
       ...(c.colorOverride ? { colorOverride: c.colorOverride } : {}),
+      ...(c.glyph ? { glyph: c.glyph as NonNullable<SectionComponent['glyph']> } : {}),
+      ...(c.glyphSpacingMeters ? { glyphSpacingMeters: c.glyphSpacingMeters } : {}),
+      ...(c.stripeLeft ? { stripeLeft: c.stripeLeft } : {}),
     };
   });
 
@@ -111,6 +124,9 @@ export function toAssetFile(section: CrossSection): AssetFile {
       widthMeters: Number(c.widthMeters.toFixed(4)),
       direction: c.direction,
       ...(c.colorOverride ? { colorOverride: c.colorOverride } : {}),
+      ...(c.glyph ? { glyph: c.glyph } : {}),
+      ...(c.glyphSpacingMeters ? { glyphSpacingMeters: c.glyphSpacingMeters } : {}),
+      ...(c.stripeLeft ? { stripeLeft: c.stripeLeft } : {}),
     })),
   };
 }

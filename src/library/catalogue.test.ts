@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   COMPONENT_CATEGORIES,
   COMPONENT_TYPES,
+  DEFAULT_LANE_GLYPHS,
   PRIMITIVES,
   searchPrimitives,
 } from './primitives';
+import { GLYPHS } from '../geo/glyphs';
 import {
   TEMPLATES,
   TEMPLATE_CATEGORIES,
@@ -28,7 +30,7 @@ const ft = (metres: number) => metresToDisplay(metres, 'ft');
 
 describe('the primitive catalogue', () => {
   it('is substantial and every entry is reachable', () => {
-    expect(COMPONENT_TYPES.length).toBeGreaterThanOrEqual(50);
+    expect(COMPONENT_TYPES.length).toBeGreaterThanOrEqual(90);
     expect(new Set(COMPONENT_TYPES).size).toBe(COMPONENT_TYPES.length);
     // Everything appears in an unfiltered search, or it is in the data and not in the UI.
     expect(searchPrimitives('')).toHaveLength(COMPONENT_TYPES.length);
@@ -63,6 +65,26 @@ describe('the primitive catalogue', () => {
     }
   });
 
+  it('keeps a path out of the carriageway', () => {
+    // The load-bearing distinction between a path and a narrow street. A path with
+    // isRoadway true would take the travelway anchor, get a kerb line drawn along it, and
+    // be trimmed as carriageway at every junction it touches.
+    for (const type of COMPONENT_TYPES) {
+      if (PRIMITIVES[type].category !== 'path') continue;
+      expect(PRIMITIVES[type].isRoadway).toBe(false);
+    }
+  });
+
+  it('gives every lane symbol a component that is wide enough to hold it', () => {
+    // A default that never fits its own lane is a default that never appears, which reads
+    // as a bug rather than as the deliberate suppression it is.
+    for (const [type, preset] of Object.entries(DEFAULT_LANE_GLYPHS)) {
+      const spec = PRIMITIVES[type as (typeof COMPONENT_TYPES)[number]];
+      expect(GLYPHS[preset!.glyph].widthMeters).toBeLessThan(spec.defaultWidthMeters);
+      expect(preset!.spacingMeters).toBeGreaterThan(GLYPHS[preset!.glyph].lengthMeters);
+    }
+  });
+
   it('keeps the eleven original ids, so old files still load', () => {
     // These were in the first release. Renaming one silently changes what a saved project
     // opens as, and the loader would report it as an unknown component type.
@@ -86,7 +108,7 @@ describe('the primitive catalogue', () => {
 
 describe('the template catalogue', () => {
   it('is substantial and uniquely keyed', () => {
-    expect(TEMPLATES.length).toBeGreaterThanOrEqual(60);
+    expect(TEMPLATES.length).toBeGreaterThanOrEqual(150);
     expect(new Set(TEMPLATES.map((t) => t.id)).size).toBe(TEMPLATES.length);
   });
 
@@ -107,7 +129,10 @@ describe('the template catalogue', () => {
 
       const width = totalWidth(section.components);
       expect(width).toBeCloseTo(templateTotalWidth(template), 6);
-      expect(ft(width)).toBeGreaterThan(12);
+      // A path is legitimately narrower than any street — a 10 ft boardwalk is a real
+      // cross-section, not a transposed number — so the floor is per-kind rather than one
+      // figure that would have to be loosened until it caught nothing.
+      expect(ft(width)).toBeGreaterThan(template.category === 'path' ? 7 : 12);
       expect(ft(width)).toBeLessThan(400);
 
       for (const component of section.components) {

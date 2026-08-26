@@ -207,8 +207,12 @@ function toleranceFor(a: Track, b: Track): number {
   return Math.max(a.extent.left, a.extent.right, b.extent.left, b.extent.right, MIN_CLUSTER_METRES);
 }
 
-function crossingsBetween(a: Track, b: Track): Crossing[] {
+function crossingsBetween(a: Track, b: Track, clusterSlack: number): Crossing[] {
   const tolerance = toleranceFor(a, b);
+  // Detection tolerance and clustering radius are deliberately separate. Slack must not
+  // loosen what counts as a T-junction — that would invent junctions out of near misses —
+  // only whether two crossings already found are one junction or two.
+  const clusterRadius = Math.max(0.5, tolerance + clusterSlack);
   const found: Crossing[] = [];
 
   const add = (point: PlanePoint, stationA: number, stationB: number) => {
@@ -223,7 +227,7 @@ function crossingsBetween(a: Track, b: Track): Crossing[] {
         [a.streetId, stationA],
         [b.streetId, stationB],
       ]),
-      radius: tolerance,
+      radius: clusterRadius,
     });
   };
 
@@ -385,7 +389,24 @@ export interface DetectionResult {
  * Hidden streets are excluded: hiding a street should remove its junctions too, or the
  * corners it created would stay carved out of streets that no longer meet anything.
  */
-export function detectJunctions(streets: readonly Street[]): DetectionResult {
+export interface DetectionOptions {
+  /**
+   * Added to the radius at which two nearby crossings are merged into one junction.
+   *
+   * Zero means "trust the streets", which is right nearly always: the automatic radius is
+   * the widest section involved, so a crossing inside another street's footprint is the
+   * same junction. The two cases it cannot know about are a plaza that reads as one
+   * junction across twenty metres, and a staggered pair of T's that reads as two across
+   * eight — hence a knob that goes both ways.
+   */
+  mergeSlackMeters?: number;
+}
+
+export function detectJunctions(
+  streets: readonly Street[],
+  options: DetectionOptions = {},
+): DetectionResult {
+  const slack = options.mergeSlackMeters ?? 0;
   const visible = streets.filter((s) => s.visible && s.centerline.length >= 2);
   const allPoints = visible.flatMap((s) => resolveCenterline(s));
   const plane = localPlane(originFor(allPoints.length ? allPoints : [[0, 0]]));
@@ -404,7 +425,7 @@ export function detectJunctions(streets: readonly Street[]): DetectionResult {
       // intersection, and detecting one would carve a hole through both.
       if (list[i]!.level !== list[j]!.level) continue;
       // Self-intersection is a curvature problem, not a junction, so pairs only.
-      crossings.push(...crossingsBetween(list[i]!, list[j]!));
+      crossings.push(...crossingsBetween(list[i]!, list[j]!, slack));
     }
   }
 

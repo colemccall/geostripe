@@ -106,6 +106,7 @@ export default function MapEditor() {
   const junctionOverrides = useEditorStore((s) => s.junctionOverrides);
   const defaultCornerRadiusMeters = useEditorStore((s) => s.defaultCornerRadiusMeters);
   const trimAtJunctions = useEditorStore((s) => s.trimAtJunctions);
+  const junctionMergeSlackMeters = useEditorStore((s) => s.junctionMergeSlackMeters);
   const draftSection = useEditorStore((s) => s.draftSection);
   const street = useEditorStore(selectedStreet);
 
@@ -115,6 +116,7 @@ export default function MapEditor() {
     addComponent,
     setWidth,
     setDirection,
+    setComponentMarkings,
     moveComponent,
     removeComponent,
     applyTemplate,
@@ -139,6 +141,7 @@ export default function MapEditor() {
     updateLeg,
     resetJunction,
     setTrimAtJunctions,
+    setJunctionMergeSlack,
     beginGesture,
     endGesture,
     moveVertexLive,
@@ -170,6 +173,7 @@ export default function MapEditor() {
   });
   const [measure, setMeasure] = useState<{ points: number; metres: number } | null>(null);
   const [junctions, setJunctions] = useState<JunctionSummary[]>([]);
+  const [offsetPairs, setOffsetPairs] = useState<DesignData['offsetPairs']>([]);
   const [renderStats, setRenderStats] = useState<{
     bands: number;
     drawn: boolean;
@@ -201,6 +205,20 @@ export default function MapEditor() {
     () => Object.fromEntries(streets.map((s) => [s.id, s.name])),
     [streets],
   );
+  // The inspector lists a leg's own lanes, so it needs the section behind each leg.
+  const streetSections = useMemo(
+    () => Object.fromEntries(streets.map((s) => [s.id, s.section])),
+    [streets],
+  );
+  const offsetNeighbours = useMemo(() => {
+    if (!selectedJunctionKey) return [];
+    return offsetPairs
+      .filter((pair) => pair.keys.includes(selectedJunctionKey))
+      .map((pair) => ({
+        key: pair.keys[0] === selectedJunctionKey ? pair.keys[1] : pair.keys[0],
+        separationMeters: pair.separationMeters,
+      }));
+  }, [offsetPairs, selectedJunctionKey]);
 
   /** The section a newly drawn street gets — also the fallback for a bare line import. */
   const drawingSection = useMemo(() => {
@@ -572,6 +590,25 @@ export default function MapEditor() {
             />
             <span>Trim streets at intersections</span>
           </label>
+
+          <label className="field" style={{ marginTop: 9 }}>
+            <span className="label">
+              Merge nearby crossings <span className="mono">{junctionMergeSlackMeters} m</span>
+            </span>
+            <input
+              type="range"
+              min={-12}
+              max={30}
+              step={1}
+              value={junctionMergeSlackMeters}
+              onChange={(e) => setJunctionMergeSlack(Number(e.target.value))}
+            />
+            <span className="hint">
+              Two crossings inside one street&rsquo;s width are treated as one junction, which
+              is right nearly always. Push this up for a plaza that reads as a single place,
+              and down to keep a staggered pair of T&rsquo;s apart.
+            </span>
+          </label>
         </section>
 
         <section className="panel">
@@ -742,10 +779,14 @@ export default function MapEditor() {
             onSelectStreet={selectStreet}
             onSelectJunction={selectJunction}
             onWarnings={setWarnings}
-            onJunctions={setJunctions}
+            onJunctions={(list, _warnings, pairs) => {
+              setJunctions(list);
+              setOffsetPairs(pairs);
+            }}
             junctionOverrides={junctionOverrides}
             defaultCornerRadiusMeters={defaultCornerRadiusMeters}
             trimAtJunctions={trimAtJunctions}
+            junctionMergeSlackMeters={junctionMergeSlackMeters}
             selectedJunctionKey={selectedJunctionKey}
             onDraftChange={(points, metres) => setDraft({ points: points.length, metres })}
             onDrawComplete={(points) => addStreet(points)}
@@ -935,6 +976,8 @@ export default function MapEditor() {
             </button>
             <JunctionInspector
               junction={selectedJunction}
+              sections={streetSections}
+              offsetNeighbours={offsetNeighbours}
               units={units}
               streetNames={streetNames}
               override={junctionOverrides[selectedJunction.key]}
@@ -1157,6 +1200,7 @@ export default function MapEditor() {
                 onDirection={(id, d) => setDirection('street', id, d)}
                 onMove={(id, delta) => moveComponent('street', id, delta)}
                 onRemove={(id) => removeComponent('street', id)}
+                onMarkings={(id, patch) => setComponentMarkings('street', id, patch)}
               />
             </section>
 

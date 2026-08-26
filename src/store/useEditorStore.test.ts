@@ -178,3 +178,35 @@ describe('cloneSection', () => {
     expect(copy.components.map((c) => c.id)).not.toEqual(source.components.map((c) => c.id));
   });
 });
+
+describe('setComponentMarkings', () => {
+  it('sets a symbol, and clears it back to the default rather than to nothing', () => {
+    const street = useEditorStore.getState().streets[0]!;
+    useEditorStore.getState().selectStreet(street.id);
+    const component = street.section.components[0]!;
+
+    useEditorStore.getState().setComponentMarkings('street', component.id, { glyph: 'sharrow' });
+    const marked = useEditorStore.getState().streets[0]!.section.components[0]!;
+    expect(marked.glyph).toBe('sharrow');
+
+    // Clearing has to remove the key, not write `undefined` into it: a key that is present
+    // and undefined survives a JSON round trip as a null and stops meaning "inherit".
+    useEditorStore.getState().setComponentMarkings('street', component.id, { glyph: undefined });
+    const cleared = useEditorStore.getState().streets[0]!.section.components[0]!;
+    expect('glyph' in cleared).toBe(false);
+  });
+
+  it('is one undo step and leaves the other bands alone', () => {
+    const street = useEditorStore.getState().streets[0]!;
+    const before = street.section.components.map((c) => c.glyph);
+
+    useEditorStore
+      .getState()
+      .setComponentMarkings('street', street.section.components[1]!.id, { stripeLeft: 'none' });
+    useEditorStore.getState().undo();
+
+    const after = useEditorStore.getState().streets[0]!.section.components;
+    expect(after.map((c) => c.glyph)).toEqual(before);
+    expect(after[1]!.stripeLeft).toBeUndefined();
+  });
+});

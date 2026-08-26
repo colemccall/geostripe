@@ -1,5 +1,7 @@
-import { PRIMITIVES } from '../library/primitives';
+import { DEFAULT_LANE_GLYPHS, PRIMITIVES } from '../library/primitives';
 import type { Direction } from '../library/primitives';
+import { GLYPHS, GLYPH_IDS } from '../geo/glyphs';
+import { STRIPE_LABELS, STRIPE_STYLES, stripeBetween } from '../geo/markings';
 import type { SectionComponent } from '../model/types';
 import { displayToMetres, formatWidth, stepFor } from '../lib/units';
 import type { DisplayUnits } from '../lib/units';
@@ -28,6 +30,11 @@ interface Props {
   onDirection: (id: string, direction: Direction) => void;
   onMove: (id: string, delta: number) => void;
   onRemove: (id: string) => void;
+  /** Markings for the selected band. Omitted where the caller has no use for them. */
+  onMarkings?: (
+    id: string,
+    patch: Pick<Partial<SectionComponent>, 'glyph' | 'glyphSpacingMeters' | 'stripeLeft'>,
+  ) => void;
 }
 
 export default function ComponentStack({
@@ -39,6 +46,7 @@ export default function ComponentStack({
   onDirection,
   onMove,
   onRemove,
+  onMarkings,
 }: Props) {
   if (components.length === 0) {
     return <p className="empty-note">No components. Add one from the library on the left.</p>;
@@ -120,6 +128,86 @@ export default function ComponentStack({
             >
               ×
             </button>
+
+            {selected && onMarkings && (
+              <div className="row-markings">
+                <label className="field">
+                  <span className="label">Symbol</span>
+                  <select
+                    className="text-input"
+                    value={c.glyph ?? ''}
+                    onChange={(e) =>
+                      onMarkings(c.id, {
+                        glyph: e.target.value === '' ? undefined : (e.target.value as never),
+                      })
+                    }
+                  >
+                    {/* Three states, not two: inherit, deliberately bare, or a choice. */}
+                    <option value="">
+                      Default
+                      {DEFAULT_LANE_GLYPHS[c.componentType]
+                        ? ` — ${GLYPHS[DEFAULT_LANE_GLYPHS[c.componentType]!.glyph].label}`
+                        : ' — none'}
+                    </option>
+                    <option value="none">No symbol</option>
+                    {GLYPH_IDS.map((id) => (
+                      <option key={id} value={id}>
+                        {GLYPHS[id].label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="field">
+                  <span className="label">Every (m)</span>
+                  <input
+                    className="text-input mono"
+                    type="number"
+                    min={2}
+                    max={400}
+                    step={1}
+                    placeholder={String(DEFAULT_LANE_GLYPHS[c.componentType]?.spacingMeters ?? 30)}
+                    value={c.glyphSpacingMeters ?? ''}
+                    onChange={(e) => {
+                      const value = Number(e.target.value);
+                      onMarkings(c.id, {
+                        glyphSpacingMeters:
+                          e.target.value === '' || !Number.isFinite(value) || value < 2
+                            ? undefined
+                            : value,
+                      });
+                    }}
+                  />
+                </label>
+
+                {i > 0 && (
+                  <label className="field">
+                    <span className="label">Line on its left</span>
+                    <select
+                      className="text-input"
+                      value={c.stripeLeft ?? ''}
+                      onChange={(e) =>
+                        onMarkings(c.id, {
+                          stripeLeft:
+                            e.target.value === ''
+                              ? undefined
+                              : (e.target.value as NonNullable<SectionComponent['stripeLeft']>),
+                        })
+                      }
+                    >
+                      <option value="">
+                        Default — {STRIPE_LABELS[stripeBetween(components[i - 1]!, c).style]}
+                      </option>
+                      {STRIPE_STYLES.map((style) => (
+                        <option key={style} value={style}>
+                          {STRIPE_LABELS[style]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+              </div>
+            )}
           </li>
         );
       })}
