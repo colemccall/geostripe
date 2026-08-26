@@ -29,6 +29,9 @@ import PrimitivePalette from '../components/PrimitivePalette';
 import LandcoverPalette from '../components/LandcoverPalette';
 import TemplatePicker from '../components/TemplatePicker';
 import JunctionInspector from '../components/JunctionInspector';
+import MapDock from '../components/MapDock';
+import MapViewControls from '../components/MapViewControls';
+import SelectionStrip from '../components/SelectionStrip';
 import NoticeBar from '../components/NoticeBar';
 
 /**
@@ -58,29 +61,33 @@ const CURVE_MODES: { id: CurveMode; label: string; hint: string }[] = [
   },
 ];
 
-const TOOLS: { id: Tool; label: string; key: string; hint: string }[] = [
+const TOOLS: { id: Tool; label: string; key: string; hint: string; icon: string }[] = [
   {
     id: 'select',
     label: 'Select',
     key: 'V',
+    icon: '↖',
     hint: 'Click a band to select it. Drag a vertex to reshape, alt-click one to remove it, drag a hollow handle to add one.',
   },
   {
     id: 'draw',
     label: 'Draw street',
     key: 'D',
+    icon: '╱',
     hint: 'Click along the centerline; points snap to lines already drawn. Shift adds 15° angle snapping, Alt turns snapping off. Enter or double-click finishes, Backspace removes the last point, Esc cancels.',
   },
   {
     id: 'area',
     label: 'Land',
     key: 'A',
+    icon: '▰',
     hint: 'Click around a patch of ground to cover it; points snap to what is already drawn, and Alt turns that off. Enter or double-click closes the shape, Esc cancels.',
   },
   {
     id: 'measure',
     label: 'Measure',
     key: 'M',
+    icon: '⟺',
     hint: 'Click two points to measure the real street — usually kerb to kerb. Both ends snap to lines already drawn; Alt turns that off.',
   },
 ];
@@ -108,6 +115,13 @@ export default function MapEditor() {
   const trimAtJunctions = useEditorStore((s) => s.trimAtJunctions);
   const junctionMergeSlackMeters = useEditorStore((s) => s.junctionMergeSlackMeters);
   const showAllCenterlines = useEditorStore((s) => s.showAllCenterlines);
+  const layerVisibility = useEditorStore((s) => s.layerVisibility);
+  const imageryOpacity = useEditorStore((s) => s.imageryOpacity);
+  const railOpen = useEditorStore((s) => s.railOpen);
+  // Subscribed rather than read once: the dock's undo button has to grey out the moment
+  // there is nothing left to undo, which is a re-render, not a snapshot.
+  const canUndo = useEditorStore((s) => s.past.length > 0);
+  const canRedo = useEditorStore((s) => s.future.length > 0);
   const draftSection = useEditorStore((s) => s.draftSection);
   const recentComponentTypes = useEditorStore((s) => s.recentComponentTypes);
   const recentTemplateIds = useEditorStore((s) => s.recentTemplateIds);
@@ -149,6 +163,11 @@ export default function MapEditor() {
     setTrimAtJunctions,
     setJunctionMergeSlack,
     setShowAllCenterlines,
+    setLayerVisible,
+    setImageryOpacity,
+    setRailOpen,
+    undo,
+    redo,
     beginGesture,
     endGesture,
     moveVertexLive,
@@ -336,7 +355,7 @@ export default function MapEditor() {
   // ------------------------------------------------------------------------ rendering
 
   return (
-    <div className="workspace-grid">
+    <div className={`workspace-grid${railOpen ? '' : ' is-collapsed'}`}>
       {/* ---------------------------------------------------------------- left rail */}
       <aside className="rail">
         <section className="panel">
@@ -650,142 +669,214 @@ export default function MapEditor() {
       <main className="stage">
         <NoticeBar notice={notice} onDismiss={() => setNotice(null)} />
 
-        <div className="toolbar">
-          <div className="segmented" role="group" aria-label="Map tool">
-            {TOOLS.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                aria-pressed={tool === t.id}
-                title={`${t.hint} (${t.key})`}
-                onClick={() => setTool(t.id)}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-
-          {tool === 'draw' && (
-            <>
-              <label className="control">
-                <span className="label">Section</span>
-                <select
-                  className="select"
-                  value={drawSectionId}
-                  onChange={(e) => setDrawSectionId(e.target.value)}
-                >
-                  {TEMPLATE_CATEGORIES.map((group) => (
-                    <optgroup key={group.id} label={group.label}>
-                      {TEMPLATES.filter((t) => t.category === group.id).map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.label}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                  <option value={DRAFT_SECTION}>Asset builder — {draftSection.name}</option>
-                </select>
-              </label>
-              <span className="pill pill-note mono">
-                {draft.points} pt ·{' '}
-                {formatWidth(draft.metres, units, { decimals: 0, withUnit: true })}
-              </span>
-              <button
-                type="button"
-                className="btn btn-solid"
-                disabled={draft.points < 2}
-                onClick={() => mapRef.current?.finishDraw()}
-              >
-                Finish
-              </button>
-              <button
-                type="button"
-                className="btn btn-ghost"
-                disabled={draft.points === 0}
-                onClick={() => mapRef.current?.undoDraftPoint()}
-              >
-                Undo point
-              </button>
-            </>
-          )}
-
-          {tool === 'area' && (
-            <>
-              <label className="control">
-                <span className="label">Land type</span>
-                <LandcoverPalette
-                  value={drawLandcover}
-                  onChange={setDrawLandcover}
-                  variant="compact"
-                />
-              </label>
-              <span className="pill pill-note mono">{draft.points} pt</span>
-              <button
-                type="button"
-                className="btn btn-solid"
-                disabled={draft.points < 3}
-                onClick={() => mapRef.current?.finishDraw()}
-              >
-                Close shape
-              </button>
-              <button
-                type="button"
-                className="btn btn-ghost"
-                disabled={draft.points === 0}
-                onClick={() => mapRef.current?.undoDraftPoint()}
-              >
-                Undo point
-              </button>
-            </>
-          )}
-
-          {tool === 'measure' && (
-            <>
-              <span className="pill pill-note mono">
-                {measure && measure.points >= 2
-                  ? formatWidth(measure.metres, units, { withUnit: true })
-                  : 'click two points'}
-              </span>
-              <button
-                type="button"
-                className="btn btn-solid"
-                disabled={!street || !measure || measure.points < 2 || measure.metres <= 0}
-                onClick={() => {
-                  if (!street || !measure) return;
-                  setExistingWidth(street.id, measure.metres);
-                  setNotice({
-                    kind: 'success',
-                    title: `Right-of-way set to ${formatWidth(measure.metres, units, {
-                      withUnit: true,
-                    })}`,
-                  });
-                }}
-              >
-                Use as right-of-way
-              </button>
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={() => mapRef.current?.clearMeasure()}
-              >
-                Clear
-              </button>
-            </>
-          )}
-
-          <div className="spacer" />
-
-          <button
-            type="button"
-            className="btn btn-pill"
-            aria-pressed={swipe !== null}
-            onClick={() => setSwipe(swipe === null ? 0.5 : null)}
-          >
-            {swipe === null ? 'Compare with existing' : 'Show full design'}
-          </button>
-        </div>
-
         <div className="map-wrap" ref={mapWrapRef}>
+          {/* Rendered only when the active tool has something to say — an empty strip
+              sitting over the imagery is worse than no strip. */}
+          {tool !== 'select' && (
+          <div className="toolbar is-floating">
+            {tool === 'draw' && (
+              <>
+                <label className="control">
+                  <span className="label">Section</span>
+                  <select
+                    className="select"
+                    value={drawSectionId}
+                    onChange={(e) => setDrawSectionId(e.target.value)}
+                  >
+                    {TEMPLATE_CATEGORIES.map((group) => (
+                      <optgroup key={group.id} label={group.label}>
+                        {TEMPLATES.filter((t) => t.category === group.id).map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.label}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                    <option value={DRAFT_SECTION}>Asset builder — {draftSection.name}</option>
+                  </select>
+                </label>
+                <span className="pill pill-note mono">
+                  {draft.points} pt ·{' '}
+                  {formatWidth(draft.metres, units, { decimals: 0, withUnit: true })}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-solid"
+                  disabled={draft.points < 2}
+                  onClick={() => mapRef.current?.finishDraw()}
+                >
+                  Finish
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={draft.points === 0}
+                  onClick={() => mapRef.current?.undoDraftPoint()}
+                >
+                  Undo point
+                </button>
+              </>
+            )}
+
+            {tool === 'area' && (
+              <>
+                <label className="control">
+                  <span className="label">Land type</span>
+                  <LandcoverPalette
+                    value={drawLandcover}
+                    onChange={setDrawLandcover}
+                    variant="compact"
+                  />
+                </label>
+                <span className="pill pill-note mono">{draft.points} pt</span>
+                <button
+                  type="button"
+                  className="btn btn-solid"
+                  disabled={draft.points < 3}
+                  onClick={() => mapRef.current?.finishDraw()}
+                >
+                  Close shape
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={draft.points === 0}
+                  onClick={() => mapRef.current?.undoDraftPoint()}
+                >
+                  Undo point
+                </button>
+              </>
+            )}
+
+            {tool === 'measure' && (
+              <>
+                <span className="pill pill-note mono">
+                  {measure && measure.points >= 2
+                    ? formatWidth(measure.metres, units, { withUnit: true })
+                    : 'click two points'}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-solid"
+                  disabled={!street || !measure || measure.points < 2 || measure.metres <= 0}
+                  onClick={() => {
+                    if (!street || !measure) return;
+                    setExistingWidth(street.id, measure.metres);
+                    setNotice({
+                      kind: 'success',
+                      title: `Right-of-way set to ${formatWidth(measure.metres, units, {
+                        withUnit: true,
+                      })}`,
+                    });
+                  }}
+                >
+                  Use as right-of-way
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => mapRef.current?.clearMeasure()}
+                >
+                  Clear
+                </button>
+              </>
+            )}
+
+          </div>
+          )}
+          <MapDock
+            tools={TOOLS}
+            activeTool={tool}
+            onTool={(id) => setTool(id as Tool)}
+            railOpen={railOpen}
+            onRail={setRailOpen}
+            actions={[
+              {
+                id: 'frame',
+                label: 'Frame the selection',
+                icon: '⌖',
+                hint: 'Zoom to whatever is selected',
+                disabled: !street && !area && !selectedJunction,
+                onClick: () => {
+                  if (street) mapRef.current?.zoomTo(street.centerline);
+                  else if (area) mapRef.current?.zoomTo(area.ring);
+                  else if (selectedJunction) mapRef.current?.zoomTo([selectedJunction.position]);
+                },
+              },
+              {
+                id: 'duplicate',
+                label: 'Duplicate',
+                icon: '⧉',
+                hint: 'Copy the selected street or land cover',
+                disabled: !street && !area,
+                onClick: () => {
+                  if (street) duplicateStreet(street.id);
+                  else if (area) duplicateArea(area.id);
+                },
+              },
+              {
+                id: 'mirror',
+                label: 'Mirror the section',
+                icon: '⇄',
+                hint: 'Flip the cross-section end for end',
+                disabled: !street,
+                onClick: () => mirrorSection('street'),
+              },
+              {
+                id: 'hide',
+                label: street?.visible === false || area?.visible === false ? 'Show' : 'Hide',
+                icon: street?.visible === false || area?.visible === false ? '○' : '◉',
+                hint: 'Hide it without deleting it',
+                disabled: !street && !area,
+                onClick: () => {
+                  if (street) toggleStreetVisible(street.id);
+                  else if (area) toggleAreaVisible(area.id);
+                },
+              },
+              {
+                id: 'delete',
+                label: 'Delete',
+                icon: '×',
+                hint: 'Remove the selection. Ctrl+Z brings it back.',
+                danger: true,
+                disabled: !street && !area,
+                onClick: () => {
+                  if (street) removeStreet(street.id);
+                  else if (area) removeArea(area.id);
+                },
+              },
+            ]}
+            history={[
+              {
+                id: 'undo',
+                label: 'Undo',
+                icon: '↶',
+                hint: 'Ctrl+Z',
+                disabled: !canUndo,
+                onClick: undo,
+              },
+              {
+                id: 'redo',
+                label: 'Redo',
+                icon: '↷',
+                hint: 'Ctrl+Shift+Z',
+                disabled: !canRedo,
+                onClick: redo,
+              },
+            ]}
+          />
+
+          <MapViewControls
+            visibility={layerVisibility}
+            onVisibility={setLayerVisible}
+            imageryOpacity={imageryOpacity}
+            onImageryOpacity={setImageryOpacity}
+            onZoom={(delta) => mapRef.current?.zoomBy(delta)}
+            onFitAll={() => mapRef.current?.zoomToAll()}
+            swipe={swipe}
+            onSwipe={setSwipe}
+          />
+
           <MapCanvas
             ref={mapRef}
             basemapId={basemapId}
@@ -810,6 +901,8 @@ export default function MapEditor() {
             trimAtJunctions={trimAtJunctions}
             junctionMergeSlackMeters={junctionMergeSlackMeters}
             showAllCenterlines={showAllCenterlines}
+            layerVisibility={layerVisibility}
+            imageryOpacity={imageryOpacity}
             selectedJunctionKey={selectedJunctionKey}
             onDraftChange={(points, metres) => setDraft({ points: points.length, metres })}
             onDrawComplete={(points) => addStreet(points)}
@@ -861,6 +954,40 @@ export default function MapEditor() {
               <span className="swipe-tag swipe-tag-left">existing</span>
               <span className="swipe-tag swipe-tag-right">redesign</span>
             </div>
+          )}
+
+          {/* What is selected, and the number the design has to answer to, under the
+              thing it describes rather than in a panel a glance away. */}
+          {tool === 'select' && (street || area || selectedJunction) && (
+            <SelectionStrip
+              units={units}
+              kind={street ? 'street' : area ? 'land' : 'junction'}
+              name={
+                street?.name ??
+                area?.name ??
+                (selectedJunction
+                  ? selectedJunction.legs
+                      .map((leg) => streetNames[leg.streetId] ?? 'Street')
+                      .filter((n, i, all) => all.indexOf(n) === i)
+                      .join(' × ')
+                  : '')
+              }
+              section={street?.section ?? null}
+              fit={street ? fit : null}
+              crossingMeters={
+                selectedJunction
+                  ? Math.max(...selectedJunction.legs.map((l) => l.crossingDistanceMeters))
+                  : null
+              }
+              onRename={
+                street
+                  ? (value) => renameStreet(street.id, value)
+                  : area
+                    ? (value) => renameArea(area.id, value)
+                    : undefined
+              }
+              onOpenPanel={() => setRailOpen(true)}
+            />
           )}
 
           {/* Only while a modal tool is active — a permanent hint just covers imagery. */}

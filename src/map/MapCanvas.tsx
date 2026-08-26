@@ -13,6 +13,8 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { basemapById, tileUrlsFor, unconfiguredReason } from './basemaps';
 import type { BasemapId, TileSourceOptions } from './basemaps';
 import { buildDesignData, clipEastOf, clipLinesEastOf } from './designLayers';
+import { LAYER_GROUPS } from './layerGroups';
+import type { LayerGroupId } from './layerGroups';
 import type { DesignData } from './designLayers';
 import type { JunctionOverride } from '../geo/derived';
 import { distanceMeters, lineLengthMeters } from '../geo/measure';
@@ -85,6 +87,10 @@ export interface MapHandle {
   undoDraftPoint: () => void;
   clearMeasure: () => void;
   zoomTo: (centerline: readonly LngLat[]) => void;
+  /** Step the zoom, for on-map buttons. MapLibre animates both. */
+  zoomBy: (delta: number) => void;
+  /** Frame everything drawn. Does nothing when there is nothing to frame. */
+  zoomToAll: () => void;
 }
 
 interface Props {
@@ -117,8 +123,13 @@ interface Props {
   defaultCornerRadiusMeters?: number;
   trimAtJunctions?: boolean;
   junctionMergeSlackMeters?: number;
+  mergeBelowDegrees?: number;
   selectedJunctionKey?: string | null;
   showAllCenterlines?: boolean;
+  /** Which groups of layers are drawn. Missing or true means visible. */
+  layerVisibility?: Partial<Record<LayerGroupId, boolean>>;
+  /** Imagery opacity, 0 to 1. Fading it back is how a design is checked against the trace. */
+  imageryOpacity?: number;
 
   // ---- drawing
   /** Committed draft vertices and their running length, for the toolbar readout. */
@@ -514,8 +525,11 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     defaultCornerRadiusMeters,
     trimAtJunctions,
     junctionMergeSlackMeters,
+    mergeBelowDegrees,
     selectedJunctionKey,
     showAllCenterlines,
+    layerVisibility,
+    imageryOpacity,
     onDraftChange,
     onDrawComplete,
     onGestureStart,
@@ -553,8 +567,11 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     defaultCornerRadiusMeters,
     trimAtJunctions,
     junctionMergeSlackMeters,
+    mergeBelowDegrees,
     selectedJunctionKey,
     showAllCenterlines,
+    layerVisibility,
+    imageryOpacity,
     onDraftChange,
     onDrawComplete,
     onGestureStart,
@@ -660,6 +677,33 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
       cancelDraw,
       undoDraftPoint,
       clearMeasure,
+      zoomBy: (delta) => mapRef.current?.easeTo({ zoom: (mapRef.current.getZoom() ?? 0) + delta }),
+      zoomToAll: () => {
+        const map = mapRef.current;
+        if (!map) return;
+        const points = [
+          ...latest.current.streets.flatMap((street) => street.centerline),
+          ...(latest.current.areas ?? []).flatMap((area) => area.ring),
+        ];
+        if (points.length === 0) return;
+        let minLng = Infinity;
+        let minLat = Infinity;
+        let maxLng = -Infinity;
+        let maxLat = -Infinity;
+        for (const [lng, lat] of points) {
+          minLng = Math.min(minLng, lng);
+          maxLng = Math.max(maxLng, lng);
+          minLat = Math.min(minLat, lat);
+          maxLat = Math.max(maxLat, lat);
+        }
+        map.fitBounds(
+          [
+            [minLng, minLat],
+            [maxLng, maxLat],
+          ],
+          { padding: 90, maxZoom: 19, duration: 600 },
+        );
+      },
       zoomTo: (centerline) => {
         const map = mapRef.current;
         if (!map || centerline.length === 0) return;
@@ -684,6 +728,39 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     }),
     [finishDraw, cancelDraw, undoDraftPoint, clearMeasure],
   );
+
+  /**
+   * Show and hide whole groups of layers.
+   *
+   * Runs on every change of the toggles and after every style load, because a basemap
+   * switch rebuilds the style and takes the layers with it — a toggle applied once at
+   * click time would silently come back on the next imagery change.
+   */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    for (const group of LAYER_GROUPS) {
+      const visible = layerVisibility?.[group.id] ?? true;
+      for (const id of group.layers) {
+        if (!map.getLayer(id)) continue;
+        try {
+          map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none');
+        } catch {
+          // A layer the current style does not have is not an error worth surfacing.
+        }
+      }
+    }
+  }, [layerVisibility, ready, basemapId]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready || !map.getLayer('basemap')) return;
+    try {
+      map.setPaintProperty('basemap', 'raster-opacity', imageryOpacity ?? 1);
+    } catch {
+      // Same: a style without a basemap layer is a configuration state, not a fault.
+    }
+  }, [imageryOpacity, ready, basemapId]);
 
   /** Rebuild derived geometry and push it to the map, applying the swipe clip. */
   const refresh = useCallback(() => {
@@ -717,6 +794,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
       defaultCornerRadiusMeters: latest.current.defaultCornerRadiusMeters,
       trimAtJunctions: latest.current.trimAtJunctions,
       junctionMergeSlackMeters: latest.current.junctionMergeSlackMeters,
+      mergeBelowDegrees: latest.current.mergeBelowDegrees,
       selectedJunctionKey: latest.current.selectedJunctionKey,
       showAllCenterlines: latest.current.showAllCenterlines,
     });
@@ -1192,8 +1270,11 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     defaultCornerRadiusMeters,
     trimAtJunctions,
     junctionMergeSlackMeters,
+    mergeBelowDegrees,
     selectedJunctionKey,
     showAllCenterlines,
+    layerVisibility,
+    imageryOpacity,
   ]);
 
   // ---- scale bar unit follows the app
