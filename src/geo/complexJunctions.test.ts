@@ -2,6 +2,9 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { deriveProject, resetDerivedCaches } from './derived';
 import type { JunctionOverride } from './derived';
 import { cornerAngle, detectJunctions } from './junctions';
+import { classifyJunction, mergeParts } from './merge';
+import { ringArea } from './intersection';
+import { localPlane } from './projection';
 import { componentsFromSpecs } from '../library/templates';
 import type { ComponentType, Direction } from '../library/primitives';
 import type { Street } from '../model/types';
@@ -377,5 +380,139 @@ describe('lane assignment on a real crossing', () => {
     const derived = deriveProject(list, { overrides });
     const glyphs = derived.approachStamps.map((f) => f.properties?.glyph).sort();
     expect(glyphs).toEqual(['arrowLeft', 'arrowRight', 'arrowThrough', 'arrowThrough']);
+  });
+});
+
+describe('a road that merges rather than crosses', () => {
+  /** A mainline running east-west, with a ramp coming in from the west at `degrees`. */
+  function ramp(degrees: number, length = 120): Street[] {
+    const radians = (degrees * Math.PI) / 180;
+    const start = at(-Math.cos(radians) * length, -Math.sin(radians) * length);
+    return [
+      street('main', [at(-200, 0), at(200, 0)]),
+      street('ramp', [start, at(0, 0)], [
+        ['shoulder', 'none', 1.2],
+        ['rampLane', 'forward', 3.65],
+        ['shoulder', 'none', 2.4],
+      ]),
+    ];
+  }
+
+  it('is read as a merge at a shallow angle and a junction at a square one', () => {
+    // The distinction is the angle and nothing else. A twenty-degree crossroads is not
+    // something anyone draws, so the shallow case is decided rather than asked about.
+    expect(classifyJunction(detectJunctions(ramp(20)).junctions[0]!)).toBe('merge');
+    expect(classifyJunction(detectJunctions(ramp(90)).junctions[0]!)).toBe('intersection');
+  });
+
+  it('measures the angle it comes in at', () => {
+    const parts = mergeParts(detectJunctions(ramp(25)).junctions[0]!);
+    expect(parts).not.toBeNull();
+    expect(parts!.angleDegrees).toBeCloseTo(25, 0);
+  });
+
+  it('is not a merge just because three streets are shallow to each other', () => {
+    // Three streets through one point is a six-legged junction whatever the angles are.
+    const three = [
+      street('a', [at(-150, 0), at(150, 0)]),
+      street('b', [at(-150, -20), at(150, 20)]),
+      street('c', [at(-150, 20), at(150, -20)]),
+    ];
+    for (const junction of detectJunctions(three).junctions) {
+      expect(mergeParts(junction)).toBeNull();
+      expect(classifyJunction(junction)).toBe('intersection');
+    }
+  });
+
+  it('leaves the mainline completely uncut', () => {
+    // The whole reason merges exist as their own form. A junction box across a road that
+    // nothing crosses is a hole where there should be asphalt.
+    const streets = ramp(20);
+    const derived = deriveProject(streets);
+    expect(derived.junctionForms[0]).toBe('merge');
+
+    const mainBands = derived.byStreet.get('main')!.bands;
+    // One unbroken band per component: no split, no MultiPolygon, no hole.
+    expect(mainBands).toHaveLength(streets[0]!.section.components.length);
+    for (const band of mainBands) expect(band.geometry.type).toBe('Polygon');
+  });
+
+  it('fills the taper between the ramp and the road it joins', () => {
+    const derived = deriveProject(ramp(20));
+    const geometry = derived.junctionGeometry[0]!;
+    const plane = localPlane(at(0, 0));
+
+    const ring = geometry.paved.map((p) => plane.toPlane(p));
+    // A long thin wedge: real area, and far longer than a junction box would be.
+    expect(Math.abs(ringArea(ring))).toBeGreaterThan(50);
+
+    const xs = ring.map((p) => p.x);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(20);
+  });
+
+  it('keeps the taper out of the carriageway it joins', () => {
+    // The property the whole boolean exists for, and the one a ray walk got wrong when the
+    // ramp was the wider road: the wedge abuts the mainline's kerb and never crosses it.
+    // Overlap here would draw ramp asphalt over mainline asphalt and, worse, would mean the
+    // hole cut for the merge was eating into a road nothing crosses.
+    const derived = deriveProject(ramp(20));
+    const plane = derived.plane;
+    const centre = plane.toPlane(derived.junctionGeometry[0]!.centre);
+
+    // The mainline runs east-west through the junction with a 3.3 m half-travelway.
+    for (const point of derived.junctionGeometry[0]!.paved) {
+      const local = plane.toPlane(point);
+      expect(Math.abs(local.y - centre.y)).toBeGreaterThan(3.3 - 0.05);
+    }
+  });
+
+  it('cuts the ramp back further the shallower it comes in', () => {
+    // Geometry, not taste: a shallower approach means the ramp's kerbs take longer to
+    // reach the mainline's, so the taper is longer.
+    const shallow = deriveProject(ramp(10)).junctionGeometry[0]!;
+    resetDerivedCaches();
+    const steeper = deriveProject(ramp(30)).junctionGeometry[0]!;
+
+    const stemOf = (g: typeof shallow) =>
+      Math.max(...g.legs.map((leg) => leg.stopOffsetMeters));
+    expect(stemOf(shallow)).toBeGreaterThan(stemOf(steeper));
+  });
+
+  it('gives it a gore, and no crosswalks or stop bars', () => {
+    const derived = deriveProject(ramp(15));
+    expect(derived.crossings.length).toBeGreaterThan(0);
+    for (const crossing of derived.crossings) {
+      expect(crossing.properties?.kind).toBe('stripe');
+    }
+    for (const leg of derived.junctionGeometry[0]!.legs) {
+      expect(leg.hasCrosswalk).toBe(false);
+    }
+  });
+
+  it('warns when the merge is sharp enough to behave like a junction', () => {
+    const derived = deriveProject(ramp(35), { mergeBelowDegrees: 45 });
+    expect(derived.junctionForms[0]).toBe('merge');
+    expect(derived.junctionWarnings.join(' ')).toMatch(/sharp for a merge/);
+  });
+
+  it('can be forced back to a junction, and a junction forced to a merge', () => {
+    const shallow = ramp(20);
+    const key = detectJunctions(shallow).junctions[0]!.key;
+    const forced = deriveProject(shallow, { overrides: { [key]: { form: 'intersection' } } });
+    expect(forced.junctionForms[0]).toBe('intersection');
+    // Forcing it back to a junction does cut the mainline, which is the visible difference.
+    const mainBands = forced.byStreet.get('main')!.bands;
+    expect(mainBands.some((b) => b.geometry.type === 'MultiPolygon')).toBe(true);
+
+    resetDerivedCaches();
+    const square = ramp(70);
+    const squareKey = detectJunctions(square).junctions[0]!.key;
+    const asMerge = deriveProject(square, { overrides: { [squareKey]: { form: 'merge' } } });
+    expect(asMerge.junctionForms[0]).toBe('merge');
+  });
+
+  it('reports the taper overrunning a ramp too short to hold it', () => {
+    const derived = deriveProject(ramp(6, 25));
+    expect(derived.junctionWarnings.join(' ')).toMatch(/only \d+ m long/);
   });
 });

@@ -49,6 +49,14 @@ export interface TemplateDef {
   readonly label: string;
   readonly note: string;
   readonly category: TemplateCategory;
+  /**
+   * The group this preset sits in within its category.
+   *
+   * A plain label rather than an enum, for the same reason the primitives have one: it is
+   * how the library divides for a person browsing it, and a generated family should be
+   * able to name itself without a type change.
+   */
+  readonly family: string;
   readonly specs: readonly Spec[];
 }
 
@@ -155,6 +163,7 @@ for (const lanes of [2, 4, 6]) {
     label: `${lanes} lanes`,
     note: 'as built',
     category: 'existing',
+    family: `${lanes} lanes`,
     specs: symmetric({ lanes }),
   });
   generated.push({
@@ -162,6 +171,7 @@ for (const lanes of [2, 4, 6]) {
     label: `${lanes} lanes + parking both`,
     note: 'as built',
     category: 'existing',
+    family: `${lanes} lanes`,
     specs: symmetric({ lanes, kerbside: ['parkingLaneParallel', 'none'] }),
   });
   generated.push({
@@ -169,6 +179,7 @@ for (const lanes of [2, 4, 6]) {
     label: `${lanes} lanes + center turn`,
     note: 'as built',
     category: 'existing',
+    family: `${lanes} lanes`,
     specs: symmetric({ lanes, centre: ['turnLane', 'both'] }),
   });
   generated.push({
@@ -176,6 +187,7 @@ for (const lanes of [2, 4, 6]) {
     label: `${lanes} lanes + median`,
     note: 'as built',
     category: 'existing',
+    family: `${lanes} lanes`,
     specs: symmetric({ lanes, centre: ['median', 'none'] }),
   });
 }
@@ -192,6 +204,7 @@ for (const [id, label, kerbside] of [
     label: `1+1 + turn + ${label}`,
     note: 'road diet',
     category: 'diet',
+    family: `Two lanes + turn`,
     specs: symmetric({
       lanes: 2,
       laneWidth: NARROW,
@@ -204,21 +217,23 @@ for (const [id, label, kerbside] of [
     label: `2+2 + ${label}`,
     note: 'road diet',
     category: 'diet',
+    family: `Four lanes`,
     specs: symmetric({ lanes: 4, laneWidth: NARROW, kerbside }),
   });
 }
 
 // ---- bike families.
-for (const [id, label, kerbside] of [
-  ['bike-conventional', 'painted bike lane', ['bikeLaneConventional', 'forward'] as Spec],
-  ['bike-buffered', 'buffered bike lane', ['bikeLaneBuffered', 'forward'] as Spec],
-  ['bike-protected', 'protected bike lane', ['bikeLaneProtected', 'forward'] as Spec],
+for (const [id, label, kerbside, family] of [
+  ['bike-conventional', 'painted bike lane', ['bikeLaneConventional', 'forward'] as Spec, 'Painted'],
+  ['bike-buffered', 'buffered bike lane', ['bikeLaneBuffered', 'forward'] as Spec, 'Buffered'],
+  ['bike-protected', 'protected bike lane', ['bikeLaneProtected', 'forward'] as Spec, 'Protected'],
 ] as const) {
   generated.push({
     id: `${id}-plain`,
     label: `1+1 + ${label} both`,
     note: 'bikeway',
     category: 'bike',
+    family,
     specs: symmetric({ lanes: 2, laneWidth: NARROW, kerbside }),
   });
   generated.push({
@@ -226,6 +241,7 @@ for (const [id, label, kerbside] of [
     label: `1+1 + parking + ${label} both`,
     note: 'parking as buffer',
     category: 'bike',
+    family,
     specs: symmetric({
       lanes: 2,
       laneWidth: NARROW,
@@ -242,6 +258,7 @@ for (const lanes of [2, 4]) {
     label: `${lanes} lanes + kerbside bus both`,
     note: 'transit',
     category: 'transit',
+    family: `Kerbside`,
     specs: symmetric({ lanes, laneWidth: NARROW, kerbside: ['busLane', 'forward'] }),
   });
   generated.push({
@@ -249,6 +266,7 @@ for (const lanes of [2, 4]) {
     label: `${lanes} lanes + offset bus both`,
     note: 'transit',
     category: 'transit',
+    family: `Offset`,
     specs: symmetric({
       lanes,
       laneWidth: NARROW,
@@ -268,6 +286,7 @@ for (const [id, label, kerbside] of [
     label: `1+1 + ${label}`,
     note: 'local street',
     category: 'residential',
+    family: 'Local street',
     specs: symmetric({ lanes: 2, laneWidth: 2.9, kerbside, walkWidth: 2.4 }),
   });
 }
@@ -279,6 +298,7 @@ for (const lanes of [4, 6, 8]) {
     label: `Freeway, ${lanes} lanes, barrier median`,
     note: 'AASHTO 12 ft lanes',
     category: 'highway',
+    family: `Freeway`,
     specs: [
       ['soundWall', 'none'],
       ['shoulder', 'none', 3.0],
@@ -296,6 +316,7 @@ for (const lanes of [4, 6, 8]) {
     label: `Freeway, ${lanes} lanes, open median`,
     note: 'AASHTO 12 ft lanes',
     category: 'highway',
+    family: `Freeway`,
     specs: [
       ['shoulder', 'none', 3.0],
       ...Array.from({ length: lanes / 2 }, () => ['freewayLane', 'backward'] as Spec),
@@ -316,6 +337,7 @@ for (const lanes of [2, 4, 6]) {
     label: `${lanes} lanes + shoulder both`,
     note: 'as built',
     category: 'existing',
+    family: `${lanes} lanes`,
     specs: symmetric({ lanes, kerbside: ['shoulder', 'none'] }),
   });
   generated.push({
@@ -323,6 +345,7 @@ for (const lanes of [2, 4, 6]) {
     label: `${lanes} lanes + painted bike both`,
     note: 'as built',
     category: 'existing',
+    family: `${lanes} lanes`,
     specs: symmetric({ lanes, kerbside: ['bikeLaneConventional', 'forward'] }),
   });
 }
@@ -339,6 +362,7 @@ for (const [id, label, kerbside] of [
     label: `1+1 + turn + ${label}`,
     note: 'road diet',
     category: 'diet',
+    family: `Two lanes + turn`,
     specs: symmetric({
       lanes: 2,
       laneWidth: NARROW,
@@ -351,19 +375,21 @@ for (const [id, label, kerbside] of [
     label: `2+2 + ${label}`,
     note: 'road diet',
     category: 'diet',
+    family: `Four lanes`,
     specs: symmetric({ lanes: 4, laneWidth: NARROW, kerbside }),
   });
 }
 
 // ---- bikeways: every separation type, and the buffer that turns paint into protection.
-for (const [id, label, kerbside] of [
-  ['bike-raised', 'raised cycle track', ['cycleTrackRaised', 'forward'] as Spec],
+for (const [id, label, kerbside, family] of [
+  ['bike-raised', 'raised cycle track', ['cycleTrackRaised', 'forward'] as Spec, 'Raised'],
 ] as const) {
   generated.push({
     id: `${id}-plain`,
     label: `1+1 + ${label} both`,
     note: 'bikeway',
     category: 'bike',
+    family,
     specs: symmetric({ lanes: 2, laneWidth: NARROW, kerbside }),
   });
   generated.push({
@@ -371,6 +397,7 @@ for (const [id, label, kerbside] of [
     label: `1+1 + parking + ${label} both`,
     note: 'parking as buffer',
     category: 'bike',
+    family,
     specs: symmetric({
       lanes: 2,
       laneWidth: NARROW,
@@ -380,17 +407,18 @@ for (const [id, label, kerbside] of [
   });
 }
 
-for (const [id, label, kerbside] of [
-  ['bike-conventional', 'painted bike lane', ['bikeLaneConventional', 'forward'] as Spec],
-  ['bike-buffered', 'buffered bike lane', ['bikeLaneBuffered', 'forward'] as Spec],
-  ['bike-protected', 'protected bike lane', ['bikeLaneProtected', 'forward'] as Spec],
-  ['bike-raised', 'raised cycle track', ['cycleTrackRaised', 'forward'] as Spec],
+for (const [id, label, kerbside, family] of [
+  ['bike-conventional', 'painted bike lane', ['bikeLaneConventional', 'forward'] as Spec, 'Painted'],
+  ['bike-buffered', 'buffered bike lane', ['bikeLaneBuffered', 'forward'] as Spec, 'Buffered'],
+  ['bike-protected', 'protected bike lane', ['bikeLaneProtected', 'forward'] as Spec, 'Protected'],
+  ['bike-raised', 'raised cycle track', ['cycleTrackRaised', 'forward'] as Spec, 'Raised'],
 ] as const) {
   generated.push({
     id: `${id}-buffer`,
     label: `1+1 + buffer + ${label} both`,
     note: 'painted separation',
     category: 'bike',
+    family,
     specs: symmetric({
       lanes: 2,
       laneWidth: NARROW,
@@ -406,6 +434,7 @@ generated.push({
   label: '6 lanes + kerbside bus both',
   note: 'transit',
   category: 'transit',
+  family: 'Kerbside',
   specs: symmetric({ lanes: 6, laneWidth: NARROW, kerbside: ['busLane', 'forward'] }),
 });
 generated.push({
@@ -413,6 +442,7 @@ generated.push({
   label: '6 lanes + offset bus both',
   note: 'transit',
   category: 'transit',
+  family: 'Offset',
   specs: symmetric({
     lanes: 6,
     laneWidth: NARROW,
@@ -427,6 +457,7 @@ for (const lanes of [2, 4]) {
     label: `${lanes} lanes + centre busway`,
     note: 'centre-running BRT',
     category: 'transit',
+    family: `Centre-running`,
     specs: [
       walk(),
       ...Array.from({ length: lanes / 2 || 1 }, () => ['travelLane', 'backward', NARROW] as Spec),
@@ -442,6 +473,7 @@ for (const lanes of [2, 4]) {
     label: `${lanes} lanes + tram reservation`,
     note: 'tram on its own alignment',
     category: 'transit',
+    family: `Centre-running`,
     specs: [
       walk(),
       ...Array.from({ length: lanes / 2 || 1 }, () => ['travelLane', 'backward', NARROW] as Spec),
@@ -465,6 +497,7 @@ for (const lanes of [1, 2, 3]) {
       label: `One-way, ${lanes} lane${lanes === 1 ? '' : 's'} + ${label}`,
       note: 'one-way street',
       category: 'downtown',
+      family: 'One-way',
       specs: oneWay({ lanes, laneWidth: NARROW, left, right }),
     });
   }
@@ -482,6 +515,7 @@ for (const lanes of [4, 6]) {
       label: `${lanes} lanes + ${label}`,
       note: 'divided street',
       category: 'downtown',
+      family: 'Boulevard',
       specs: symmetric({
         lanes,
         laneWidth: NARROW,
@@ -502,6 +536,7 @@ for (const [id, label, kerbside] of [
     label: `1+1 + ${label}`,
     note: 'local street',
     category: 'residential',
+    family: 'Local street',
     specs: symmetric({ lanes: 2, laneWidth: 2.9, kerbside, walkWidth: 2.4 }),
   });
 }
@@ -513,6 +548,7 @@ for (const lanes of [10]) {
     label: `Freeway, ${lanes} lanes, barrier median`,
     note: 'AASHTO 12 ft lanes',
     category: 'highway',
+    family: `Freeway`,
     specs: [
       ['soundWall', 'none'],
       ['shoulder', 'none', 3.0],
@@ -533,6 +569,7 @@ for (const lanes of [4, 6, 8]) {
     label: `Freeway, ${lanes} lanes + collector-distributor`,
     note: 'weaving taken off the mainline',
     category: 'highway',
+    family: `Collector-distributor`,
     specs: [
       ['shoulder', 'none', 3.0],
       ['collectorLane', 'backward'],
@@ -562,6 +599,7 @@ for (const [suffix, width, label] of [
     label: `Rural 2 lane, ${label}`,
     note: 'rural highway',
     category: 'rural',
+    family: `Two lane`,
     specs: [
       ['ditch', 'none'],
       ['verge', 'none'],
@@ -581,6 +619,7 @@ generated.push({
   label: 'Tunnel, 1+1',
   note: 'set the street level to tunnel',
   category: 'special',
+  family: 'Grade separated',
   specs: [
     ['retainingWall', 'none'],
     ['gutter', 'none'],
@@ -595,6 +634,7 @@ generated.push({
   label: 'Tunnel, 2+2',
   note: 'set the street level to tunnel',
   category: 'special',
+  family: 'Grade separated',
   specs: [
     ['retainingWall', 'none'],
     ['shoulder', 'none', 1.2],
@@ -613,6 +653,7 @@ for (const lanes of [4, 6]) {
     label: `Viaduct, ${lanes} lanes`,
     note: 'set the street level to overpass',
     category: 'special',
+    family: `Grade separated`,
     specs: [
       ['barrier', 'none'],
       ['shoulder', 'none', 1.5],
@@ -639,6 +680,7 @@ for (const [suffix, width, label] of [
     label: `Shared use path, ${label}`,
     note: 'AASHTO shared use path',
     category: 'path',
+    family: `Shared use path`,
     specs: pathway({ surface: ['sharedUsePath', 'both', width], verge: 1.2 }),
   });
 }
@@ -658,6 +700,7 @@ const authored: TemplateDef[] = [
     label: 'Greenway',
     note: 'off-street path on its own corridor',
     category: 'path',
+    family: `Greenway and trail`,
     specs: [
       ['verge', 'none', 2.0],
       ['pathShoulder', 'none', 0.6],
@@ -671,6 +714,7 @@ const authored: TemplateDef[] = [
     label: 'Separated path — walking and cycling apart',
     note: 'the Dutch answer to a busy shared path',
     category: 'path',
+    family: `Walking`,
     specs: [
       ['verge', 'none', 1.2],
       ['footpath', 'both', 2.4],
@@ -685,6 +729,7 @@ const authored: TemplateDef[] = [
     label: 'Side path beside a road',
     note: 'two-way path on one side; watch the driveways',
     category: 'path',
+    family: `Beside a road or railway`,
     specs: [
       ['travelLane', 'backward'],
       ['travelLane', 'forward'],
@@ -699,6 +744,7 @@ const authored: TemplateDef[] = [
     label: 'Rail trail',
     note: 'a disused rail corridor, already flat and continuous',
     category: 'path',
+    family: `Greenway and trail`,
     specs: [
       ['verge', 'none', 3.0],
       ['pathShoulder', 'none', 0.9],
@@ -712,6 +758,7 @@ const authored: TemplateDef[] = [
     label: 'Rail with trail',
     note: 'a path beside a live railway, with the separation that needs',
     category: 'path',
+    family: `Beside a road or railway`,
     specs: [
       ['railBallast', 'none'],
       ['railTrack', 'none'],
@@ -727,6 +774,7 @@ const authored: TemplateDef[] = [
     label: 'Boardwalk',
     note: 'over wetland or dune; width is a cost decision',
     category: 'path',
+    family: `Structure and lane`,
     specs: [['boardwalk', 'both', 3.0]],
   },
   {
@@ -734,6 +782,7 @@ const authored: TemplateDef[] = [
     label: 'Unpaved trail',
     note: 'crushed stone; cheaper, softer, and not reliably accessible',
     category: 'path',
+    family: `Greenway and trail`,
     specs: [
       ['verge', 'none', 1.5],
       ['trailUnpaved', 'both'],
@@ -745,6 +794,7 @@ const authored: TemplateDef[] = [
     label: 'Canal towpath',
     note: 'flat, continuous and already a corridor',
     category: 'path',
+    family: `Greenway and trail`,
     specs: [
       ['verge', 'none', 1.2],
       ['towpath', 'both'],
@@ -756,6 +806,7 @@ const authored: TemplateDef[] = [
     label: 'Bridleway and path',
     note: 'a soft horse route beside a sealed path',
     category: 'path',
+    family: `Greenway and trail`,
     specs: [
       ['verge', 'none', 1.2],
       ['bridleway', 'both'],
@@ -769,6 +820,7 @@ const authored: TemplateDef[] = [
     label: 'Park path',
     note: 'walking only, planted both sides',
     category: 'path',
+    family: `Walking`,
     specs: [
       ['plantingStrip', 'none', 1.8],
       ['footpath', 'both', 2.4],
@@ -780,6 +832,7 @@ const authored: TemplateDef[] = [
     label: 'Promenade',
     note: 'a walking street in its own right, not a route between two places',
     category: 'path',
+    family: `Walking`,
     specs: [
       ['verge', 'none', 1.2],
       ['footpath', 'both', 6.0],
@@ -792,6 +845,7 @@ const authored: TemplateDef[] = [
     label: 'Quiet lane',
     note: 'a single-track lane where walking and cycling take priority over the car',
     category: 'path',
+    family: `Structure and lane`,
     specs: [
       ['verge', 'none', 1.2],
       ['woonerf', 'both', 4.0],
@@ -805,6 +859,7 @@ const authored: TemplateDef[] = [
     label: 'Cafe street',
     note: 'one lane, wide walking zones, dining in the old parking bays',
     category: 'downtown',
+    family: `Named downtown streets`,
     specs: [
       walk(3.6),
       ['outdoorDining', 'none'],
@@ -819,6 +874,7 @@ const authored: TemplateDef[] = [
     label: 'Shared space',
     note: 'no kerb line, no markings; works only where speeds are genuinely low',
     category: 'downtown',
+    family: `Named downtown streets`,
     specs: [
       ['frontageZone', 'none'],
       ['sharedSpace', 'both', 7.0],
@@ -830,6 +886,7 @@ const authored: TemplateDef[] = [
     label: 'Arcaded street',
     note: 'sheltered footway that costs no street width',
     category: 'downtown',
+    family: `Named downtown streets`,
     specs: [
       ['arcade', 'both'],
       ['furnitureZone', 'none'],
@@ -848,6 +905,7 @@ const authored: TemplateDef[] = [
     label: 'School street',
     note: 'closed to through traffic at drop-off and pick-up',
     category: 'special',
+    family: `One of a kind`,
     specs: [
       walk(3.0),
       ['playStreet', 'both'],
@@ -859,6 +917,7 @@ const authored: TemplateDef[] = [
     label: 'Freight street',
     note: 'wide lanes and real loading, because the deliveries happen either way',
     category: 'special',
+    family: `One of a kind`,
     specs: [
       walk(2.4),
       ['loadingZone', 'none', 3.6],
@@ -873,6 +932,7 @@ const authored: TemplateDef[] = [
     label: 'Floating bus stop',
     note: 'the bike lane passes behind the stop instead of through it',
     category: 'special',
+    family: `One of a kind`,
     specs: [
       walk(),
       ['bikeLaneProtected', 'backward'],
@@ -891,6 +951,7 @@ const authored: TemplateDef[] = [
     label: 'Advisory bike lanes',
     note: 'dashed lanes either side of one shared space; drivers yield to enter',
     category: 'special',
+    family: `One of a kind`,
     specs: [
       walk(2.4),
       ['bikeLaneAdvisory', 'backward'],
@@ -904,6 +965,7 @@ const authored: TemplateDef[] = [
     label: 'Bicycle boulevard',
     note: 'a local street where through traffic is filtered out and bikes are the priority',
     category: 'special',
+    family: `One of a kind`,
     specs: [
       walk(2.4),
       ['parkingLaneParallel', 'none'],
@@ -917,6 +979,7 @@ const authored: TemplateDef[] = [
     label: 'Highway with frontage roads',
     note: 'the arrangement that doubles the crossings a pedestrian faces',
     category: 'highway',
+    family: `Frontage`,
     specs: [
       walk(2.4),
       ['frontageRoad', 'both'],
@@ -940,6 +1003,7 @@ const authored: TemplateDef[] = [
     label: 'Ramp, single lane',
     note: 'a diamond ramp; the shoulder either side is not optional',
     category: 'highway',
+    family: `Ramps`,
     specs: [
       ['guardrail', 'none'],
       ['shoulder', 'none', 1.2],
@@ -953,6 +1017,7 @@ const authored: TemplateDef[] = [
     label: 'Ramp, two lanes',
     note: 'a two-lane exit, usually where the ramp meets a signalised arterial',
     category: 'highway',
+    family: `Ramps`,
     specs: [
       ['guardrail', 'none'],
       ['shoulder', 'none', 1.2],
@@ -967,6 +1032,7 @@ const authored: TemplateDef[] = [
     label: 'Exit with gore',
     note: 'the deceleration lane and the painted gore beside it',
     category: 'highway',
+    family: `Ramps`,
     specs: [
       ['shoulderInner', 'none'],
       ['freewayLane', 'forward'],
@@ -982,6 +1048,7 @@ const authored: TemplateDef[] = [
     label: 'Weaving section',
     note: 'an entrance and the next exit sharing a length of road',
     category: 'highway',
+    family: `Ramps`,
     specs: [
       ['shoulderInner', 'none'],
       ['freewayLane', 'forward'],
@@ -996,6 +1063,7 @@ const authored: TemplateDef[] = [
     label: 'Rural 2 lane + climbing lane',
     note: 'an extra uphill lane so slow vehicles do not hold up the rest',
     category: 'rural',
+    family: `Two lane`,
     specs: [
       ['ditch', 'none'],
       ['shoulder', 'none', 1.2],
@@ -1011,6 +1079,7 @@ const authored: TemplateDef[] = [
     label: 'Alley',
     note: 'the cheapest space left in most cities',
     category: 'residential',
+    family: `Local street`,
     specs: [['alley', 'both']],
   },
   {
@@ -1018,6 +1087,7 @@ const authored: TemplateDef[] = [
     label: 'Existing — 4 lanes + center turn',
     note: 'as built',
     category: 'existing',
+    family: `Named streets`,
     specs: [
       walk(),
       ['travelLane', 'backward'],
@@ -1033,6 +1103,7 @@ const authored: TemplateDef[] = [
     label: '1+1 + turn + protected bike both',
     note: 'road diet',
     category: 'diet',
+    family: `Named diets`,
     specs: [
       walk(),
       ['bikeLaneProtected', 'backward'],
@@ -1048,6 +1119,7 @@ const authored: TemplateDef[] = [
     label: 'Bus lanes both + 1+1',
     note: 'transit',
     category: 'transit',
+    family: `Named transit streets`,
     specs: [
       walk(),
       ['busLane', 'backward'],
@@ -1062,6 +1134,7 @@ const authored: TemplateDef[] = [
     label: '1+1 + parking-protected bike both',
     note: 'parking as buffer',
     category: 'bike',
+    family: `Named bikeways`,
     specs: [
       walk(),
       ['bikeLaneConventional', 'backward'],
@@ -1078,6 +1151,7 @@ const authored: TemplateDef[] = [
     label: '1+1 + planted median + bike both',
     note: 'boulevard',
     category: 'diet',
+    family: `Named diets`,
     specs: [
       walk(),
       ['bikeLaneBuffered', 'backward'],
@@ -1093,6 +1167,7 @@ const authored: TemplateDef[] = [
     label: '1+1 + parking both sides',
     note: 'local street',
     category: 'residential',
+    family: `Local street`,
     specs: [
       walk(),
       ['parkingLaneParallel', 'none'],
@@ -1107,6 +1182,7 @@ const authored: TemplateDef[] = [
     label: 'Main street — wide walk one side',
     note: 'asymmetric',
     category: 'downtown',
+    family: `Named downtown streets`,
     specs: [
       walk(3.7),
       ['parkingLaneParallel', 'none'],
@@ -1121,6 +1197,7 @@ const authored: TemplateDef[] = [
     label: 'One-way, 2 lanes + protected bike',
     note: 'one-way pair',
     category: 'downtown',
+    family: `Named downtown streets`,
     specs: [
       walk(),
       ['bikeLaneProtected', 'forward'],
@@ -1137,6 +1214,7 @@ const authored: TemplateDef[] = [
     label: 'Transit mall',
     note: 'buses and people only',
     category: 'downtown',
+    family: `Named downtown streets`,
     specs: [
       walk(4.5),
       ['busLane', 'backward'],
@@ -1150,6 +1228,7 @@ const authored: TemplateDef[] = [
     label: 'Two-way cycle track one side',
     note: 'downtown',
     category: 'bike',
+    family: `Named bikeways`,
     specs: [
       walk(),
       ['cycleTrackTwoWay', 'both'],
@@ -1165,6 +1244,7 @@ const authored: TemplateDef[] = [
     label: 'Back-in angled parking both',
     note: 'retail street',
     category: 'downtown',
+    family: `Named downtown streets`,
     specs: [
       walk(3.7),
       ['parkingBackInAngled', 'none'],
@@ -1179,6 +1259,7 @@ const authored: TemplateDef[] = [
     label: 'One-way + loading + bike',
     note: 'freight-friendly',
     category: 'downtown',
+    family: `Named downtown streets`,
     specs: [
       walk(),
       ['bikeLaneProtected', 'forward'],
@@ -1194,6 +1275,7 @@ const authored: TemplateDef[] = [
     label: 'Centre busway + 1+1',
     note: 'BRT',
     category: 'transit',
+    family: `Named transit streets`,
     specs: [
       walk(),
       ['travelLane', 'backward', NARROW],
@@ -1207,6 +1289,7 @@ const authored: TemplateDef[] = [
     label: 'Tram reservation + 1+1',
     note: 'light rail',
     category: 'transit',
+    family: `Centre-running`,
     specs: [
       walk(),
       ['travelLane', 'backward', NARROW],
@@ -1220,6 +1303,7 @@ const authored: TemplateDef[] = [
     label: 'Embedded tram + shared lanes',
     note: 'streetcar',
     category: 'transit',
+    family: `Centre-running`,
     specs: [
       walk(),
       ['parkingLaneParallel', 'none'],
@@ -1236,6 +1320,7 @@ const authored: TemplateDef[] = [
     label: 'Bike boulevard',
     note: 'low volume, no lanes',
     category: 'bike',
+    family: `Named bikeways`,
     specs: [
       walk(2.4),
       ['parkingLaneParallel', 'none'],
@@ -1249,6 +1334,7 @@ const authored: TemplateDef[] = [
     label: 'One-way + contraflow bike',
     note: 'undoes a one-way',
     category: 'bike',
+    family: `Named bikeways`,
     specs: [
       walk(),
       ['bikeLaneContraflow', 'backward'],
@@ -1262,6 +1348,7 @@ const authored: TemplateDef[] = [
     label: 'Raised cycle track both',
     note: 'kerb-separated',
     category: 'bike',
+    family: `Named bikeways`,
     specs: [
       walk(2.4),
       ['bikeLaneProtected', 'backward'],
@@ -1280,6 +1367,7 @@ const authored: TemplateDef[] = [
     label: 'On-ramp, single lane',
     note: 'ramp',
     category: 'highway',
+    family: `Named highways`,
     specs: [
       ['shoulder', 'none', 1.8],
       ['rampLane', 'forward'],
@@ -1291,6 +1379,7 @@ const authored: TemplateDef[] = [
     label: 'Ramp, two lanes',
     note: 'ramp',
     category: 'highway',
+    family: `Named highways`,
     specs: [
       ['shoulder', 'none', 1.8],
       ['rampLane', 'forward'],
@@ -1303,6 +1392,7 @@ const authored: TemplateDef[] = [
     label: 'Collector-distributor road',
     note: 'parallel to the mainline',
     category: 'highway',
+    family: `Named highways`,
     specs: [
       ['shoulderInner', 'none'],
       ['auxiliaryLane', 'forward'],
@@ -1315,6 +1405,7 @@ const authored: TemplateDef[] = [
     label: 'Tunnel bore, 2 lanes',
     note: 'set the street level to -1',
     category: 'highway',
+    family: `Named highways`,
     specs: [
       ['barrier', 'none'],
       ['shoulderInner', 'none'],
@@ -1329,6 +1420,7 @@ const authored: TemplateDef[] = [
     label: 'Viaduct deck, 4 lanes',
     note: 'set the street level to +1',
     category: 'highway',
+    family: `Named highways`,
     specs: [
       ['barrier', 'none'],
       ['shoulder', 'none', 2.4],
@@ -1348,6 +1440,7 @@ const authored: TemplateDef[] = [
     label: 'Rural 2-lane + shoulders',
     note: 'rural',
     category: 'rural',
+    family: `Two lane`,
     specs: [
       ['ditch', 'none'],
       ['shoulder', 'none', 2.4],
@@ -1362,6 +1455,7 @@ const authored: TemplateDef[] = [
     label: 'Rural 2-lane + shared use path',
     note: 'rural',
     category: 'rural',
+    family: `Two lane`,
     specs: [
       ['verge', 'none'],
       ['travelLane', 'backward', 3.35],
@@ -1376,6 +1470,7 @@ const authored: TemplateDef[] = [
     label: 'Village gateway',
     note: 'speed transition',
     category: 'rural',
+    family: `Two lane`,
     specs: [
       walk(2.4),
       ['plantingStrip', 'none'],
@@ -1393,6 +1488,7 @@ const authored: TemplateDef[] = [
     label: 'Woonerf / shared street',
     note: 'no kerbs',
     category: 'special',
+    family: `One of a kind`,
     specs: [
       ['frontageZone', 'none'],
       ['treePit', 'none'],
@@ -1406,6 +1502,7 @@ const authored: TemplateDef[] = [
     label: 'Pedestrian mall',
     note: 'no vehicles',
     category: 'special',
+    family: `One of a kind`,
     specs: [
       ['frontageZone', 'none', 1.8],
       ['pedestrianMall', 'none'],
@@ -1417,6 +1514,7 @@ const authored: TemplateDef[] = [
     label: 'Green street with bioswales',
     note: 'stormwater',
     category: 'special',
+    family: `One of a kind`,
     specs: [
       walk(2.4),
       ['bioswale', 'none'],
@@ -1433,6 +1531,7 @@ const authored: TemplateDef[] = [
     label: 'Rail corridor beside a street',
     note: 'shared corridor',
     category: 'special',
+    family: `One of a kind`,
     specs: [
       walk(2.4),
       ['travelLane', 'backward', NARROW],
@@ -1473,6 +1572,27 @@ export function templateTotalWidth(template: TemplateDef): number {
 }
 
 /** Case-insensitive match on label, note, category, or any component it contains. */
+/**
+ * The presets as a two-level tree: category, then family.
+ *
+ * Derived from the data for the same reason the primitive tree is — a preset that belongs
+ * to no listed family would simply vanish from the browser, and nothing would say so.
+ */
+export function templateTree(
+  templates: readonly TemplateDef[] = TEMPLATES,
+): { category: TemplateCategory; label: string; groups: { label: string; items: TemplateDef[] }[] }[] {
+  return TEMPLATE_CATEGORIES.map((category) => {
+    const members = templates.filter((template) => template.category === category.id);
+    const groups: { label: string; items: TemplateDef[] }[] = [];
+    for (const template of members) {
+      const existing = groups.find((group) => group.label === template.family);
+      if (existing) existing.items.push(template);
+      else groups.push({ label: template.family, items: [template] });
+    }
+    return { category: category.id, label: category.label, groups };
+  }).filter((entry) => entry.groups.length > 0);
+}
+
 export function searchTemplates(query: string): TemplateDef[] {
   const q = query.trim().toLowerCase();
   if (!q) return [...TEMPLATES];

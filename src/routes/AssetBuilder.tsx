@@ -26,6 +26,8 @@ import NoticeBar from '../components/NoticeBar';
 export default function AssetBuilder() {
   const section = useEditorStore((s) => s.draftSection);
   const units = useEditorStore((s) => s.units);
+  const recentComponentTypes = useEditorStore((s) => s.recentComponentTypes);
+  const recentTemplateIds = useEditorStore((s) => s.recentTemplateIds);
   const selectedId = useEditorStore((s) => s.selectedComponentId);
   const notice = useEditorStore((s) => s.notice);
 
@@ -35,6 +37,8 @@ export default function AssetBuilder() {
     setWidth,
     setDirection,
     setComponentMarkings,
+    duplicateComponent,
+    mirrorSection,
     moveComponent,
     selectComponent,
     renameSection,
@@ -84,7 +88,11 @@ export default function AssetBuilder() {
           <header className="panel-head">
             <span className="label">Lane primitives</span>
           </header>
-          <PrimitivePalette units={units} onAdd={(type) => addComponent('draft', type)} />
+          <PrimitivePalette
+                units={units}
+                recent={recentComponentTypes}
+                onAdd={(type) => addComponent('draft', type)}
+              />
           <p className="hint">
             Defaults come from NACTO guidance and are starting values, never constraints.
           </p>
@@ -95,6 +103,7 @@ export default function AssetBuilder() {
             <span className="label">Start from a template</span>
           </header>
           <TemplatePicker
+            recent={recentTemplateIds}
             units={units}
             onPick={(t) => applyTemplate('draft', t.id)}
           />
@@ -195,8 +204,14 @@ export default function AssetBuilder() {
             onDirection={(id, d) => setDirection('draft', id, d)}
             onMove={(id, delta) => moveComponent('draft', id, delta)}
             onRemove={(id) => removeComponent('draft', id)}
+            onDuplicate={(id) => duplicateComponent('draft', id)}
             onMarkings={(id, patch) => setComponentMarkings('draft', id, patch)}
           />
+          <div className="btn-row">
+            <button type="button" className="btn btn-ghost" onClick={() => mirrorSection('draft')}>
+              Mirror the section
+            </button>
+          </div>
         </section>
 
         <section className="panel">

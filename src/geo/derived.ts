@@ -17,6 +17,8 @@ import { pruneResolvedCache, resolveCenterline } from './curve';
 import type { CurveSettings } from './curve';
 import type { Junction } from './junctions';
 import { DEFAULT_CORNER_RADIUS_METRES, junctionGeometry } from './intersection';
+import { classifyJunction, mergeGeometry } from './merge';
+import type { JunctionForm } from './merge';
 import type {
   CornerTreatment,
   CrosswalkSpec,
@@ -67,6 +69,8 @@ export interface DerivedProject {
   junctionGeometry: JunctionGeometry[];
   /** Crosswalk stripes, edge lines, raised tables and stop bars, ready to draw. */
   crossings: Feature[];
+  /** How each junction was read, aligned with `junctions`. */
+  junctionForms: JunctionForm[];
   /** Lane-use arrows on junction approaches, and the turn pockets they belong to. */
   approachStamps: Feature[];
   /** Extra approach lanes added at a junction, drawn as bands. */
@@ -144,6 +148,17 @@ export interface OffsetPair {
 export interface JunctionOverride {
   corners?: (CornerOverride | null)[];
   legs?: (LegOverride | null)[];
+  /**
+   * Force how this junction is read.
+   *
+   * Absent means "decide from the geometry", which is right nearly always: a road joining
+   * another at twenty degrees is a merge and nobody drew a twenty-degree crossroads. The
+   * override is for the ambiguous band around thirty degrees, where whether traffic yields
+   * or merges is a fact about the place that the shape cannot show.
+   */
+  form?: JunctionForm;
+  /** A yield line across the joining road. Only meaningful on a merge. */
+  yieldLine?: boolean;
 }
 
 export interface DeriveOptions {
@@ -151,6 +166,14 @@ export interface DeriveOptions {
   defaultCornerRadiusMeters?: number;
   /** Off by default so the feature can be turned off wholesale if it misbehaves. */
   trimAtJunctions?: boolean;
+  /**
+   * Below this angle a road joining another is drawn as a merge rather than a junction.
+   *
+   * Exposed because the honest threshold depends on what is being drawn: a motorway
+   * interchange merges at five degrees, a suburban slip road at thirty, and a service road
+   * that meets its arterial at forty is arguable either way.
+   */
+  mergeBelowDegrees?: number;
   /**
    * Slack on the radius at which nearby crossings are treated as one junction.
    *
@@ -214,7 +237,12 @@ interface GeometryEntry {
 const geometryCache = new Map<string, GeometryEntry>();
 
 /** Everything the geometry depends on, rounded to a tenth of a millimetre. */
-function signatureOf(junction: Junction, override: JunctionOverride | undefined, radius: number): string {
+function signatureOf(
+  junction: Junction,
+  override: JunctionOverride | undefined,
+  radius: number,
+  form: JunctionForm,
+): string {
   const legs = junction.legs
     .map((l) =>
       [
@@ -233,6 +261,7 @@ function signatureOf(junction: Junction, override: JunctionOverride | undefined,
     junction.position[1].toFixed(9),
     legs,
     radius,
+    form,
     JSON.stringify(override ?? null),
   ].join('#');
 }
@@ -242,10 +271,22 @@ function geometryFor(
   plane: LocalPlane,
   override: JunctionOverride | undefined,
   defaultRadius: number,
+  form: JunctionForm,
 ): GeometryEntry {
-  const signature = signatureOf(junction, override, defaultRadius);
+  const signature = signatureOf(junction, override, defaultRadius, form);
   const hit = geometryCache.get(junction.key);
   if (hit && hit.signature === signature) return hit;
+
+  if (form === 'merge') {
+    const merged = mergeGeometry(junction, plane, { yieldLine: override?.yieldLine });
+    // Null means the parts do not make a merge after all — a junction is the safe answer,
+    // and a silently empty one would just make the streets overlap.
+    if (merged) {
+      const entry: GeometryEntry = { signature, geometry: merged };
+      geometryCache.set(junction.key, entry);
+      return entry;
+    }
+  }
 
   const geometry = junctionGeometry(junction, plane, {
     defaultRadiusMeters: defaultRadius,
@@ -621,6 +662,7 @@ export function deriveProject(
     defaultCornerRadiusMeters = DEFAULT_CORNER_RADIUS_METRES,
     trimAtJunctions = true,
     junctionMergeSlackMeters = 0,
+    mergeBelowDegrees = 40,
   } = options;
 
   const visible = streets.filter((s) => s.visible);
@@ -636,9 +678,23 @@ export function deriveProject(
     ? junctions.map((junction) => withFlares(junction, overrides?.[junction.key]))
     : junctions;
 
+  // Form is decided on the FLARED legs, not the raw ones: adding a turn pocket changes
+  // the widths a merge is measured against, and reading the form from geometry the user
+  // can no longer see would be its own kind of lie.
+  const forms = flared.map<JunctionForm>(
+    (junction) =>
+      overrides?.[junction.key]?.form ?? classifyJunction(junction, mergeBelowDegrees),
+  );
+
   const entries = trimAtJunctions
-    ? flared.map((junction) =>
-        geometryFor(junction, plane, overrides?.[junction.key], defaultCornerRadiusMeters),
+    ? flared.map((junction, index) =>
+        geometryFor(
+          junction,
+          plane,
+          overrides?.[junction.key],
+          defaultCornerRadiusMeters,
+          forms[index]!,
+        ),
       )
     : [];
   const geometry = entries.map((entry) => entry.geometry);
@@ -889,6 +945,7 @@ export function deriveProject(
     byStreet,
     junctions: flared,
     junctionGeometry: geometry,
+    junctionForms: trimAtJunctions ? forms : flared.map(() => 'intersection' as JunctionForm),
     crossings,
     approachStamps: approach,
     flares,

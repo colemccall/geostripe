@@ -2,16 +2,20 @@ import { useMemo, useState } from 'react';
 import {
   LANDCOVERS,
   LANDCOVER_CATEGORIES,
+  LANDCOVER_TYPES,
+  landcoverTree,
   searchLandcover,
 } from '../library/landcover';
-import type { LandcoverCategory, LandcoverType } from '../library/landcover';
+import type { LandcoverType } from '../library/landcover';
+import LibraryTree from './LibraryTree';
 
 /**
- * The land cover picker: category filter plus free-text search.
+ * The land cover picker.
  *
- * Built to scale rather than to fit today's list. Twenty-two entries would be fine as a
- * flat scroll, but the same pattern has to carry a library several hundred long, and a
- * palette that only works while the list is short is a palette that gets rewritten.
+ * Uses the same tree as the lane and preset libraries rather than its own arrangement.
+ * Twenty-two entries would be fine as a flat scroll, but a browser that only works while
+ * the list is short is a browser that gets rewritten, and three navigation patterns in one
+ * app is two too many.
  */
 interface Props {
   value: LandcoverType;
@@ -21,13 +25,13 @@ interface Props {
 }
 
 export default function LandcoverPalette({ value, onChange, variant = 'full' }: Props) {
-  const [category, setCategory] = useState<LandcoverCategory | 'all'>('all');
   const [query, setQuery] = useState('');
 
-  const matches = useMemo(() => {
-    const found = searchLandcover(query);
-    return category === 'all' ? found : found.filter((t) => LANDCOVERS[t].category === category);
-  }, [query, category]);
+  const tree = useMemo(() => landcoverTree(), []);
+  const filtered = useMemo(
+    () => (query.trim() ? landcoverTree(searchLandcover(query)) : tree),
+    [query, tree],
+  );
 
   if (variant === 'compact') {
     return (
@@ -53,59 +57,31 @@ export default function LandcoverPalette({ value, onChange, variant = 'full' }: 
   }
 
   return (
-    <>
-      <input
-        className="text-input"
-        type="search"
-        placeholder="Search land types…"
-        value={query}
-        aria-label="Search land types"
-        onChange={(e) => setQuery(e.target.value)}
-      />
-
-      <div className="chip-filter" role="group" aria-label="Filter by category">
-        <button
-          type="button"
-          aria-pressed={category === 'all'}
-          onClick={() => setCategory('all')}
-        >
-          All
-        </button>
-        {LANDCOVER_CATEGORIES.map((group) => (
+    <LibraryTree
+      tree={tree}
+      filtered={filtered}
+      query={query}
+      onQuery={setQuery}
+      placeholder="Search land types…"
+      totalLabel={`${LANDCOVER_TYPES.length} materials`}
+      keyOf={(type) => type}
+      renderItem={(type) => {
+        const spec = LANDCOVERS[type];
+        return (
           <button
-            key={group.id}
             type="button"
-            aria-pressed={category === group.id}
-            onClick={() => setCategory(group.id)}
+            className={`prim${type === value ? ' is-selected' : ''}`}
+            title={spec.note}
+            onClick={() => onChange(type)}
           >
-            {group.label}
+            <span className="swatch" style={{ background: spec.color }} />
+            <span className="prim-name">{spec.label}</span>
+            <span className="prim-add" aria-hidden="true">
+              {type === value ? '✓' : ''}
+            </span>
           </button>
-        ))}
-      </div>
-
-      {matches.length === 0 ? (
-        <p className="empty-note">Nothing matches “{query}”.</p>
-      ) : (
-        <ul className="prims">
-          {matches.map((type) => {
-            const spec = LANDCOVERS[type];
-            return (
-              <li key={type}>
-                <button
-                  type="button"
-                  className={`prim${type === value ? ' is-selected' : ''}`}
-                  title={spec.note}
-                  onClick={() => onChange(type)}
-                >
-                  <span className="swatch" style={{ background: spec.color }} />
-                  <span className="prim-name">{spec.label}</span>
-                  <span className="prim-width">{spec.category}</span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </>
+        );
+      }}
+    />
   );
 }

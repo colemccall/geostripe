@@ -98,6 +98,18 @@ interface EditorState extends Snapshot {
    * slider buried every real edit behind it.
    */
   junctionMergeSlackMeters: number;
+  /**
+   * Most recently used, newest first — lanes and presets separately.
+   *
+   * A view convenience rather than part of the document: assembling one street uses the
+   * same three or four lanes over and over, and making someone re-navigate the tree each
+   * time is the difference between a library and an obstacle. Deliberately outside the
+   * undo history, because undoing a width change should not also forget where you were.
+   */
+  recentComponentTypes: ComponentType[];
+  recentTemplateIds: string[];
+  /** Show every street's centerline, not only the selected one. */
+  showAllCenterlines: boolean;
 
   // ---- selection
   selectedStreetId: string | null;
@@ -130,10 +142,13 @@ interface EditorState extends Snapshot {
   setDefaultCornerRadius: (metres: number) => void;
   setTrimAtJunctions: (value: boolean) => void;
   setJunctionMergeSlack: (metres: number) => void;
+  setShowAllCenterlines: (value: boolean) => void;
   /** Merge a patch into one corner's settings. A field left out is left alone. */
   updateCorner: (key: string, cornerIndex: number, patch: Partial<CornerOverride>) => void;
   /** Merge a patch into one leg's settings. */
   updateLeg: (key: string, legIndex: number, patch: Partial<LegOverride>) => void;
+  /** How a junction is read: an intersection, a merge, or left to the geometry. */
+  setJunctionForm: (key: string, patch: Pick<JunctionOverride, 'form' | 'yieldLine'>) => void;
   resetJunction: (key: string) => void;
 
   // ---- selection actions
@@ -143,6 +158,16 @@ interface EditorState extends Snapshot {
   // ---- section editing, on either target
   addComponent: (target: EditTarget, type: ComponentType, index?: number) => void;
   removeComponent: (target: EditTarget, id: string) => void;
+  /** Copy one band and drop the copy immediately beside it. */
+  duplicateComponent: (target: EditTarget, id: string) => void;
+  /**
+   * Flip the section end for end: reverse the order and swap forward for backward.
+   *
+   * The answer to having built one half of an asymmetric street and wanting the mirror of
+   * it, which is most of how a real section gets assembled. Reversing the order alone
+   * would leave every lane pointing the wrong way.
+   */
+  mirrorSection: (target: EditTarget) => void;
   setWidth: (target: EditTarget, id: string, metres: number) => void;
   setDirection: (target: EditTarget, id: string, direction: Direction) => void;
   /**
@@ -318,6 +343,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
     defaultCornerRadiusMeters: DEFAULT_CORNER_RADIUS_METRES,
     trimAtJunctions: true,
     junctionMergeSlackMeters: 0,
+    recentComponentTypes: [],
+    recentTemplateIds: [],
+    showAllCenterlines: false,
 
     selectedStreetId: initialStreets[0]?.id ?? null,
     selectedAreaId: null,
@@ -346,6 +374,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     setDefaultCornerRadius: (defaultCornerRadiusMeters) => set({ defaultCornerRadiusMeters }),
     setTrimAtJunctions: (trimAtJunctions) => set({ trimAtJunctions }),
     setJunctionMergeSlack: (junctionMergeSlackMeters) => set({ junctionMergeSlackMeters }),
+    setShowAllCenterlines: (showAllCenterlines) => set({ showAllCenterlines }),
 
     updateCorner: (key, cornerIndex, patch) => {
       const existing = get().junctionOverrides[key];
@@ -355,6 +384,15 @@ export const useEditorStore = create<EditorState>((set, get) => {
       commit({
         junctionOverrides: { ...get().junctionOverrides, [key]: { ...existing, corners } },
       });
+    },
+
+    setJunctionForm: (key, patch) => {
+      const existing = get().junctionOverrides[key] ?? {};
+      const next = { ...existing, ...patch };
+      // An explicit undefined has to leave the object, or "decide from the geometry" would
+      // be stored as a null and read back as a form nobody chose.
+      if ('form' in patch && patch.form === undefined) delete next.form;
+      commit({ junctionOverrides: { ...get().junctionOverrides, [key]: next } });
     },
 
     updateLeg: (key, legIndex, patch) => {
@@ -382,7 +420,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
       }),
     selectComponent: (selectedComponentId) => set({ selectedComponentId }),
 
-    addComponent: (target, type, index) =>
+    addComponent: (target, type, index) => {
+      set({
+        recentComponentTypes: [type, ...get().recentComponentTypes.filter((t) => t !== type)].slice(
+          0,
+          8,
+        ),
+      });
       editComponents(target, (components) => {
         const spec = PRIMITIVES[type];
         const entry: SectionComponent = {
@@ -397,12 +441,40 @@ export const useEditorStore = create<EditorState>((set, get) => {
         const next = [...components];
         next.splice(at, 0, entry);
         return next;
-      }),
+      });
+    },
 
     removeComponent: (target, id) => {
       editComponents(target, (components) => components.filter((c) => c.id !== id));
       if (get().selectedComponentId === id) set({ selectedComponentId: null });
     },
+
+    duplicateComponent: (target, id) =>
+      editComponents(target, (components) => {
+        const at = components.findIndex((c) => c.id === id);
+        if (at < 0) return components;
+        const next = [...components];
+        // A fresh id, or the copy and the original would be the same band to every
+        // selection, edit and lookup in the app.
+        next.splice(at + 1, 0, { ...components[at]!, id: newId('cmp') });
+        return next;
+      }),
+
+    mirrorSection: (target) =>
+      editComponents(target, (components) =>
+        [...components].reverse().map((component) => ({
+          ...component,
+          direction:
+            component.direction === 'forward'
+              ? 'backward'
+              : component.direction === 'backward'
+                ? 'forward'
+                : component.direction,
+          // The stripe belongs to a band's LEFT edge, and mirroring makes that its right.
+          // Carrying it across would move every line one band over.
+          stripeLeft: undefined,
+        })),
+      ),
 
     setWidth: (target, id, metres) =>
       editComponents(target, (components) =>
@@ -477,7 +549,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
       if (!def) return;
       const fresh = instantiateTemplate(def);
       editSection(target, (section) => ({ ...fresh, id: section.id }));
-      set({ selectedComponentId: null });
+      set({
+        selectedComponentId: null,
+        recentTemplateIds: [
+          templateId,
+          ...get().recentTemplateIds.filter((id) => id !== templateId),
+        ].slice(0, 6),
+      });
     },
 
     loadSection: (target, section) => {

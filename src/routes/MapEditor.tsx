@@ -69,19 +69,19 @@ const TOOLS: { id: Tool; label: string; key: string; hint: string }[] = [
     id: 'draw',
     label: 'Draw street',
     key: 'D',
-    hint: 'Click along the centerline. Enter or double-click finishes it, Backspace removes the last point, Esc cancels.',
+    hint: 'Click along the centerline; points snap to lines already drawn. Shift adds 15° angle snapping, Alt turns snapping off. Enter or double-click finishes, Backspace removes the last point, Esc cancels.',
   },
   {
     id: 'area',
     label: 'Land',
     key: 'A',
-    hint: 'Click around a patch of ground to cover it. Enter or double-click closes the shape, Esc cancels.',
+    hint: 'Click around a patch of ground to cover it; points snap to what is already drawn, and Alt turns that off. Enter or double-click closes the shape, Esc cancels.',
   },
   {
     id: 'measure',
     label: 'Measure',
     key: 'M',
-    hint: 'Click two points to measure the real street — usually kerb to kerb.',
+    hint: 'Click two points to measure the real street — usually kerb to kerb. Both ends snap to lines already drawn; Alt turns that off.',
   },
 ];
 
@@ -107,7 +107,10 @@ export default function MapEditor() {
   const defaultCornerRadiusMeters = useEditorStore((s) => s.defaultCornerRadiusMeters);
   const trimAtJunctions = useEditorStore((s) => s.trimAtJunctions);
   const junctionMergeSlackMeters = useEditorStore((s) => s.junctionMergeSlackMeters);
+  const showAllCenterlines = useEditorStore((s) => s.showAllCenterlines);
   const draftSection = useEditorStore((s) => s.draftSection);
+  const recentComponentTypes = useEditorStore((s) => s.recentComponentTypes);
+  const recentTemplateIds = useEditorStore((s) => s.recentTemplateIds);
   const street = useEditorStore(selectedStreet);
 
   const {
@@ -117,6 +120,8 @@ export default function MapEditor() {
     setWidth,
     setDirection,
     setComponentMarkings,
+    duplicateComponent,
+    mirrorSection,
     moveComponent,
     removeComponent,
     applyTemplate,
@@ -139,9 +144,11 @@ export default function MapEditor() {
     selectJunction,
     updateCorner,
     updateLeg,
+    setJunctionForm,
     resetJunction,
     setTrimAtJunctions,
     setJunctionMergeSlack,
+    setShowAllCenterlines,
     beginGesture,
     endGesture,
     moveVertexLive,
@@ -451,6 +458,20 @@ export default function MapEditor() {
             </ul>
           )}
 
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={showAllCenterlines}
+              onChange={(e) => setShowAllCenterlines(e.target.checked)}
+            />
+            <span>Show every centerline</span>
+          </label>
+          <p className="hint">
+            A centerline is an editing handle, not part of the design — it is the one line on
+            the map that does not exist on the ground. Off, it appears only for the street
+            you have selected, which is the moment it means anything.
+          </p>
+
           <div className="btn-row">
             <button type="button" className="btn btn-ghost" onClick={loadDemo}>
               Load example
@@ -566,7 +587,7 @@ export default function MapEditor() {
                     </span>
                     <span className="card-meta">
                       <span>
-                        {j.legCount} legs · {j.kind}
+                        {j.legCount} legs · {j.form === 'merge' ? 'merge' : j.kind}
                       </span>
                       <span className="mono">
                         {formatWidth(
@@ -617,6 +638,7 @@ export default function MapEditor() {
             <span className="label">apply to the selected street</span>
           </header>
           <TemplatePicker
+            recent={recentTemplateIds}
             units={units}
             disabled={!street}
             onPick={(t) => applyTemplate('street', t.id)}
@@ -787,6 +809,7 @@ export default function MapEditor() {
             defaultCornerRadiusMeters={defaultCornerRadiusMeters}
             trimAtJunctions={trimAtJunctions}
             junctionMergeSlackMeters={junctionMergeSlackMeters}
+            showAllCenterlines={showAllCenterlines}
             selectedJunctionKey={selectedJunctionKey}
             onDraftChange={(points, metres) => setDraft({ points: points.length, metres })}
             onDrawComplete={(points) => addStreet(points)}
@@ -983,6 +1006,7 @@ export default function MapEditor() {
               override={junctionOverrides[selectedJunction.key]}
               onCorner={(index, patch) => updateCorner(selectedJunction.key, index, patch)}
               onLeg={(index, patch) => updateLeg(selectedJunction.key, index, patch)}
+              onForm={(patch) => setJunctionForm(selectedJunction.key, patch)}
               onReset={() => resetJunction(selectedJunction.key)}
             />
           </>
@@ -1200,15 +1224,41 @@ export default function MapEditor() {
                 onDirection={(id, d) => setDirection('street', id, d)}
                 onMove={(id, delta) => moveComponent('street', id, delta)}
                 onRemove={(id) => removeComponent('street', id)}
+                onDuplicate={(id) => duplicateComponent('street', id)}
                 onMarkings={(id, patch) => setComponentMarkings('street', id, patch)}
               />
+              <div className="btn-row">
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => mirrorSection('street')}
+                >
+                  Mirror the section
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={!street?.existingWidthMeters}
+                  title="Scale every band so the section matches the width you measured"
+                  onClick={() =>
+                    street?.existingWidthMeters &&
+                    fitSectionToWidth('street', street.existingWidthMeters)
+                  }
+                >
+                  Fit to measured width
+                </button>
+              </div>
             </section>
 
             <section className="panel">
               <header className="panel-head">
                 <span className="label">Add a band</span>
               </header>
-              <PrimitivePalette units={units} onAdd={(type) => addComponent('street', type)} />
+              <PrimitivePalette
+                units={units}
+                recent={recentComponentTypes}
+                onAdd={(type) => addComponent('street', type)}
+              />
               <p className="hint">
                 Added just inside the right-hand kerb. Reorder with the arrows above.
               </p>

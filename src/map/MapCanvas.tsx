@@ -15,7 +15,9 @@ import type { BasemapId, TileSourceOptions } from './basemaps';
 import { buildDesignData, clipEastOf, clipLinesEastOf } from './designLayers';
 import type { DesignData } from './designLayers';
 import type { JunctionOverride } from '../geo/derived';
-import { lineLengthMeters } from '../geo/measure';
+import { distanceMeters, lineLengthMeters } from '../geo/measure';
+import { snapPoint } from '../geo/snap';
+import type { SnapResult } from '../geo/snap';
 import type { Area, Street } from '../model/types';
 import type { Tool } from '../store/useEditorStore';
 import type { DisplayUnits } from '../lib/units';
@@ -116,6 +118,7 @@ interface Props {
   trimAtJunctions?: boolean;
   junctionMergeSlackMeters?: number;
   selectedJunctionKey?: string | null;
+  showAllCenterlines?: boolean;
 
   // ---- drawing
   /** Committed draft vertices and their running length, for the toolbar readout. */
@@ -176,6 +179,12 @@ function buildStyle(basemapId: BasemapId, options: TileSourceOptions): MapStyle 
   };
 }
 
+/** How near, in screen pixels, a drawn point has to be to snap to something. */
+const SNAP_DRAW_PX = 14;
+
+/** Angle snapping increments, when Shift is held. */
+const SNAP_ANGLE_DEGREES = 15;
+
 const DESIGN_SOURCES = [
   'areas',
   'junction-footprint',
@@ -193,6 +202,7 @@ const DESIGN_SOURCES = [
   'draft-points',
   'measure',
   'measure-points',
+  'snap',
 ] as const;
 
 /**
@@ -420,6 +430,20 @@ function addDesignLayers(map: MapLibreMap) {
     paint: { 'line-color': '#FF9E6D', 'line-width': 1.8, 'line-dasharray': [2, 1.5] },
   });
 
+  // The snap indicator sits above everything: it is feedback about what the next click
+  // will do, so it must never be behind the thing it is pointing at.
+  addLayerSafely(map, {
+    id: 'snap-point',
+    type: 'circle',
+    source: 'snap',
+    paint: {
+      'circle-radius': 6,
+      'circle-color': 'rgba(0,0,0,0)',
+      'circle-stroke-width': 2,
+      'circle-stroke-color': ['case', ['==', ['get', 'kind'], 'angle'], '#7FB2E5', '#F2C14E'],
+    },
+  });
+
   addLayerSafely(map, {
     id: 'measure-vertex',
     type: 'circle',
@@ -491,6 +515,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     trimAtJunctions,
     junctionMergeSlackMeters,
     selectedJunctionKey,
+    showAllCenterlines,
     onDraftChange,
     onDrawComplete,
     onGestureStart,
@@ -529,6 +554,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     trimAtJunctions,
     junctionMergeSlackMeters,
     selectedJunctionKey,
+    showAllCenterlines,
     onDraftChange,
     onDrawComplete,
     onGestureStart,
@@ -692,6 +718,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
       trimAtJunctions: latest.current.trimAtJunctions,
       junctionMergeSlackMeters: latest.current.junctionMergeSlackMeters,
       selectedJunctionKey: latest.current.selectedJunctionKey,
+      showAllCenterlines: latest.current.showAllCenterlines,
     });
     warn?.(data.warnings);
     reportJunctions?.(data.junctions, data.junctionWarnings, data.offsetPairs);
@@ -824,6 +851,54 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
 
     // ------------------------------------------------------------------ pointer input
 
+    /**
+     * Where the next drawn point should land.
+     *
+     * Alt suppresses snapping entirely, which is the escape hatch for tracing something
+     * that genuinely runs a metre off an existing line. Shift adds angle snapping, which
+     * is opt-in because tracing imagery wants the cursor free.
+     */
+    const snapFor = (event: MapMouseEvent, from: LngLat | null): SnapResult => {
+      const here: LngLat = [event.lngLat.lng, event.lngLat.lat];
+      const original = event.originalEvent as MouseEvent | undefined;
+      if (original?.altKey) return { point: here, kind: 'none', label: '' };
+
+      // Screen pixels to ground metres, taken from the map rather than assumed: the same
+      // fourteen pixels is a metre at one zoom and thirty at another.
+      const a = map.unproject([event.point.x, event.point.y]);
+      const b = map.unproject([event.point.x + SNAP_DRAW_PX, event.point.y]);
+      const toleranceMeters = Math.max(0.25, distanceMeters([a.lng, a.lat], [b.lng, b.lat]));
+
+      return snapPoint({
+        cursor: here,
+        streets: latest.current.streets,
+        areas: latest.current.areas ?? [],
+        from,
+        toleranceMeters,
+        angleStepDegrees: original?.shiftKey ? SNAP_ANGLE_DEGREES : 0,
+      });
+    };
+
+    const showSnap = (result: SnapResult) => {
+      if (!map.getSource('snap')) return;
+      setData(
+        map,
+        'snap',
+        result.kind === 'none'
+          ? EMPTY
+          : {
+              type: 'FeatureCollection',
+              features: [
+                {
+                  type: 'Feature',
+                  properties: { kind: result.kind },
+                  geometry: { type: 'Point', coordinates: result.point },
+                },
+              ],
+            },
+      );
+    };
+
     const near = (event: MapMouseEvent, point: LngLat | undefined) => {
       if (!point) return false;
       const a = map.project(point);
@@ -832,7 +907,6 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
 
     map.on('click', (event) => {
       const active = latest.current.tool;
-      const here: LngLat = [event.lngLat.lng, event.lngLat.lat];
 
       if (active === 'draw' || active === 'area') {
         const draft = draftRef.current;
@@ -842,16 +916,23 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
           finishDraw();
           return;
         }
-        draftRef.current = [...draft, here];
+        // The committed point is the SNAPPED one. Junctions are derived from where
+        // centerlines really meet, so a vertex that lands where it was aimed is the
+        // difference between a junction at the crossing and one at a near miss.
+        const snapped = snapFor(event, draft[draft.length - 1] ?? null).point;
+        draftRef.current = [...draft, snapped];
         drawDraft();
         reportDraft();
         return;
       }
 
       if (active === 'measure') {
+        // Measuring snaps too: measuring kerb to kerb is the commonest thing anyone does
+        // with it, and both kerbs are on lines already drawn.
+        const snapped = snapFor(event, measureRef.current[0] ?? null).point;
         // A third click starts a fresh measurement rather than extending a two-point one.
         measureRef.current =
-          measureRef.current.length >= 2 ? [here] : [...measureRef.current, here];
+          measureRef.current.length >= 2 ? [snapped] : [...measureRef.current, snapped];
         drawMeasure();
         return;
       }
@@ -895,13 +976,29 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
 
     map.on('mousemove', (event) => {
       const active = latest.current.tool;
-      if ((active === 'draw' || active === 'area') && draftRef.current.length > 0) {
-        hoverRef.current = [event.lngLat.lng, event.lngLat.lat];
-        drawDraft();
-      } else if (active === 'measure' && measureRef.current.length === 1) {
-        hoverRef.current = [event.lngLat.lng, event.lngLat.lat];
-        drawMeasure();
+
+      if (active === 'draw' || active === 'area') {
+        const draft = draftRef.current;
+        const result = snapFor(event, draft[draft.length - 1] ?? null);
+        showSnap(result);
+        if (draft.length > 0) {
+          hoverRef.current = result.point;
+          drawDraft();
+        }
+        return;
       }
+
+      if (active === 'measure') {
+        const result = snapFor(event, measureRef.current[0] ?? null);
+        showSnap(result);
+        if (measureRef.current.length === 1) {
+          hoverRef.current = result.point;
+          drawMeasure();
+        }
+        return;
+      }
+
+      showSnap({ point: [0, 0], kind: 'none', label: '' });
     });
 
     map.on('dblclick', (event) => {
@@ -1096,6 +1193,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     trimAtJunctions,
     junctionMergeSlackMeters,
     selectedJunctionKey,
+    showAllCenterlines,
   ]);
 
   // ---- scale bar unit follows the app
