@@ -263,7 +263,8 @@ function addDesignLayers(map: MapLibreMap) {
     paint: {
       // Colour travels with the feature so a palette change needs no layer rebuild.
       'fill-color': ['get', 'color'],
-      'fill-opacity': 0.82,
+      // A tunnel shows the ground through it; anything at or above grade is solid.
+      'fill-opacity': ['case', ['<', ['coalesce', ['get', 'level'], 0], 0], 0.42, 0.82],
     },
   });
 
@@ -271,7 +272,11 @@ function addDesignLayers(map: MapLibreMap) {
     id: 'band-outline',
     type: 'line',
     source: 'bands',
-    paint: { 'line-color': 'rgba(0,0,0,0.55)', 'line-width': 0.6 },
+    paint: {
+      'line-color': 'rgba(0,0,0,0.55)',
+      // An overpass gets a heavier edge, which is what reads as a deck from above.
+      'line-width': ['case', ['>', ['coalesce', ['get', 'level'], 0], 0], 2.2, 0.6],
+    },
   });
 
   // Two layers rather than one with an expression: `line-dasharray` is not a data-driven

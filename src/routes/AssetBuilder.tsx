@@ -1,5 +1,3 @@
-import { PRIMITIVES } from '../library/primitives';
-import { TEMPLATES, templateTotalWidth } from '../library/templates';
 import { useEditorStore, anchorModeOf } from '../store/useEditorStore';
 import type { AnchorMode } from '../store/useEditorStore';
 import { downloadAsset, pickTextFile } from '../model/assetFile';
@@ -13,6 +11,7 @@ import {
 import { formatWidth } from '../lib/units';
 import CrossSectionSvg from '../components/CrossSectionSvg';
 import ComponentStack from '../components/ComponentStack';
+import TemplatePicker from '../components/TemplatePicker';
 import PrimitivePalette from '../components/PrimitivePalette';
 import NoticeBar from '../components/NoticeBar';
 
@@ -94,32 +93,10 @@ export default function AssetBuilder() {
           <header className="panel-head">
             <span className="label">Start from a template</span>
           </header>
-          <ul className="cards">
-            {TEMPLATES.map((t) => (
-              <li key={t.id}>
-                <button type="button" className="card" onClick={() => applyTemplate('draft', t.id)}>
-                  <span className="card-title">{t.label}</span>
-                  <span className="chip-row" aria-hidden="true">
-                    {t.specs.map(([type, , w], i) => (
-                      <i
-                        key={i}
-                        style={{
-                          flexGrow: w ?? PRIMITIVES[type].defaultWidthMeters,
-                          background: PRIMITIVES[type].color,
-                        }}
-                      />
-                    ))}
-                  </span>
-                  <span className="card-meta">
-                    <span>{t.note}</span>
-                    <span className="mono">
-                      {formatWidth(templateTotalWidth(t), units, { withUnit: true })}
-                    </span>
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
+          <TemplatePicker
+            units={units}
+            onPick={(t) => applyTemplate('draft', t.id)}
+          />
         </section>
       </aside>
 

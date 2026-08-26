@@ -161,6 +161,8 @@ interface EditorState extends Snapshot {
   /** Create a street from a freshly drawn centerline. Returns its id. */
   addStreet: (centerline: [number, number][], name?: string) => string;
   renameStreet: (streetId: string, name: string) => void;
+  /** 0 at grade, +1 overpass, -1 tunnel. */
+  setStreetLevel: (streetId: string, level: number) => void;
   toggleStreetVisible: (streetId: string) => void;
   duplicateStreet: (streetId: string) => void;
   loadStreets: (
@@ -500,6 +502,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
     renameStreet: (streetId, name) =>
       commit({ streets: editStreet(streetId, (s) => ({ ...s, name })) }),
+
+    setStreetLevel: (streetId, level) =>
+      commit({ streets: editStreet(streetId, (s) => ({ ...s, level })) }),
 
     toggleStreetVisible: (streetId) =>
       commit({ streets: editStreet(streetId, (s) => ({ ...s, visible: !s.visible })) }),

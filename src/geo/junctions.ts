@@ -84,6 +84,7 @@ export interface Junction {
 
 interface Track {
   streetId: string;
+  level: number;
   pts: PlanePoint[];
   /** Cumulative distance from the start at each vertex. */
   stations: number[];
@@ -107,6 +108,7 @@ function buildTrack(street: Street, plane: LocalPlane): Track | null {
 
   return {
     streetId: street.id,
+    level: street.level ?? 0,
     pts,
     stations,
     length: stations[stations.length - 1]!,
@@ -398,6 +400,9 @@ export function detectJunctions(streets: readonly Street[]): DetectionResult {
   const crossings: Crossing[] = [];
   for (let i = 0; i < list.length; i++) {
     for (let j = i + 1; j < list.length; j++) {
+      // Different levels never meet. An overpass crossing the street below it is not an
+      // intersection, and detecting one would carve a hole through both.
+      if (list[i]!.level !== list[j]!.level) continue;
       // Self-intersection is a curvature problem, not a junction, so pairs only.
       crossings.push(...crossingsBetween(list[i]!, list[j]!));
     }

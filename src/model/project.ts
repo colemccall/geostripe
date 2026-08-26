@@ -54,6 +54,7 @@ const curveSchema = z.object({
 const streetPropertiesSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   curve: curveSchema.optional(),
+  level: z.number().int().min(-5).max(5).optional(),
   visible: z.boolean().optional(),
   existingWidthMeters: z.number().finite().positive().max(300).optional(),
   sectionName: z.string().min(1).max(120).optional(),
@@ -217,6 +218,7 @@ export function toProjectGeoJSON(
         // Control points plus how they are joined. The dense line is derived, exactly like
         // the bands, so a curved street stays as editable after a round-trip as before it.
         ...(street.curve && street.curve.mode !== 'straight' ? { curve: street.curve } : {}),
+        ...(street.level ? { level: street.level } : {}),
         anchorOffsetMeters:
           street.section.anchorOffsetMeters === null
             ? null
@@ -319,6 +321,7 @@ function makeStreet(
   existingWidthMeters: number | undefined,
   visible: boolean,
   curve?: CurveSettings,
+  level?: number,
 ): Street {
   return {
     id,
@@ -326,6 +329,7 @@ function makeStreet(
     centerline,
     visible,
     ...(curve ? { curve } : {}),
+    ...(level ? { level } : {}),
     ...(existingWidthMeters !== undefined ? { existingWidthMeters } : {}),
     section: {
       id: newId('sec'),
@@ -492,6 +496,7 @@ export function parseProject(text: string, defaults: ImportDefaults): ProjectPar
         data.existingWidthMeters,
         data.visible ?? true,
         data.curve,
+        data.level,
       ),
     );
   });

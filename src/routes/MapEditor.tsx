@@ -10,7 +10,7 @@ import { checkFit, resolveAnchorOffset, totalWidth } from '../model/section';
 import { displayToMetres, formatWidth, stepFor } from '../lib/units';
 import { EDITOR_VERSION } from '../lib/version';
 import { PRIMITIVES } from '../library/primitives';
-import { TEMPLATES, instantiateTemplate, templateTotalWidth } from '../library/templates';
+import { TEMPLATES, TEMPLATE_CATEGORIES, instantiateTemplate } from '../library/templates';
 import { basemapById } from '../map/basemaps';
 import MapCanvas from '../map/MapCanvas';
 import type { EntityKind, MapHandle, MapView } from '../map/MapCanvas';
@@ -27,6 +27,7 @@ import CrossSectionSvg from '../components/CrossSectionSvg';
 import ComponentStack from '../components/ComponentStack';
 import PrimitivePalette from '../components/PrimitivePalette';
 import LandcoverPalette from '../components/LandcoverPalette';
+import TemplatePicker from '../components/TemplatePicker';
 import JunctionInspector from '../components/JunctionInspector';
 import NoticeBar from '../components/NoticeBar';
 
@@ -144,6 +145,7 @@ export default function MapEditor() {
     insertVertexLive,
     removeVertex,
     setCurve,
+    setStreetLevel,
     toggleSharpVertex,
     addArea,
     selectArea,
@@ -574,40 +576,14 @@ export default function MapEditor() {
 
         <section className="panel">
           <header className="panel-head">
-            <span className="label">Apply a template</span>
-            <span className="label">to the selected street</span>
+            <span className="label">Cross-sections</span>
+            <span className="label">apply to the selected street</span>
           </header>
-          <ul className="cards">
-            {TEMPLATES.map((t) => (
-              <li key={t.id}>
-                <button
-                  type="button"
-                  className="card"
-                  disabled={!street}
-                  onClick={() => applyTemplate('street', t.id)}
-                >
-                  <span className="card-title">{t.label}</span>
-                  <span className="chip-row" aria-hidden="true">
-                    {t.specs.map(([type, , w], i) => (
-                      <i
-                        key={i}
-                        style={{
-                          flexGrow: w ?? PRIMITIVES[type].defaultWidthMeters,
-                          background: PRIMITIVES[type].color,
-                        }}
-                      />
-                    ))}
-                  </span>
-                  <span className="card-meta">
-                    <span>{t.note}</span>
-                    <span className="mono">
-                      {formatWidth(templateTotalWidth(t), units, { withUnit: true })}
-                    </span>
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
+          <TemplatePicker
+            units={units}
+            disabled={!street}
+            onPick={(t) => applyTemplate('street', t.id)}
+          />
         </section>
       </aside>
 
@@ -639,10 +615,14 @@ export default function MapEditor() {
                   value={drawSectionId}
                   onChange={(e) => setDrawSectionId(e.target.value)}
                 >
-                  {TEMPLATES.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.label}
-                    </option>
+                  {TEMPLATE_CATEGORIES.map((group) => (
+                    <optgroup key={group.id} label={group.label}>
+                      {TEMPLATES.filter((t) => t.category === group.id).map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.label}
+                        </option>
+                      ))}
+                    </optgroup>
                   ))}
                   <option value={DRAFT_SECTION}>Asset builder — {draftSection.name}</option>
                 </select>
@@ -1040,6 +1020,23 @@ export default function MapEditor() {
                   </span>
                 </label>
               )}
+
+              <label className="field" style={{ marginTop: 9 }}>
+                <span className="label">Level</span>
+                <select
+                  className="text-input"
+                  value={street.level ?? 0}
+                  onChange={(e) => setStreetLevel(street.id, Number(e.target.value))}
+                >
+                  <option value={-1}>Tunnel — below grade</option>
+                  <option value={0}>At grade</option>
+                  <option value={1}>Overpass — above grade</option>
+                </select>
+                <span className="hint">
+                  Streets at different levels do not form an intersection, which is what
+                  keeps a viaduct from carving a hole through the street beneath it.
+                </span>
+              </label>
 
               {curveMode !== 'straight' && (
                 <p className="hint">

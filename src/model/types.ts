@@ -62,6 +62,13 @@ export interface Street {
   centerline: [number, number][];
   /** How the control points are joined. Absent means a plain polyline. */
   curve?: CurveSettings;
+  /**
+   * Grade separation, the way OSM uses `layer`: 0 is at grade, +1 an overpass, -1 a
+   * tunnel. Streets at different levels do not form junctions, which is the entire point —
+   * a freeway crossing a street underneath it is not an intersection, and treating it as
+   * one would carve a hole through both.
+   */
+  level?: number;
   section: CrossSection;
   /** Measured curb-to-curb of the real street, for the fit check. */
   existingWidthMeters?: number;

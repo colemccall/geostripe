@@ -445,6 +445,9 @@ export function deriveProject(
       // band is drawn there, and the footway ring underneath shows through instead.
       const trimmed = subtractRings(band, roadway ? roadwayHoles : footprintHoles);
       if (!trimmed) continue;
+      // Carried onto the feature so the map can draw a tunnel translucent and an overpass
+      // with a deck edge, without needing to know which street a band came from.
+      trimmed.properties = { ...trimmed.properties, level: street.level ?? 0 };
 
       if (!roadway || !isParking(type) || daylightHoles.length === 0) {
         bands.push(trimmed);
