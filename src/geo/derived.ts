@@ -3,6 +3,8 @@ import type { Feature, MultiPolygon, Polygon } from 'geojson';
 import { bandsForStreet, markingsForStreet } from './banding';
 import type { BandFeature } from './banding';
 import { detectJunctions } from './junctions';
+import { pruneResolvedCache, resolveCenterline } from './curve';
+import type { CurveSettings } from './curve';
 import type { Junction } from './junctions';
 import { DEFAULT_CORNER_RADIUS_METRES, junctionGeometry } from './intersection';
 import type {
@@ -94,6 +96,7 @@ export interface DeriveOptions {
 
 interface RawEntry {
   centerline: Street['centerline'];
+  curve: CurveSettings | undefined;
   section: CrossSection;
   bands: BandFeature[];
   markings: Feature[];
@@ -106,14 +109,23 @@ function rawFor(street: Street): RawEntry {
   const hit = rawCache.get(street.id);
   // Reference equality, not deep comparison: the store never mutates in place, so a
   // matching reference is a guarantee of matching content and costs nothing to check.
-  if (hit && hit.centerline === street.centerline && hit.section === street.section) return hit;
+  if (
+    hit &&
+    hit.centerline === street.centerline &&
+    hit.curve === street.curve &&
+    hit.section === street.section
+  ) {
+    return hit;
+  }
 
-  const result = bandsForStreet(street.id, street.centerline, street.section);
+  const line = resolveCenterline(street);
+  const result = bandsForStreet(street.id, line, street.section);
   const entry: RawEntry = {
     centerline: street.centerline,
+    curve: street.curve,
     section: street.section,
     bands: result.bands,
-    markings: markingsForStreet(street.id, street.centerline, street.section),
+    markings: markingsForStreet(street.id, line, street.section),
     warnings: result.warnings,
   };
   rawCache.set(street.id, entry);
@@ -471,6 +483,7 @@ export function deriveProject(
 
   // Prune, so a deleted street cannot hold its geometry alive.
   const live = new Set(streets.map((s) => s.id));
+  pruneResolvedCache(live);
   for (const id of [...rawCache.keys()]) if (!live.has(id)) rawCache.delete(id);
   for (const id of [...trimCache.keys()]) if (!live.has(id)) trimCache.delete(id);
   const liveJunctions = new Set(junctions.map((j) => j.key));
@@ -508,6 +521,7 @@ export function deriveProject(
 
 /** Drop every cache. Exists for tests; the pruning above handles normal operation. */
 export function resetDerivedCaches(): void {
+  pruneResolvedCache(new Set());
   rawCache.clear();
   trimCache.clear();
   geometryCache.clear();

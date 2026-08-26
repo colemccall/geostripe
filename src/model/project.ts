@@ -7,6 +7,8 @@ import { componentSchema } from './schema';
 import type { Street } from './types';
 import { newId } from './types';
 import type { JunctionOverride } from '../geo/derived';
+import { resolveCenterline } from '../geo/curve';
+import type { CurveSettings } from '../geo/curve';
 
 /**
  * The project interchange format: plain GeoJSON, editable by hand and readable by QGIS.
@@ -42,8 +44,15 @@ const lineStringSchema = z.object({
   coordinates: z.array(positionSchema).min(2),
 });
 
+const curveSchema = z.object({
+  mode: z.enum(['straight', 'rounded', 'smooth']),
+  radiusMeters: z.number().finite().min(0).max(2000),
+  sharpVertices: z.array(z.number().int().min(0).max(9999)).max(4096).optional(),
+});
+
 const streetPropertiesSchema = z.object({
   name: z.string().min(1).max(200).optional(),
+  curve: curveSchema.optional(),
   visible: z.boolean().optional(),
   existingWidthMeters: z.number().finite().positive().max(300).optional(),
   sectionName: z.string().min(1).max(120).optional(),
@@ -150,6 +159,9 @@ export function toProjectGeoJSON(
           ? { existingWidthMeters: round(street.existingWidthMeters) }
           : {}),
         sectionName: street.section.name,
+        // Control points plus how they are joined. The dense line is derived, exactly like
+        // the bands, so a curved street stays as editable after a round-trip as before it.
+        ...(street.curve && street.curve.mode !== 'straight' ? { curve: street.curve } : {}),
         anchorOffsetMeters:
           street.section.anchorOffsetMeters === null
             ? null
@@ -169,9 +181,13 @@ export function toProjectGeoJSON(
   }
 
   // Derived polygons, for anything downstream that just wants shapes.
+  //
+  // Built from the RESOLVED line, not the control points. A curved street whose exported
+  // polygons followed its control polygon would open in QGIS as a different street from
+  // the one on screen — straight where the design curves.
   for (const street of streets) {
     if (!street.visible) continue;
-    for (const band of bandsForStreet(street.id, street.centerline, street.section).bands) {
+    for (const band of bandsForStreet(street.id, resolveCenterline(street), street.section).bands) {
       features.push({
         ...band,
         properties: { ...band.properties, geostripe: 'band', streetName: street.name },
@@ -242,12 +258,14 @@ function makeStreet(
   anchorOffsetMeters: number | null,
   existingWidthMeters: number | undefined,
   visible: boolean,
+  curve?: CurveSettings,
 ): Street {
   return {
     id,
     name,
     centerline,
     visible,
+    ...(curve ? { curve } : {}),
     ...(existingWidthMeters !== undefined ? { existingWidthMeters } : {}),
     section: {
       id: newId('sec'),
@@ -375,6 +393,7 @@ export function parseProject(text: string, defaults: ImportDefaults): ProjectPar
         data.anchorOffsetMeters ?? null,
         data.existingWidthMeters,
         data.visible ?? true,
+        data.curve,
       ),
     );
   });

@@ -11,6 +11,8 @@ import { DEFAULT_VINTAGE } from '../map/basemaps';
 import { createDemoStreets } from '../demo/washingtonPark';
 import { DEFAULT_CORNER_RADIUS_METRES } from '../geo/intersection';
 import type { CornerOverride, JunctionOverride, LegOverride } from '../geo/derived';
+import { DEFAULT_CURVE } from '../geo/curve';
+import type { CurveSettings } from '../geo/curve';
 
 /**
  * Editor state.
@@ -158,6 +160,11 @@ interface EditorState extends Snapshot {
   toggleStreetVisible: (streetId: string) => void;
   duplicateStreet: (streetId: string) => void;
   loadStreets: (streets: Street[], junctionOverrides?: Record<string, JunctionOverride>) => void;
+
+  // ---- curves
+  setCurve: (streetId: string, patch: Partial<CurveSettings>) => void;
+  /** Pin or release one control point as a hard corner. */
+  toggleSharpVertex: (streetId: string, index: number) => void;
 
   // ---- centerline vertex editing
   removeVertex: (streetId: string, index: number) => void;
@@ -489,6 +496,25 @@ export const useEditorStore = create<EditorState>((set, get) => {
           const centerline = [...s.centerline];
           centerline.splice(afterIndex + 1, 0, point);
           return { ...s, centerline };
+        }),
+      }),
+
+    setCurve: (streetId, patch) =>
+      commit({
+        streets: editStreet(streetId, (s) => ({
+          ...s,
+          curve: { ...DEFAULT_CURVE, ...s.curve, ...patch },
+        })),
+      }),
+
+    toggleSharpVertex: (streetId, index) =>
+      commit({
+        streets: editStreet(streetId, (s) => {
+          const curve = { ...DEFAULT_CURVE, ...s.curve };
+          const sharp = new Set(curve.sharpVertices ?? []);
+          if (sharp.has(index)) sharp.delete(index);
+          else sharp.add(index);
+          return { ...s, curve: { ...curve, sharpVertices: [...sharp].sort((a, b) => a - b) } };
         }),
       }),
 

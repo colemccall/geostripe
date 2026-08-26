@@ -1,4 +1,5 @@
 import { dedupe, localPlane, originFor } from './projection';
+import { resolveCenterline } from './curve';
 import type { LngLat, LocalPlane, PlanePoint } from './projection';
 import { sectionExtent, travelwayWidth } from '../model/section';
 import type { Street } from '../model/types';
@@ -92,7 +93,10 @@ interface Track {
 }
 
 function buildTrack(street: Street, plane: LocalPlane): Track | null {
-  const line = dedupe(street.centerline);
+  // The resolved line, not the control points: a curved street meets its neighbours where
+  // the curve goes, and detecting against the straight control polygon would place the
+  // junction somewhere the pavement never reaches.
+  const line = dedupe(resolveCenterline(street));
   if (line.length < 2) return null;
 
   const pts = line.map((p) => plane.toPlane(p));
@@ -381,7 +385,7 @@ export interface DetectionResult {
  */
 export function detectJunctions(streets: readonly Street[]): DetectionResult {
   const visible = streets.filter((s) => s.visible && s.centerline.length >= 2);
-  const allPoints = visible.flatMap((s) => s.centerline);
+  const allPoints = visible.flatMap((s) => resolveCenterline(s));
   const plane = localPlane(originFor(allPoints.length ? allPoints : [[0, 0]]));
 
   const tracks = new Map<string, Track>();

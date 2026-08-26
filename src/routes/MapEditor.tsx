@@ -17,6 +17,8 @@ import type { MapHandle, MapView } from '../map/MapCanvas';
 import type { DesignData, JunctionSummary } from '../map/designLayers';
 import { describeWarnings } from '../geo/curvature';
 import { lineLengthMeters } from '../geo/measure';
+import { DEFAULT_CURVE, resolveCenterline, tightestRadius } from '../geo/curve';
+import type { CurveMode } from '../geo/curve';
 import { downloadText, pickTextFile } from '../model/assetFile';
 import { parseProject, projectFilename, serializeProject } from '../model/project';
 import { DEMO_CENTER, DEMO_ZOOM } from '../demo/washingtonPark';
@@ -38,6 +40,20 @@ import NoticeBar from '../components/NoticeBar';
  * vertex) go through the store's live setters bracketed by beginGesture/endGesture, so a
  * drag lands in history as one step rather than two hundred.
  */
+
+const CURVE_MODES: { id: CurveMode; label: string; hint: string }[] = [
+  { id: 'straight', label: 'Straight', hint: 'Plain polyline — every control point is a hard corner.' },
+  {
+    id: 'rounded',
+    label: 'Rounded',
+    hint: 'Tangent-arc-tangent, the way a road alignment is specified: straight runs joined by arcs of a stated radius.',
+  },
+  {
+    id: 'smooth',
+    label: 'Smooth',
+    hint: 'A spline through every control point. Best for tracing a street that genuinely curves, where you do not know the radius.',
+  },
+];
 
 const TOOLS: { id: Tool; label: string; key: string; hint: string }[] = [
   {
@@ -116,6 +132,8 @@ export default function MapEditor() {
     moveVertexLive,
     insertVertexLive,
     removeVertex,
+    setCurve,
+    toggleSharpVertex,
   } = useEditorStore.getState();
 
   const [view, setView] = useState<MapView | null>(null);
@@ -148,6 +166,9 @@ export default function MapEditor() {
   const fit = section ? checkFit(section.components, available || total) : null;
   const basemap = basemapById(basemapId);
   const activeTool = TOOLS.find((t) => t.id === tool) ?? TOOLS[0]!;
+  const curveMode = street?.curve?.mode ?? 'straight';
+  const sharpCount = street?.curve?.sharpVertices?.length ?? 0;
+  const actualRadius = street ? tightestRadius(resolveCenterline(street)) : Infinity;
   const selectedJunction = junctions.find((j) => j.key === selectedJunctionKey) ?? null;
   const streetNames = useMemo(
     () => Object.fromEntries(streets.map((s) => [s.id, s.name])),
@@ -320,7 +341,7 @@ export default function MapEditor() {
                       <span className="card-meta">
                         <span>
                           {s.section.components.length} bands ·{' '}
-                          {formatWidth(lineLengthMeters(s.centerline), units, {
+                          {formatWidth(lineLengthMeters(resolveCenterline(s)), units, {
                             decimals: 0,
                             withUnit: true,
                           })}{' '}
@@ -613,6 +634,7 @@ export default function MapEditor() {
             onVertexMove={moveVertexLive}
             onVertexInsert={insertVertexLive}
             onVertexDelete={removeVertex}
+            onVertexSharp={toggleSharpVertex}
             onMeasureChange={(points, metres) => setMeasure({ points: points.length, metres })}
             onRenderStats={setRenderStats}
           />
@@ -728,7 +750,7 @@ export default function MapEditor() {
               <header className="panel-head">
                 <span className="label">Street</span>
                 <span className="label mono">
-                  {formatWidth(lineLengthMeters(street.centerline), units, {
+                  {formatWidth(lineLengthMeters(resolveCenterline(street)), units, {
                     decimals: 0,
                     withUnit: true,
                   })}
@@ -741,9 +763,66 @@ export default function MapEditor() {
                 onChange={(e) => renameStreet(street.id, e.target.value)}
               />
               <p className="hint">
-                {street.centerline.length} centerline points. Drag one on the map to reshape,
-                alt-click to remove it, or drag a hollow handle between two to add one.
+                {street.centerline.length} control points. Drag one to reshape, alt-click to
+                remove it, or drag a hollow handle between two to add one.
               </p>
+            </section>
+
+            <section className="panel">
+              <header className="panel-head">
+                <span className="label">Alignment</span>
+                {curveMode !== 'straight' && Number.isFinite(actualRadius) && (
+                  <span className="label mono" title="Tightest radius actually on the line">
+                    R {formatWidth(actualRadius, units, { decimals: 0, withUnit: true })}
+                  </span>
+                )}
+              </header>
+
+              <div className="segmented" role="group" aria-label="Centerline alignment">
+                {CURVE_MODES.map((mode) => (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    aria-pressed={curveMode === mode.id}
+                    title={mode.hint}
+                    onClick={() => setCurve(street.id, { mode: mode.id })}
+                  >
+                    {mode.label}
+                  </button>
+                ))}
+              </div>
+
+              {curveMode === 'rounded' && (
+                <label className="field" style={{ marginTop: 9 }}>
+                  <span className="label">Corner radius ({units})</span>
+                  <input
+                    className="text-input mono"
+                    type="number"
+                    min={0}
+                    step={stepFor(units)}
+                    value={formatWidth(street.curve?.radiusMeters ?? DEFAULT_CURVE.radiusMeters, units, {
+                      decimals: 0,
+                    })}
+                    onChange={(e) => {
+                      const value = Number(e.target.value);
+                      if (!Number.isFinite(value) || value < 0) return;
+                      setCurve(street.id, { radiusMeters: displayToMetres(value, units) });
+                    }}
+                  />
+                  <span className="hint">
+                    A corner is clamped to the largest arc its two segments can carry, so the
+                    radius above is what was asked for and the R in the header is what you got.
+                  </span>
+                </label>
+              )}
+
+              {curveMode !== 'straight' && (
+                <p className="hint">
+                  Shift-click a control point to pin it as a hard corner — useful where a
+                  street curves through a bend but has to turn square at a junction.
+                  {sharpCount > 0 && ` ${sharpCount} pinned.`}
+                </p>
+              )}
             </section>
 
             <section className="panel">

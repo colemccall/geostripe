@@ -5,6 +5,7 @@ import { deriveProject } from '../geo/derived';
 import type { JunctionOverride } from '../geo/derived';
 import type { JunctionGeometry } from '../geo/intersection';
 import { midpoint } from '../geo/measure';
+import { resolveCenterline } from '../geo/curve';
 import type { CurvatureWarning } from '../geo/curvature';
 import { PRIMITIVES } from '../library/primitives';
 
@@ -100,17 +101,22 @@ export function buildDesignData(
       type: 'Feature',
       id: `${street.id}:center`,
       properties: { streetId: street.id, name: street.name, selected },
-      geometry: { type: 'LineString', coordinates: street.centerline },
+      // The resolved line, so the guide follows the curve the bands were built from.
+      geometry: { type: 'LineString', coordinates: resolveCenterline(street) },
     });
 
     // Vertices are drawn only for the selected street — every centerline showing its
     // handles at once turns the map into confetti.
     if (selected) {
+      const sharp = new Set(street.curve?.sharpVertices ?? []);
+      const curved = (street.curve?.mode ?? 'straight') !== 'straight';
       street.centerline.forEach((position, index) => {
         vertices.features.push({
           type: 'Feature',
           id: `${street.id}:v${index}`,
-          properties: { streetId: street.id, index },
+          // `sharp` only means anything on a curved street; on a polyline every corner
+          // is already hard and flagging them would be noise.
+          properties: { streetId: street.id, index, sharp: curved && sharp.has(index) },
           geometry: { type: 'Point', coordinates: position },
         });
 

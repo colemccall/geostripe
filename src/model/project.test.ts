@@ -171,6 +171,53 @@ describe('intersection settings', () => {
   });
 });
 
+describe('curved alignments', () => {
+  const curved: Street[] = createDemoStreets().map((street, i) =>
+    i === 0
+      ? { ...street, curve: { mode: 'rounded' as const, radiusMeters: 18, sharpVertices: [2] } }
+      : { ...street, curve: { mode: 'smooth' as const, radiusMeters: 0 } },
+  );
+
+  it('round-trips the alignment alongside the control points', () => {
+    const loaded = roundTrip(curved);
+    expect(loaded[0]!.curve).toEqual({ mode: 'rounded', radiusMeters: 18, sharpVertices: [2] });
+    expect(loaded[1]!.curve).toEqual({ mode: 'smooth', radiusMeters: 0 });
+    // Control points, not the tessellated line: a reopened curve has to stay editable.
+    expect(loaded[0]!.centerline).toEqual(curved[0]!.centerline);
+  });
+
+  it('writes nothing for a plain polyline', () => {
+    const file = toProjectGeoJSON(createDemoStreets(), META);
+    const street = file.features.find((f) => f.properties?.['geostripe'] === 'street')!;
+    expect(street.properties?.['curve']).toBeUndefined();
+  });
+
+  it('keeps the derived bands following the curve, not the controls', () => {
+    // The bands exported for QGIS have to match what is on screen, which means they are
+    // built from the resolved line. A curved street's polygons therefore cover more
+    // ground than its control polygon would.
+    // The same street, with and without an alignment — otherwise this would be comparing
+    // two streets that differ in vertex count for unrelated reasons.
+    const plain = createDemoStreets()[1]!;
+    const straightFile = toProjectGeoJSON([plain], META);
+    const curvedFile = toProjectGeoJSON(
+      [{ ...plain, curve: { mode: 'smooth' as const, radiusMeters: 0 } }],
+      META,
+    );
+    const count = (f: typeof straightFile) =>
+      f.features.filter((x) => x.properties?.['geostripe'] === 'band').length;
+    expect(count(curvedFile)).toBe(count(straightFile));
+
+    const curvedBand = curvedFile.features.find((f) => f.properties?.['geostripe'] === 'band')!;
+    const straightBand = straightFile.features.find(
+      (f) => f.properties?.['geostripe'] === 'band',
+    )!;
+    const points = (f: typeof curvedBand) =>
+      (f.geometry as { coordinates: number[][][] }).coordinates[0]!.length;
+    expect(points(curvedBand)).toBeGreaterThan(points(straightBand));
+  });
+});
+
 describe('graceful failure', () => {
   it('rejects text that is not JSON', () => {
     const result = parseProject('<html>nope</html>', DEFAULTS);

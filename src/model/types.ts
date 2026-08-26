@@ -1,4 +1,5 @@
 import type { ComponentType, Direction } from '../library/primitives';
+import type { CurveSettings } from '../geo/curve';
 
 /**
  * One band of a cross-section. `id` is runtime-only — it is regenerated on load and
@@ -50,8 +51,16 @@ export interface CrossSection {
 export interface Street {
   id: string;
   name: string;
-  /** WGS84 [lng, lat] pairs. */
+  /**
+   * WGS84 [lng, lat] control points — the vertices you drag.
+   *
+   * NOT the line the geometry is built from when the street is curved. Everything that
+   * needs real geometry goes through `resolveCenterline`, which tessellates these into a
+   * dense polyline. Keeping the controls separate is what lets a curve stay editable.
+   */
   centerline: [number, number][];
+  /** How the control points are joined. Absent means a plain polyline. */
+  curve?: CurveSettings;
   section: CrossSection;
   /** Measured curb-to-curb of the real street, for the fit check. */
   existingWidthMeters?: number;

@@ -116,6 +116,8 @@ interface Props {
   onVertexMove?: (streetId: string, index: number, point: LngLat) => void;
   onVertexInsert?: (streetId: string, afterIndex: number, point: LngLat) => void;
   onVertexDelete?: (streetId: string, index: number) => void;
+  /** Shift-click a control point to pin or release it as a hard corner. */
+  onVertexSharp?: (streetId: string, index: number) => void;
 
   // ---- measuring
   onMeasureChange?: (points: LngLat[], metres: number) => void;
@@ -313,10 +315,12 @@ function addDesignLayers(map: MapLibreMap) {
     type: 'circle',
     source: 'vertices',
     paint: {
-      'circle-radius': 4.5,
-      'circle-color': '#F2C14E',
-      'circle-stroke-color': '#14181A',
-      'circle-stroke-width': 1.6,
+      // A pinned corner reads as hollow: the curve runs through the filled ones and
+      // stops at these.
+      'circle-radius': ['case', ['get', 'sharp'], 5, 4.5],
+      'circle-color': ['case', ['get', 'sharp'], '#14181A', '#F2C14E'],
+      'circle-stroke-color': ['case', ['get', 'sharp'], '#F2C14E', '#14181A'],
+      'circle-stroke-width': ['case', ['get', 'sharp'], 2.2, 1.6],
     },
   });
 
@@ -438,6 +442,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     onVertexMove,
     onVertexInsert,
     onVertexDelete,
+    onVertexSharp,
     onMeasureChange,
     onRenderStats,
   },
@@ -470,6 +475,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     onVertexMove,
     onVertexInsert,
     onVertexDelete,
+    onVertexSharp,
     onMeasureChange,
     onRenderStats,
   };
@@ -862,10 +868,14 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
 
       event.preventDefault();
 
-      // Alt-click removes. Held rather than a separate mode, because deleting a vertex is
-      // a one-off correction, not somewhere you stay.
+      // Alt-click removes, shift-click pins the corner. Both held rather than separate
+      // modes, because each is a one-off correction, not somewhere you stay.
       if (event.originalEvent.altKey) {
         latest.current.onVertexDelete?.(streetId, index);
+        return;
+      }
+      if (event.originalEvent.shiftKey) {
+        latest.current.onVertexSharp?.(streetId, index);
         return;
       }
 
