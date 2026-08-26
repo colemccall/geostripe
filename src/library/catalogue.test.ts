@@ -4,6 +4,7 @@ import {
   COMPONENT_TYPES,
   DEFAULT_LANE_GLYPHS,
   PRIMITIVES,
+  primitiveTree,
   searchPrimitives,
 } from './primitives';
 import { GLYPHS } from '../geo/glyphs';
@@ -13,6 +14,7 @@ import {
   instantiateTemplate,
   searchTemplates,
   templateTotalWidth,
+  templateTree,
 } from './templates';
 import { totalWidth } from '../model/section';
 import { metresToDisplay } from '../lib/units';
@@ -82,6 +84,27 @@ describe('the primitive catalogue', () => {
       const spec = PRIMITIVES[type as (typeof COMPONENT_TYPES)[number]];
       expect(GLYPHS[preset!.glyph].widthMeters).toBeLessThan(spec.defaultWidthMeters);
       expect(preset!.spacingMeters).toBeGreaterThan(GLYPHS[preset!.glyph].lengthMeters);
+    }
+  });
+
+  it('leaves nothing stranded outside the browser tree', () => {
+    // The tree is what the palette navigates. A primitive in no listed group would simply
+    // not exist as far as the UI is concerned, and nothing anywhere would say so.
+    const inTree = primitiveTree().flatMap((c) => c.groups.flatMap((g) => g.items));
+    expect(new Set(inTree).size).toBe(COMPONENT_TYPES.length);
+    for (const type of COMPONENT_TYPES) expect(inTree).toContain(type);
+  });
+
+  it('names every group, and keeps categories from splintering into singletons', () => {
+    for (const category of primitiveTree()) {
+      expect(category.groups.length).toBeGreaterThan(0);
+      // More than six groups in one category is a category that wants splitting; a group
+      // per item is a tree that navigates no better than the flat list it replaced.
+      expect(category.groups.length).toBeLessThanOrEqual(6);
+      for (const group of category.groups) {
+        expect(group.label.length).toBeGreaterThan(2);
+        expect(group.items.length).toBeGreaterThan(0);
+      }
     }
   });
 
@@ -161,6 +184,18 @@ describe('the template catalogue', () => {
 
     expect(searchTemplates('tram').length).toBeGreaterThan(0);
     expect(searchTemplates('zzzz')).toHaveLength(0);
+  });
+
+  it('leaves no preset outside the tree, and no family unreasonably large', () => {
+    const inTree = templateTree().flatMap((c) => c.groups.flatMap((g) => g.items));
+    expect(inTree).toHaveLength(TEMPLATES.length);
+    for (const category of templateTree()) {
+      for (const group of category.groups) {
+        expect(group.label.length).toBeGreaterThan(2);
+        // A family of thirty is a flat list wearing a tree's clothes.
+        expect(group.items.length).toBeLessThanOrEqual(14);
+      }
+    }
   });
 
   it('keeps the eight original template ids, which saved projects reference', () => {

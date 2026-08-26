@@ -5,6 +5,7 @@ import { deriveProject } from '../geo/derived';
 import type { DerivedProject, JunctionOverride } from '../geo/derived';
 import type { JunctionGeometry } from '../geo/intersection';
 import { midpoint } from '../geo/measure';
+import { mergeParts } from '../geo/merge';
 import { closeRing, resolveCenterline, resolveRing } from '../geo/curve';
 import { LANDCOVERS } from '../library/landcover';
 import type { CurvatureWarning } from '../geo/curvature';
@@ -30,6 +31,10 @@ export interface JunctionSummary {
   position: [number, number];
   legCount: number;
   kind: string;
+  /** How it was read: an intersection, a merge, or two streets simply continuing. */
+  form: DerivedProject['junctionForms'][number];
+  /** Angle at which the joining road comes in, when there is one. Degrees. */
+  mergeAngleDegrees: number | null;
   corners: JunctionGeometry['corners'];
   legs: JunctionGeometry['legs'];
   warnings: string[];
@@ -79,7 +84,17 @@ export interface BuildOptions {
   defaultCornerRadiusMeters?: number;
   trimAtJunctions?: boolean;
   junctionMergeSlackMeters?: number;
+  mergeBelowDegrees?: number;
   selectedJunctionKey?: string | null;
+  /**
+   * Draw every centerline, not just the selected one.
+   *
+   * Off by default. A centerline is an editing handle, not part of the design: once the
+   * bands are drawn it is the one line on the map that does not exist on the ground, and
+   * a dozen of them turn a finished design into a wiring diagram. It comes back the moment
+   * a street is selected, which is the moment it means anything.
+   */
+  showAllCenterlines?: boolean;
 }
 
 export function buildDesignData(
@@ -157,6 +172,7 @@ export function buildDesignData(
     defaultCornerRadiusMeters: options.defaultCornerRadiusMeters,
     trimAtJunctions: options.trimAtJunctions,
     junctionMergeSlackMeters: options.junctionMergeSlackMeters,
+    mergeBelowDegrees: options.mergeBelowDegrees,
   });
 
   for (const street of streets) {
@@ -170,13 +186,15 @@ export function buildDesignData(
     }
 
     const selected = street.id === selectedStreetId;
-    centerlines.features.push({
-      type: 'Feature',
-      id: `${street.id}:center`,
-      properties: { streetId: street.id, name: street.name, selected },
-      // The resolved line, so the guide follows the curve the bands were built from.
-      geometry: { type: 'LineString', coordinates: resolveCenterline(street) },
-    });
+    if (selected || options.showAllCenterlines) {
+      centerlines.features.push({
+        type: 'Feature',
+        id: `${street.id}:center`,
+        properties: { streetId: street.id, name: street.name, selected },
+        // The resolved line, so the guide follows the curve the bands were built from.
+        geometry: { type: 'LineString', coordinates: resolveCenterline(street) },
+      });
+    }
 
     // Vertices are drawn only for the selected street — every centerline showing its
     // handles at once turns the map into confetti.
@@ -268,6 +286,8 @@ export function buildDesignData(
       position: geometry.centre,
       legCount: geometry.legs.length,
       kind: junction.kind,
+      form: derived.junctionForms[index] ?? 'intersection',
+      mergeAngleDegrees: mergeParts(junction)?.angleDegrees ?? null,
       corners: geometry.corners,
       legs: geometry.legs,
       warnings: geometry.warnings,

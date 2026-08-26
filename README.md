@@ -111,6 +111,8 @@ src/
     curve.ts              Arcs and splines: control points -> the line everything uses
     junctions.ts          Junction detection; identity that survives every edit
     intersection.ts       Curb returns, crossings, corner treatments, trimming boundaries
+    merge.ts              Where a road joins another instead of crossing it
+    snap.ts               Where a drawn point should actually land
     glyphs.ts             Pavement symbols, authored in metres in a lane-local frame
     markings.ts           Stripes, repeating lane symbols, junction approach arrows
     derived.ts            The memoised pipeline everything on the map comes out of
@@ -138,6 +140,8 @@ src/
     MapCanvas.tsx         MapLibre wrapper and all pointer interaction
     worker.guard.test.ts  Source-level guard on the MapLibre worker configuration
   components/
+    LibraryTree.tsx       The two-level browser all three libraries share
+    ApproachEditor.tsx    Lane assignment and turn pockets for one junction approach
     AppShell.tsx          Chrome — units, imagery picker, undo/redo
     CrossSectionSvg.tsx   Shared elevation renderer, both pages
     ComponentStack.tsx    Shared editable stack, both pages
@@ -223,6 +227,22 @@ the width that is really there, and save it as GeoJSON you can reopen and keep e
   lane-use arrow follows. A turn pocket is applied to the leg *before* any geometry is
   built, so it moves the kerb, the corner return and the crossing with it — and the crossing
   distance the inspector reports goes up by exactly what the pocket costs.
+- **Merges.** A road that joins another instead of crossing it is drawn as a merge, not an
+  intersection: the road being joined is never cut, and the junction is the taper between
+  the two kerbs, with a gore at the nose. Below 40° it is classified automatically —
+  nobody draws a twenty-degree crossroads — and either reading can be forced from the
+  inspector for the ambiguous band around thirty. The wedge is stated as *the ramp's
+  corridor minus the road it joins*, which is what makes it correct when the ramp is the
+  wider of the two.
+- **Snapping.** Points snap to control points and to centerlines while drawing, measuring
+  and covering ground; Shift adds 15° angle snapping, Alt turns it all off. This is more
+  than a convenience here: junctions are derived from where centerlines actually meet, so a
+  vertex that lands where it was aimed is the difference between a junction at the crossing
+  and one at a near miss.
+- **A browsable library.** 96 primitives and 157 presets in a two-level tree — category,
+  then group — with search that flattens the whole thing and covers each entry's purpose,
+  not just its name. Recently used sits above the tree, because assembling one street uses
+  the same three or four lanes over and over.
 - **Junctions that are not a tidy four-way.** Five and six legs, acute corners, and the
   staggered intersection: two T-junctions close enough that a driver reads them as one
   place. Those stay two junctions on purpose — averaging them would put both side streets
@@ -230,10 +250,10 @@ the width that is really there, and save it as GeoJSON you can reopen and keep e
   inside the neighbour suppressed. One slider moves the threshold in both directions.
 - **Grade separation** — `level` marks a street as a tunnel or an overpass, and streets at
   different levels do not form junctions.
-- **716 unit tests** across geometry, curves, junction detection, intersection geometry,
-  complex and staggered junctions, road markings, the memoisation that keeps dragging
-  affordable, cross-section arithmetic, the dimensional audit, the asset catalogue, the
-  project round-trip, and store history.
+- **741 unit tests** across geometry, curves, junction detection, intersection geometry,
+  complex and staggered junctions, merges, snapping, road markings, the memoisation that
+  keeps dragging affordable, cross-section arithmetic, the dimensional audit, the asset
+  catalogue, the project round-trip, and store history.
 
 - **Intersections** — detected automatically wherever centerlines cross, with no node to
   place or maintain. Each junction carries its legs sorted by bearing and a corner between
@@ -278,16 +298,19 @@ junction detection.
 | M | Paths and shared-use paths as their own kind of alignment | done |
 | N | Road markings — stripes, lane symbols, lane-use arrows | done |
 | O | Complex junctions — 5/6-way, staggered pairs, lane assignment, turn pockets | done |
+| R | Merges — a road joining another, with a taper and a gore instead of a box | done |
+| S | Snapping — to vertices, to centerlines, and to 15° increments | done |
+| T | Library browser — a two-level tree, search, recents, per-band actions | done |
 | G | Protected (Dutch) intersection, incl. the corner refuge island | next |
 | H | Roundabout, as a junction form | planned |
 | P | Signal phasing — which movements run together, and the conflicts left over | planned |
 | I | Swept-path / design-vehicle check | stretch |
 | Q | Text pavement markings (ONLY, BUS, STOP) — needs glyph outlines, not a font | stretch |
 
-Also outstanding, smaller: endpoint and angle snapping while drawing, touch support for
-vertex dragging (mouse only today), point components such as trees and signals, and
-asymmetric template generators (everything generated today is mirrored about the
-centerline, so "parking on one side" is still hand-authored).
+Also outstanding, smaller: touch support for vertex dragging (mouse only today), point
+components such as trees and signals, and asymmetric template generators (everything
+generated today is mirrored about the centerline, so "parking on one side" is still
+hand-authored).
 
 ### What each of the finished phases actually decided
 
@@ -307,6 +330,15 @@ Worth recording, because these are the calls that would be quietly re-litigated 
   guess on the road and calling it a design is the failure mode this tool exists against;
   the conventional assignment is one button away and labelled as a convention.
 - **A staggered pair stays two junctions** (O), reported rather than merged.
+- **A merge is a boolean, not a walk** (R). The first version walked the ramp's kerbs
+  outward to the mainline's and stitched four points together, which works only while the
+  ramp is the narrower road. Stating the wedge as *ramp corridor minus mainline* has no
+  special cases and produces the nose for free.
+- **A vertex beats an edge** (S), even when the edge is marginally nearer. An existing
+  control point is a decision somebody made; a point on a segment is not.
+- **The centerline hides itself** (T). It is an editing handle, not part of the design —
+  the one line on the map that does not exist on the ground — so it appears only for the
+  street you have selected, with a toggle for when you want them all.
 
 Deliberately out of scope for v1: image/PNG export, accounts, a backend, 3D, and traffic
 simulation.

@@ -30,6 +30,7 @@ interface Props {
   onDirection: (id: string, direction: Direction) => void;
   onMove: (id: string, delta: number) => void;
   onRemove: (id: string) => void;
+  onDuplicate?: (id: string) => void;
   /** Markings for the selected band. Omitted where the caller has no use for them. */
   onMarkings?: (
     id: string,
@@ -46,6 +47,7 @@ export default function ComponentStack({
   onDirection,
   onMove,
   onRemove,
+  onDuplicate,
   onMarkings,
 }: Props) {
   if (components.length === 0) {
@@ -119,15 +121,28 @@ export default function ComponentStack({
               }}
             />
 
-            <button
-              type="button"
-              className="row-remove"
-              aria-label={`Remove ${spec.label}`}
-              title="Remove"
-              onClick={() => onRemove(c.id)}
-            >
-              ×
-            </button>
+            <span className="row-tools">
+              {onDuplicate && (
+                <button
+                  type="button"
+                  className="row-remove"
+                  aria-label={`Duplicate ${spec.label}`}
+                  title="Duplicate"
+                  onClick={() => onDuplicate(c.id)}
+                >
+                  ⧉
+                </button>
+              )}
+              <button
+                type="button"
+                className="row-remove"
+                aria-label={`Remove ${spec.label}`}
+                title="Remove"
+                onClick={() => onRemove(c.id)}
+              >
+                ×
+              </button>
+            </span>
 
             {selected && onMarkings && (
               <div className="row-markings">

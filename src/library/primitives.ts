@@ -177,6 +177,14 @@ export type Marking = 'none' | 'lane' | 'turn' | 'bus' | 'bike' | 'parking' | 'w
 export interface Primitive {
   readonly label: string;
   readonly category: ComponentCategory;
+  /**
+   * The group this sits in *within* its category, as a plain label.
+   *
+   * A string rather than another enum: these are how a person navigating the library
+   * expects it to divide, not a property anything computes with, and adding "Ramps and
+   * merging" should not mean touching a type that geometry code imports.
+   */
+  readonly group: string;
   /** As-built typical. See the note at the top of this file. */
   readonly defaultWidthMeters: number;
   readonly minWidthMeters: number;
@@ -195,6 +203,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   travelLane: {
     label: 'Travel lane',
     category: 'travel',
+    group: 'General purpose',
     defaultWidthMeters: 3.35,
     minWidthMeters: 2.7,
     typicalRangeFeet: [10, 12],
@@ -208,6 +217,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   turnLane: {
     label: 'Center turn lane',
     category: 'travel',
+    group: 'Turning',
     defaultWidthMeters: 3.35,
     minWidthMeters: 3.0,
     typicalRangeFeet: [10, 14],
@@ -221,6 +231,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   turnPocket: {
     label: 'Turn pocket',
     category: 'travel',
+    group: 'Turning',
     defaultWidthMeters: 3.05,
     minWidthMeters: 2.7,
     typicalRangeFeet: [10, 12],
@@ -234,6 +245,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   sharedLane: {
     label: 'Shared lane',
     category: 'travel',
+    group: 'General purpose',
     defaultWidthMeters: 4.0,
     minWidthMeters: 3.0,
     typicalRangeFeet: [12, 15],
@@ -247,6 +259,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   slipLane: {
     label: 'Slip lane',
     category: 'travel',
+    group: 'Turning',
     defaultWidthMeters: 4.0,
     minWidthMeters: 3.35,
     typicalRangeFeet: [12, 16],
@@ -260,6 +273,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   reversibleLane: {
     label: 'Reversible lane',
     category: 'travel',
+    group: 'General purpose',
     defaultWidthMeters: 3.35,
     minWidthMeters: 3.0,
     typicalRangeFeet: [10, 12],
@@ -273,6 +287,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   woonerf: {
     label: 'Shared street',
     category: 'travel',
+    group: 'Access',
     defaultWidthMeters: 5.5,
     minWidthMeters: 3.5,
     typicalRangeFeet: [14, 24],
@@ -288,6 +303,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   busLane: {
     label: 'Bus lane',
     category: 'transit',
+    group: 'Bus',
     defaultWidthMeters: 3.35,
     minWidthMeters: 3.0,
     typicalRangeFeet: [10, 12],
@@ -301,6 +317,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   busLaneOffset: {
     label: 'Offset bus lane',
     category: 'transit',
+    group: 'Bus',
     defaultWidthMeters: 3.65,
     minWidthMeters: 3.0,
     typicalRangeFeet: [11, 13],
@@ -314,6 +331,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   busway: {
     label: 'Busway',
     category: 'transit',
+    group: 'Bus',
     defaultWidthMeters: 7.0,
     minWidthMeters: 6.0,
     typicalRangeFeet: [20, 26],
@@ -327,6 +345,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   transitPlatform: {
     label: 'Transit platform',
     category: 'transit',
+    group: 'Stops',
     defaultWidthMeters: 2.4,
     minWidthMeters: 1.8,
     typicalRangeFeet: [6, 12],
@@ -340,6 +359,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   tramTrack: {
     label: 'Tram track',
     category: 'transit',
+    group: 'Tram',
     defaultWidthMeters: 3.0,
     minWidthMeters: 2.6,
     typicalRangeFeet: [9, 11],
@@ -353,6 +373,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   tramReservation: {
     label: 'Tram reservation',
     category: 'transit',
+    group: 'Tram',
     defaultWidthMeters: 6.4,
     minWidthMeters: 5.5,
     typicalRangeFeet: [18, 24],
@@ -368,6 +389,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   bikeLaneConventional: {
     label: 'Bike lane',
     category: 'bike',
+    group: 'Painted',
     defaultWidthMeters: 1.8,
     minWidthMeters: 1.2,
     typicalRangeFeet: [5, 7],
@@ -381,6 +403,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   bikeLaneBuffered: {
     label: 'Buffered bike lane',
     category: 'bike',
+    group: 'Painted',
     defaultWidthMeters: 2.4,
     minWidthMeters: 1.8,
     typicalRangeFeet: [7, 10],
@@ -394,6 +417,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   bikeLaneProtected: {
     label: 'Protected bike lane',
     category: 'bike',
+    group: 'Separated',
     defaultWidthMeters: 3.0,
     minWidthMeters: 2.1,
     typicalRangeFeet: [8, 13],
@@ -407,6 +431,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   cycleTrackTwoWay: {
     label: 'Two-way cycle track',
     category: 'bike',
+    group: 'Separated',
     defaultWidthMeters: 3.7,
     minWidthMeters: 2.4,
     typicalRangeFeet: [10, 16],
@@ -420,6 +445,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   bikeLaneContraflow: {
     label: 'Contraflow bike lane',
     category: 'bike',
+    group: 'Painted',
     defaultWidthMeters: 1.8,
     minWidthMeters: 1.5,
     typicalRangeFeet: [5, 7],
@@ -433,6 +459,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   sharedUsePath: {
     label: 'Shared use path',
     category: 'path',
+    group: 'Paved',
     defaultWidthMeters: 3.0,
     minWidthMeters: 2.4,
     typicalRangeFeet: [8, 14],
@@ -446,6 +473,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   bikeParking: {
     label: 'Bike parking',
     category: 'bike',
+    group: 'Support',
     defaultWidthMeters: 1.8,
     minWidthMeters: 0.9,
     typicalRangeFeet: [3, 8],
@@ -461,6 +489,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   parkingLaneParallel: {
     label: 'Parallel parking',
     category: 'parking',
+    group: 'Parking',
     defaultWidthMeters: 2.4,
     minWidthMeters: 2.1,
     typicalRangeFeet: [7, 9],
@@ -474,6 +503,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   parkingLaneAngled: {
     label: 'Angled parking',
     category: 'parking',
+    group: 'Parking',
     defaultWidthMeters: 5.5,
     minWidthMeters: 4.3,
     typicalRangeFeet: [16, 20],
@@ -487,6 +517,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   parkingBackInAngled: {
     label: 'Back-in angled parking',
     category: 'parking',
+    group: 'Parking',
     defaultWidthMeters: 5.5,
     minWidthMeters: 4.3,
     typicalRangeFeet: [16, 20],
@@ -500,6 +531,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   parkingPerpendicular: {
     label: 'Perpendicular parking',
     category: 'parking',
+    group: 'Parking',
     defaultWidthMeters: 5.5,
     minWidthMeters: 4.9,
     typicalRangeFeet: [16, 20],
@@ -513,6 +545,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   loadingZone: {
     label: 'Loading zone',
     category: 'parking',
+    group: 'Loading and stopping',
     defaultWidthMeters: 3.0,
     minWidthMeters: 2.4,
     typicalRangeFeet: [8, 12],
@@ -526,6 +559,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   layby: {
     label: 'Layby',
     category: 'parking',
+    group: 'Loading and stopping',
     defaultWidthMeters: 3.0,
     minWidthMeters: 2.4,
     typicalRangeFeet: [8, 12],
@@ -541,6 +575,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   sidewalk: {
     label: 'Sidewalk',
     category: 'pedestrian',
+    group: 'Walking',
     defaultWidthMeters: 3.0,
     minWidthMeters: 1.5,
     typicalRangeFeet: [6, 15],
@@ -554,6 +589,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   frontageZone: {
     label: 'Frontage zone',
     category: 'pedestrian',
+    group: 'Sidewalk zones',
     defaultWidthMeters: 0.6,
     minWidthMeters: 0.3,
     typicalRangeFeet: [1.5, 6],
@@ -567,6 +603,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   furnitureZone: {
     label: 'Furniture zone',
     category: 'pedestrian',
+    group: 'Sidewalk zones',
     defaultWidthMeters: 1.2,
     minWidthMeters: 0.9,
     typicalRangeFeet: [3, 6],
@@ -580,6 +617,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   pedestrianMall: {
     label: 'Pedestrian mall',
     category: 'pedestrian',
+    group: 'Walking',
     defaultWidthMeters: 9.0,
     minWidthMeters: 4.0,
     typicalRangeFeet: [20, 60],
@@ -593,6 +631,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   sharedSpace: {
     label: 'Shared space',
     category: 'pedestrian',
+    group: 'Shared and social',
     defaultWidthMeters: 6.0,
     minWidthMeters: 3.0,
     typicalRangeFeet: [12, 30],
@@ -608,6 +647,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   median: {
     label: 'Planted median',
     category: 'median',
+    group: 'Median',
     defaultWidthMeters: 2.4,
     minWidthMeters: 1.8,
     typicalRangeFeet: [6, 16],
@@ -621,6 +661,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   medianRefuge: {
     label: 'Refuge island',
     category: 'median',
+    group: 'Median',
     defaultWidthMeters: 1.83,
     minWidthMeters: 1.83,
     typicalRangeFeet: [6, 10],
@@ -634,6 +675,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   flushMedian: {
     label: 'Flush median',
     category: 'median',
+    group: 'Median',
     defaultWidthMeters: 1.2,
     minWidthMeters: 0.6,
     typicalRangeFeet: [2, 6],
@@ -647,6 +689,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   paintedBuffer: {
     label: 'Painted buffer',
     category: 'median',
+    group: 'Buffer',
     defaultWidthMeters: 0.9,
     minWidthMeters: 0.45,
     typicalRangeFeet: [1.5, 5],
@@ -660,6 +703,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   plantingStrip: {
     label: 'Planting strip',
     category: 'median',
+    group: 'Green infrastructure',
     defaultWidthMeters: 1.5,
     minWidthMeters: 0.9,
     typicalRangeFeet: [3, 8],
@@ -673,6 +717,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   bioswale: {
     label: 'Bioswale',
     category: 'median',
+    group: 'Green infrastructure',
     defaultWidthMeters: 1.8,
     minWidthMeters: 1.2,
     typicalRangeFeet: [4, 10],
@@ -686,6 +731,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   treePit: {
     label: 'Tree pit',
     category: 'median',
+    group: 'Green infrastructure',
     defaultWidthMeters: 1.5,
     minWidthMeters: 1.2,
     typicalRangeFeet: [4, 8],
@@ -701,6 +747,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   shoulder: {
     label: 'Shoulder',
     category: 'edge',
+    group: 'Shoulder and kerb',
     defaultWidthMeters: 2.4,
     minWidthMeters: 0.6,
     typicalRangeFeet: [4, 10],
@@ -714,6 +761,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   gutter: {
     label: 'Gutter',
     category: 'edge',
+    group: 'Shoulder and kerb',
     defaultWidthMeters: 0.45,
     minWidthMeters: 0.3,
     typicalRangeFeet: [1, 2],
@@ -727,6 +775,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   verge: {
     label: 'Verge',
     category: 'edge',
+    group: 'Ground',
     defaultWidthMeters: 1.8,
     minWidthMeters: 0.6,
     typicalRangeFeet: [3, 12],
@@ -740,6 +789,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   barrier: {
     label: 'Concrete barrier',
     category: 'edge',
+    group: 'Barrier',
     defaultWidthMeters: 0.6,
     minWidthMeters: 0.45,
     typicalRangeFeet: [1.5, 3],
@@ -753,6 +803,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   guardrail: {
     label: 'Guardrail',
     category: 'edge',
+    group: 'Barrier',
     defaultWidthMeters: 0.45,
     minWidthMeters: 0.3,
     typicalRangeFeet: [1, 2],
@@ -766,6 +817,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   soundWall: {
     label: 'Sound wall',
     category: 'edge',
+    group: 'Barrier',
     defaultWidthMeters: 0.6,
     minWidthMeters: 0.3,
     typicalRangeFeet: [1, 3],
@@ -779,6 +831,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   ditch: {
     label: 'Ditch',
     category: 'edge',
+    group: 'Ground',
     defaultWidthMeters: 2.4,
     minWidthMeters: 1.2,
     typicalRangeFeet: [4, 12],
@@ -794,6 +847,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   freewayLane: {
     label: 'Freeway lane',
     category: 'highway',
+    group: 'Mainline',
     defaultWidthMeters: 3.65,
     minWidthMeters: 3.35,
     typicalRangeFeet: [11, 12],
@@ -807,6 +861,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   auxiliaryLane: {
     label: 'Auxiliary lane',
     category: 'highway',
+    group: 'Ramps and merging',
     defaultWidthMeters: 3.65,
     minWidthMeters: 3.35,
     typicalRangeFeet: [11, 12],
@@ -820,6 +875,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   rampLane: {
     label: 'Ramp lane',
     category: 'highway',
+    group: 'Ramps and merging',
     defaultWidthMeters: 4.3,
     minWidthMeters: 3.65,
     typicalRangeFeet: [12, 16],
@@ -833,6 +889,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   accelerationLane: {
     label: 'Acceleration lane',
     category: 'highway',
+    group: 'Ramps and merging',
     defaultWidthMeters: 3.65,
     minWidthMeters: 3.35,
     typicalRangeFeet: [11, 12],
@@ -846,6 +903,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   shoulderInner: {
     label: 'Inner shoulder',
     category: 'highway',
+    group: 'Mainline',
     defaultWidthMeters: 1.22,
     minWidthMeters: 0.6,
     typicalRangeFeet: [4, 6],
@@ -859,6 +917,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   gore: {
     label: 'Gore area',
     category: 'highway',
+    group: 'Ramps and merging',
     defaultWidthMeters: 3.0,
     minWidthMeters: 1.2,
     typicalRangeFeet: [4, 20],
@@ -874,6 +933,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   railTrack: {
     label: 'Rail track',
     category: 'rail',
+    group: 'Track',
     defaultWidthMeters: 3.0,
     minWidthMeters: 2.6,
     typicalRangeFeet: [9, 12],
@@ -887,6 +947,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   railBallast: {
     label: 'Ballast',
     category: 'rail',
+    group: 'Track',
     defaultWidthMeters: 1.8,
     minWidthMeters: 0.9,
     typicalRangeFeet: [3, 8],
@@ -902,6 +963,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   hovLane: {
     label: 'HOV lane',
     category: 'travel',
+    group: 'Managed',
     defaultWidthMeters: 3.5,
     minWidthMeters: 3.0,
     typicalRangeFeet: [11, 12],
@@ -915,6 +977,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   climbingLane: {
     label: 'Climbing lane',
     category: 'travel',
+    group: 'General purpose',
     defaultWidthMeters: 3.35,
     minWidthMeters: 3.0,
     typicalRangeFeet: [10, 12],
@@ -928,6 +991,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   contraflowLane: {
     label: 'Contraflow lane',
     category: 'travel',
+    group: 'General purpose',
     defaultWidthMeters: 3.2,
     minWidthMeters: 3.0,
     typicalRangeFeet: [10, 12],
@@ -941,6 +1005,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   frontageRoad: {
     label: 'Frontage road',
     category: 'travel',
+    group: 'Access',
     defaultWidthMeters: 6.5,
     minWidthMeters: 4.5,
     typicalRangeFeet: [18, 26],
@@ -954,6 +1019,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   serviceRoad: {
     label: 'Service road',
     category: 'travel',
+    group: 'Access',
     defaultWidthMeters: 5.5,
     minWidthMeters: 3.5,
     typicalRangeFeet: [14, 22],
@@ -967,6 +1033,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   alley: {
     label: 'Alley',
     category: 'travel',
+    group: 'Access',
     defaultWidthMeters: 4.9,
     minWidthMeters: 3.0,
     typicalRangeFeet: [10, 20],
@@ -980,6 +1047,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   queueJumpLane: {
     label: 'Queue jump lane',
     category: 'transit',
+    group: 'Bus',
     defaultWidthMeters: 3.35,
     minWidthMeters: 3.0,
     typicalRangeFeet: [10, 12],
@@ -993,6 +1061,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   busIsland: {
     label: 'Floating bus island',
     category: 'transit',
+    group: 'Stops',
     defaultWidthMeters: 2.4,
     minWidthMeters: 1.8,
     typicalRangeFeet: [6, 10],
@@ -1006,6 +1075,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   brtStation: {
     label: 'BRT station platform',
     category: 'transit',
+    group: 'Stops',
     defaultWidthMeters: 4.0,
     minWidthMeters: 2.5,
     typicalRangeFeet: [8, 16],
@@ -1019,6 +1089,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   trolleyLane: {
     label: 'Trolleybus lane',
     category: 'transit',
+    group: 'Bus',
     defaultWidthMeters: 3.35,
     minWidthMeters: 3.0,
     typicalRangeFeet: [10, 12],
@@ -1032,6 +1103,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   tramPlatform: {
     label: 'Tram platform',
     category: 'transit',
+    group: 'Stops',
     defaultWidthMeters: 2.5,
     minWidthMeters: 1.5,
     typicalRangeFeet: [5, 12],
@@ -1045,6 +1117,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   bikeLaneAdvisory: {
     label: 'Advisory bike lane',
     category: 'bike',
+    group: 'Painted',
     defaultWidthMeters: 1.7,
     minWidthMeters: 1.2,
     typicalRangeFeet: [4, 6],
@@ -1058,6 +1131,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   cycleTrackRaised: {
     label: 'Raised cycle track',
     category: 'bike',
+    group: 'Separated',
     defaultWidthMeters: 2.1,
     minWidthMeters: 1.5,
     typicalRangeFeet: [5, 8],
@@ -1071,6 +1145,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   bikeLaneClimbing: {
     label: 'Climbing bike lane',
     category: 'bike',
+    group: 'Painted',
     defaultWidthMeters: 1.7,
     minWidthMeters: 1.2,
     typicalRangeFeet: [4, 6],
@@ -1084,6 +1159,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   bikeShareStation: {
     label: 'Bike share dock',
     category: 'bike',
+    group: 'Support',
     defaultWidthMeters: 1.8,
     minWidthMeters: 1.2,
     typicalRangeFeet: [4, 8],
@@ -1097,6 +1173,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   sidepath: {
     label: 'Side path',
     category: 'path',
+    group: 'Paved',
     defaultWidthMeters: 3.0,
     minWidthMeters: 2.4,
     typicalRangeFeet: [8, 12],
@@ -1110,6 +1187,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   greenway: {
     label: 'Greenway',
     category: 'path',
+    group: 'Paved',
     defaultWidthMeters: 3.6,
     minWidthMeters: 2.4,
     typicalRangeFeet: [8, 14],
@@ -1123,6 +1201,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   footpath: {
     label: 'Footpath',
     category: 'path',
+    group: 'Paved',
     defaultWidthMeters: 2.0,
     minWidthMeters: 1.2,
     typicalRangeFeet: [4, 8],
@@ -1136,6 +1215,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   boardwalk: {
     label: 'Boardwalk',
     category: 'path',
+    group: 'Structure and edge',
     defaultWidthMeters: 3.0,
     minWidthMeters: 1.8,
     typicalRangeFeet: [6, 14],
@@ -1149,6 +1229,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   trailUnpaved: {
     label: 'Unpaved trail',
     category: 'path',
+    group: 'Unpaved',
     defaultWidthMeters: 2.4,
     minWidthMeters: 1.2,
     typicalRangeFeet: [4, 10],
@@ -1162,6 +1243,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   pathShoulder: {
     label: 'Path shoulder',
     category: 'path',
+    group: 'Structure and edge',
     defaultWidthMeters: 0.6,
     minWidthMeters: 0.3,
     typicalRangeFeet: [1, 3],
@@ -1175,6 +1257,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   bridleway: {
     label: 'Bridleway',
     category: 'path',
+    group: 'Unpaved',
     defaultWidthMeters: 3.0,
     minWidthMeters: 2.0,
     typicalRangeFeet: [6, 12],
@@ -1188,6 +1271,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   towpath: {
     label: 'Towpath',
     category: 'path',
+    group: 'Unpaved',
     defaultWidthMeters: 2.5,
     minWidthMeters: 1.5,
     typicalRangeFeet: [5, 10],
@@ -1201,6 +1285,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   taxiStand: {
     label: 'Taxi stand',
     category: 'parking',
+    group: 'Loading and stopping',
     defaultWidthMeters: 3.0,
     minWidthMeters: 2.4,
     typicalRangeFeet: [7, 10],
@@ -1214,6 +1299,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   pickupZone: {
     label: 'Passenger loading',
     category: 'parking',
+    group: 'Loading and stopping',
     defaultWidthMeters: 3.0,
     minWidthMeters: 2.4,
     typicalRangeFeet: [7, 10],
@@ -1227,6 +1313,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   parklet: {
     label: 'Parklet',
     category: 'parking',
+    group: 'Reclaimed',
     defaultWidthMeters: 2.4,
     minWidthMeters: 1.8,
     typicalRangeFeet: [6, 8],
@@ -1240,6 +1327,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   outdoorDining: {
     label: 'Outdoor dining',
     category: 'pedestrian',
+    group: 'Shared and social',
     defaultWidthMeters: 2.4,
     minWidthMeters: 1.5,
     typicalRangeFeet: [5, 10],
@@ -1253,6 +1341,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   playStreet: {
     label: 'Play street',
     category: 'pedestrian',
+    group: 'Shared and social',
     defaultWidthMeters: 6.0,
     minWidthMeters: 3.5,
     typicalRangeFeet: [12, 26],
@@ -1266,6 +1355,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   arcade: {
     label: 'Arcade',
     category: 'pedestrian',
+    group: 'Walking',
     defaultWidthMeters: 3.0,
     minWidthMeters: 2.0,
     typicalRangeFeet: [6, 14],
@@ -1279,6 +1369,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   medianPlanted: {
     label: 'Landscaped median',
     category: 'median',
+    group: 'Median',
     defaultWidthMeters: 3.6,
     minWidthMeters: 1.8,
     typicalRangeFeet: [6, 20],
@@ -1292,6 +1383,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   medianWide: {
     label: 'Boulevard median',
     category: 'median',
+    group: 'Median',
     defaultWidthMeters: 6.0,
     minWidthMeters: 3.0,
     typicalRangeFeet: [10, 40],
@@ -1305,6 +1397,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   rainGarden: {
     label: 'Rain garden',
     category: 'median',
+    group: 'Green infrastructure',
     defaultWidthMeters: 2.0,
     minWidthMeters: 1.2,
     typicalRangeFeet: [4, 8],
@@ -1318,6 +1411,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   rumbleStrip: {
     label: 'Rumble strip',
     category: 'edge',
+    group: 'Shoulder and kerb',
     defaultWidthMeters: 0.45,
     minWidthMeters: 0.2,
     typicalRangeFeet: [1, 2],
@@ -1331,6 +1425,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   retainingWall: {
     label: 'Retaining wall',
     category: 'edge',
+    group: 'Ground',
     defaultWidthMeters: 0.6,
     minWidthMeters: 0.3,
     typicalRangeFeet: [1, 4],
@@ -1344,6 +1439,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   snowStorage: {
     label: 'Snow storage',
     category: 'edge',
+    group: 'Ground',
     defaultWidthMeters: 1.5,
     minWidthMeters: 0.9,
     typicalRangeFeet: [3, 8],
@@ -1357,6 +1453,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   cableBarrier: {
     label: 'Cable barrier',
     category: 'edge',
+    group: 'Barrier',
     defaultWidthMeters: 0.6,
     minWidthMeters: 0.3,
     typicalRangeFeet: [1, 3],
@@ -1370,6 +1467,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   decelerationLane: {
     label: 'Deceleration lane',
     category: 'highway',
+    group: 'Ramps and merging',
     defaultWidthMeters: 3.65,
     minWidthMeters: 3.35,
     typicalRangeFeet: [11, 13],
@@ -1383,6 +1481,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   weavingLane: {
     label: 'Weaving lane',
     category: 'highway',
+    group: 'Ramps and merging',
     defaultWidthMeters: 3.65,
     minWidthMeters: 3.35,
     typicalRangeFeet: [11, 13],
@@ -1396,6 +1495,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   collectorLane: {
     label: 'Collector-distributor lane',
     category: 'highway',
+    group: 'Mainline',
     defaultWidthMeters: 3.65,
     minWidthMeters: 3.35,
     typicalRangeFeet: [11, 13],
@@ -1409,6 +1509,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   emergencyBay: {
     label: 'Emergency refuge bay',
     category: 'highway',
+    group: 'Refuge',
     defaultWidthMeters: 3.0,
     minWidthMeters: 2.5,
     typicalRangeFeet: [8, 12],
@@ -1422,6 +1523,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   tollLane: {
     label: 'Toll lane',
     category: 'highway',
+    group: 'Mainline',
     defaultWidthMeters: 3.65,
     minWidthMeters: 3.0,
     typicalRangeFeet: [10, 14],
@@ -1435,6 +1537,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   railPlatform: {
     label: 'Rail platform',
     category: 'rail',
+    group: 'Platform',
     defaultWidthMeters: 4.0,
     minWidthMeters: 2.5,
     typicalRangeFeet: [8, 30],
@@ -1448,6 +1551,7 @@ export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   railSiding: {
     label: 'Siding',
     category: 'rail',
+    group: 'Track',
     defaultWidthMeters: 3.0,
     minWidthMeters: 2.4,
     typicalRangeFeet: [8, 12],
@@ -1510,6 +1614,35 @@ export function primitive(type: ComponentType): Primitive {
  * Notes are searchable on purpose: it means you can find a thing by what it is *for*
  * ("refuge", "freight", "drainage") rather than having to already know its name.
  */
+/**
+ * The library as a two-level tree: category, then the groups inside it.
+ *
+ * Built from the data rather than declared separately, so a primitive can never end up in
+ * a group nothing lists — the failure mode a hand-maintained navigation tree always finds
+ * eventually. Order within a group follows COMPONENT_TYPES, which is the order the library
+ * was authored in and reads sensibly (a travel lane before a slip lane).
+ */
+export interface LibraryGroup<T> {
+  label: string;
+  items: T[];
+}
+
+export function primitiveTree(
+  types: readonly ComponentType[] = PRIMITIVE_ORDER,
+): { category: ComponentCategory; label: string; groups: LibraryGroup<ComponentType>[] }[] {
+  return COMPONENT_CATEGORIES.map((category) => {
+    const members = types.filter((type) => PRIMITIVES[type].category === category.id);
+    const groups: LibraryGroup<ComponentType>[] = [];
+    for (const type of members) {
+      const label = PRIMITIVES[type].group;
+      const existing = groups.find((group) => group.label === label);
+      if (existing) existing.items.push(type);
+      else groups.push({ label, items: [type] });
+    }
+    return { category: category.id, label: category.label, groups };
+  }).filter((entry) => entry.groups.length > 0);
+}
+
 export function searchPrimitives(query: string): ComponentType[] {
   const q = query.trim().toLowerCase();
   if (!q) return [...PRIMITIVE_ORDER];

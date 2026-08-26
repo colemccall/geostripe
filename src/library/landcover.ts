@@ -223,6 +223,25 @@ export function landcover(type: LandcoverType): Landcover {
   return LANDCOVERS[type];
 }
 
+/**
+ * The materials as a tree, so the land-cover browser matches the lane one.
+ *
+ * Twenty-two entries in four categories does not need a third level, so each category is
+ * one group. The shape still matches the other libraries, which is what lets all three
+ * share one navigation component instead of three that drift apart.
+ */
+export function landcoverTree(
+  types: readonly LandcoverType[] = LANDCOVER_ORDER,
+): { category: LandcoverCategory; label: string; groups: { label: string; items: LandcoverType[] }[] }[] {
+  return LANDCOVER_CATEGORIES.map((category) => ({
+    category: category.id,
+    label: category.label,
+    groups: [
+      { label: category.label, items: types.filter((type) => LANDCOVERS[type].category === category.id) },
+    ],
+  })).filter((entry) => entry.groups[0]!.items.length > 0);
+}
+
 /** Case-insensitive match on label, category or note. */
 export function searchLandcover(query: string): LandcoverType[] {
   const q = query.trim().toLowerCase();

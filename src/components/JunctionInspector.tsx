@@ -36,6 +36,7 @@ interface Props {
   override: JunctionOverride | undefined;
   onCorner: (cornerIndex: number, patch: Partial<CornerOverride>) => void;
   onLeg: (legIndex: number, patch: Partial<LegOverride>) => void;
+  onForm: (patch: Pick<JunctionOverride, 'form' | 'yieldLine'>) => void;
   onReset: () => void;
 }
 
@@ -79,6 +80,7 @@ export default function JunctionInspector({
   override,
   onCorner,
   onLeg,
+  onForm,
   onReset,
 }: Props) {
   const [activeCorner, setActiveCorner] = useState(0);
@@ -185,6 +187,69 @@ export default function JunctionInspector({
             <circle cx={SIZE / 2} cy={SIZE / 2} r={5} className="wheel-hub" />
           </svg>
         </div>
+
+        <div className="form-row" role="group" aria-label="How this junction is read">
+          {(
+            [
+              ['intersection', 'Intersection'],
+              ['merge', 'Merge'],
+            ] as const
+          ).map(([form, label]) => (
+            <button
+              key={form}
+              type="button"
+              className="btn btn-ghost"
+              aria-pressed={junction.form === form}
+              disabled={form === 'merge' && junction.mergeAngleDegrees === null}
+              title={
+                form === 'merge' && junction.mergeAngleDegrees === null
+                  ? 'A merge needs one road ending on another that continues through'
+                  : undefined
+              }
+              onClick={() => onForm({ form })}
+            >
+              {label}
+            </button>
+          ))}
+          {override?.form !== undefined && (
+            <button type="button" className="btn btn-ghost" onClick={() => onForm({ form: undefined })}>
+              Auto
+            </button>
+          )}
+        </div>
+
+        <p className="hint">
+          {junction.form === 'merge' ? (
+            <>
+              Drawn as a merge: the road being joined is not cut, and the taper between the
+              two kerbs is the junction.{' '}
+              {junction.mergeAngleDegrees !== null && (
+                <>It comes in at <b>{junction.mergeAngleDegrees.toFixed(0)}°</b>.</>
+              )}
+            </>
+          ) : junction.mergeAngleDegrees !== null && junction.mergeAngleDegrees < 55 ? (
+            <>
+              One road ends on another here at{' '}
+              <b>{junction.mergeAngleDegrees.toFixed(0)}°</b>. Shallow enough that it may be a
+              merge rather than a junction — which one depends on whether traffic yields or
+              merges, and the shape cannot tell you.
+            </>
+          ) : (
+            <>Drawn as an intersection: every leg is cut back to a shared box.</>
+          )}
+          {override?.form !== undefined && ' Set by hand — Auto returns it to the geometry.'}
+        </p>
+
+        {junction.form === 'merge' && (
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={override?.yieldLine ?? false}
+              onChange={(e) => onForm({ yieldLine: e.target.checked })}
+            />
+            <span>Yield line across the joining road</span>
+          </label>
+        )}
 
         {offsetNeighbours.length > 0 && (
           <p className="hint hint-warn">

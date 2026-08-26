@@ -84,6 +84,8 @@ const featureCollectionSchema = z.object({
         .record(
           z.string(),
           z.object({
+            form: z.enum(['intersection', 'merge', 'continuation']).optional(),
+            yieldLine: z.boolean().optional(),
             corners: z
               .array(
                 z
