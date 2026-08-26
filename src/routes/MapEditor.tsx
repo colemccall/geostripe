@@ -90,6 +90,7 @@ export default function MapEditor() {
     moveComponent,
     removeComponent,
     applyTemplate,
+    fitSectionToWidth,
     setAnchorMode,
     setExistingWidth,
     setSwipe,
@@ -784,6 +785,17 @@ export default function MapEditor() {
                       available {formatWidth(available || total, units, { withUnit: true })}
                     </span>
                   </div>
+
+                  {available > 0 && Math.abs(fit.differenceMeters) > 0.05 && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-block"
+                      style={{ marginTop: 9 }}
+                      onClick={() => fitSectionToWidth('street', available)}
+                    >
+                      Scale section to {formatWidth(available, units, { withUnit: true })}
+                    </button>
+                  )}
                 </div>
               )}
 

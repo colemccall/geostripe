@@ -103,6 +103,7 @@ export default function ComponentStack({
               step={stepFor(units)}
               value={formatWidth(c.widthMeters, units)}
               aria-label={`${spec.label} width in ${units}`}
+              title={`Typically ${spec.typicalRangeFeet[0]}–${spec.typicalRangeFeet[1]} ft as built. ${spec.note}`}
               onChange={(e) => {
                 const value = Number(e.target.value);
                 if (!Number.isFinite(value) || value <= 0) return;

@@ -134,6 +134,15 @@ interface EditorState extends Snapshot {
   setAnchorMode: (target: EditTarget, mode: AnchorMode) => void;
   renameSection: (target: EditTarget, name: string) => void;
   applyTemplate: (target: EditTarget, templateId: string) => void;
+  /**
+   * Scale every component so the section totals `metres`.
+   *
+   * The answer to tracing a real street and finding the bands narrower than the pavement
+   * underneath: measure the kerb-to-kerb width, then make the section match it. Scaling
+   * proportionally keeps the relative design intact, which is what someone reaching for
+   * this wants — they are correcting the overall size, not redesigning the street.
+   */
+  fitSectionToWidth: (target: EditTarget, metres: number) => void;
   loadSection: (target: EditTarget, section: CrossSection) => void;
 
   // ---- street-level
@@ -361,6 +370,23 @@ export const useEditorStore = create<EditorState>((set, get) => {
       })),
 
     renameSection: (target, name) => editSection(target, (section) => ({ ...section, name })),
+
+    fitSectionToWidth: (target, metres) =>
+      editSection(target, (section) => {
+        const current = section.components.reduce((sum, c) => sum + c.widthMeters, 0);
+        if (current <= 0 || metres <= 0) return section;
+        const factor = metres / current;
+        return {
+          ...section,
+          components: section.components.map((c) => ({
+            ...c,
+            widthMeters: Number((c.widthMeters * factor).toFixed(4)),
+          })),
+          // An explicit anchor was measured against the old widths, so it has to scale too.
+          anchorOffsetMeters:
+            section.anchorOffsetMeters === null ? null : section.anchorOffsetMeters * factor,
+        };
+      }),
 
     applyTemplate: (target, templateId) => {
       const def = TEMPLATES.find((t) => t.id === templateId);

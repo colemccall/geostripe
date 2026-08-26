@@ -47,8 +47,19 @@ export type Marking = 'none' | 'lane' | 'turn' | 'bus' | 'bike' | 'parking' | 'w
 
 export interface Primitive {
   readonly label: string;
+  /**
+   * What you would most often *measure on the ground*, not what a guide recommends.
+   *
+   * This distinction matters more than it looks. The tool's whole argument is "here is
+   * what exists, and here is what fits in the same width", so the neutral starting value
+   * has to be the as-built one — otherwise tracing a real street produces bands narrower
+   * than the pavement underneath them, and the redesign looks like it fits when it does
+   * not. Templates that are *about* narrowing state their tighter numbers explicitly.
+   */
   readonly defaultWidthMeters: number;
   readonly minWidthMeters: number;
+  /** Typical as-built range in feet, for guidance in the UI and as a test fixture. */
+  readonly typicalRangeFeet: readonly [number, number];
   readonly color: string;
   readonly isRoadway: boolean;
   readonly isRaised: boolean;
@@ -60,124 +71,135 @@ export interface Primitive {
 export const PRIMITIVES: Readonly<Record<ComponentType, Primitive>> = {
   travelLane: {
     label: 'Travel lane',
-    defaultWidthMeters: 3.0,
+    defaultWidthMeters: 3.35,
     minWidthMeters: 2.7,
+    typicalRangeFeet: [10, 12],
     color: '#4A5157',
     isRoadway: true,
     isRaised: false,
     marking: 'lane',
     defaultDirection: 'forward',
-    note: 'NACTO recommends 10 ft (3.0 m) in most urban contexts; up to 11 ft on transit or freight routes.',
+    note: 'Typically 11 ft as built in US cities. NACTO recommends 10 ft, and narrowing to it is the most common single move in a road diet.',
   },
   turnLane: {
     label: 'Center turn lane',
-    defaultWidthMeters: 3.0,
-    minWidthMeters: 2.7,
+    defaultWidthMeters: 3.35,
+    minWidthMeters: 3.0,
+    typicalRangeFeet: [10, 14],
     color: '#525A61',
     isRoadway: true,
     isRaised: false,
     marking: 'turn',
     defaultDirection: 'both',
-    note: 'Two-way left-turn lane or dedicated turn pocket, typically 10–11 ft (3.0–3.35 m).',
+    note: 'Two-way left-turn lane, usually 11 ft as built. Wide ones are often the easiest space to reclaim.',
   },
   busLane: {
     label: 'Bus lane',
     defaultWidthMeters: 3.35,
     minWidthMeters: 3.0,
+    typicalRangeFeet: [10, 12],
     color: '#7A4636',
     isRoadway: true,
     isRaised: false,
     marking: 'bus',
     defaultDirection: 'forward',
-    note: 'Wider than a general travel lane to accommodate bus width and mirrors — 11 ft (3.35 m).',
+    note: 'NACTO: 10-11 ft, 12 ft preferred where it is offset from the kerb.',
   },
   bikeLaneConventional: {
     label: 'Bike lane',
     defaultWidthMeters: 1.8,
     minWidthMeters: 1.2,
+    typicalRangeFeet: [5, 7],
     color: '#2C6B4E',
     isRoadway: true,
     isRaised: false,
     marking: 'bike',
     defaultDirection: 'forward',
-    note: 'NACTO preferred minimum bikeway width 6 ft (1.8 m); absolute minimum 4 ft (1.2 m).',
+    note: 'Conventional painted lane. 5 ft minimum next to a kerb, 6 ft typical, 7 ft where volumes are high.',
   },
   bikeLaneBuffered: {
     label: 'Buffered bike lane',
     defaultWidthMeters: 2.4,
     minWidthMeters: 1.8,
+    typicalRangeFeet: [7, 10],
     color: '#2F7050',
     isRoadway: true,
     isRaised: false,
     marking: 'bike',
     defaultDirection: 'forward',
-    note: 'Rideable width plus a painted buffer. Model the buffer as its own component when it matters.',
+    note: 'A 5-6 ft lane plus a 2-3 ft painted buffer, which is what the total here represents.',
   },
   bikeLaneProtected: {
     label: 'Protected bike lane',
-    defaultWidthMeters: 2.7,
-    minWidthMeters: 2.0,
+    defaultWidthMeters: 3.0,
+    minWidthMeters: 2.1,
+    typicalRangeFeet: [8, 13],
     color: '#2A7A57',
     isRoadway: true,
     isRaised: false,
     marking: 'bike',
     defaultDirection: 'forward',
-    note: 'NACTO 3rd ed. gives 6.5–7 ft (2.0–2.1 m) minimum *rideable* width, 8–12.5 ft preferred — separation and buffer are additional.',
+    note: 'The 2025 NACTO Bikeway Guide splits this into rideable width plus separation: 6.5-7 ft rideable minimum, 8-12.5 ft preferred, plus the separator. 10 ft total is a realistic one-way build.',
   },
   parkingLaneParallel: {
     label: 'Parallel parking',
     defaultWidthMeters: 2.4,
     minWidthMeters: 2.1,
+    typicalRangeFeet: [7, 9],
     color: '#585F65',
     isRoadway: true,
     isRaised: false,
     marking: 'parking',
     defaultDirection: 'none',
-    note: 'NACTO prefers a minimised 7 ft (2.1 m) width; up to 9 ft (2.7 m).',
+    note: 'Typically 8 ft. 7 ft is workable on a low-volume street and hands a foot back to the roadway.',
   },
   parkingLaneAngled: {
     label: 'Angled parking',
-    defaultWidthMeters: 5.2,
+    defaultWidthMeters: 5.5,
     minWidthMeters: 4.3,
+    typicalRangeFeet: [16, 20],
     color: '#5C636A',
     isRoadway: true,
     isRaised: false,
     marking: 'parking',
     defaultDirection: 'none',
-    note: 'Depth varies sharply by angle (45°/60°/90°) — verify against the local standard before relying on it.',
+    note: 'About 18 ft at 60 degrees. Back-in angled parking occupies the same width and has far better sight lines.',
   },
   median: {
     label: 'Planted median',
-    defaultWidthMeters: 1.8,
-    minWidthMeters: 0.6,
+    defaultWidthMeters: 2.4,
+    minWidthMeters: 1.8,
+    typicalRangeFeet: [6, 16],
     color: '#4B6B42',
     isRoadway: true,
     isRaised: true,
     marking: 'planting',
     defaultDirection: 'none',
-    note: 'No standard default — highly context-dependent. Sits inside the curb-to-curb width.',
+    note: 'A pedestrian refuge needs 6 ft to hold someone with a bike or a pushchair; landscaped medians run much wider.',
   },
   shoulder: {
     label: 'Shoulder',
-    defaultWidthMeters: 1.2,
+    defaultWidthMeters: 2.4,
     minWidthMeters: 0.6,
+    typicalRangeFeet: [4, 10],
     color: '#646B70',
     isRoadway: true,
     isRaised: false,
     marking: 'none',
     defaultDirection: 'none',
-    note: 'Minimal urban shoulder, 4 ft (1.2 m).',
+    note: 'Urban shoulders are 4-8 ft; a rural or highway shoulder is 8-10 ft and doubles as a breakdown lane.',
   },
   sidewalk: {
     label: 'Sidewalk',
-    defaultWidthMeters: 1.8,
+    defaultWidthMeters: 3.0,
     minWidthMeters: 1.5,
+    typicalRangeFeet: [6, 15],
     color: '#A6ADA6',
     isRoadway: false,
     isRaised: true,
     marking: 'walk',
     defaultDirection: 'none',
-    note: 'ADA minimum clear width 5 ft (1.5 m); NACTO through-zone 8–12 ft in commercial areas.',
+    note: 'The whole footway zone, not just the walking lane: frontage plus clear width plus furniture. 5 ft is the clear-width minimum alone, so a 10 ft total is the realistic urban figure.',
   },
 };
 
