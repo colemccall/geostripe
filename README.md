@@ -191,9 +191,19 @@ the width that is really there, and save it as GeoJSON you can reopen and keep e
   cross-section elevation with dimension lines, asset JSON round-trip with Zod validation
   and readable per-field errors.
 - 8 starter cross-section templates, feet/metres toggle, undo/redo with Ctrl+Z.
-- **136 unit tests** across geometry, junction detection, intersection geometry, the
-  memoisation that keeps dragging affordable, cross-section arithmetic, the project
-  round-trip, and store history.
+- **Curved alignments** — `rounded` is tangent-arc-tangent at a stated radius, the way a
+  road alignment is really specified; `smooth` is a centripetal Catmull-Rom for tracing a
+  street that genuinely curves. Shift-click pins a control point as a hard corner.
+- **Land cover** — closed polygons carrying a material (grass, plaza, water, canopy,
+  parking lot and more), drawn beneath the design so a redesign can cover the imagery it
+  replaces rather than just annotate it.
+- **53 lane primitives and 68 cross-section presets**, each categorised and searchable by
+  label, category, purpose, and — for presets — by the components they contain.
+- **Grade separation** — `level` marks a street as a tunnel or an overpass, and streets at
+  different levels do not form junctions.
+- **442 unit tests** across geometry, curves, junction detection, intersection geometry,
+  the memoisation that keeps dragging affordable, cross-section arithmetic, the dimensional
+  audit, the asset catalogue, the project round-trip, and store history.
 
 - **Intersections** — detected automatically wherever centerlines cross, with no node to
   place or maintain. Each junction carries its legs sorted by bearing and a corner between
@@ -230,9 +240,12 @@ junction detection.
 | B | Derived-geometry cache | done |
 | C | Intersection footprint, curb returns, trimming | done |
 | D | Intersection inspector | done |
-| E | Crosswalks and stop bars | next |
-| F | Corner treatments — bulb-outs, daylighting, islands | planned |
-| G | Protected (Dutch) intersection | planned |
+| E | Crosswalks and stop bars | done |
+| F | Corner treatments — bulb-outs, daylighting | done |
+| J | Curved alignments — arcs and splines | done |
+| K | Land cover polygons | done |
+| L | Asset library — 53 primitives, 68 presets, grade separation | done |
+| G | Protected (Dutch) intersection, incl. the corner refuge island | next |
 | H | Roundabout, as a junction form | planned |
 | I | Swept-path / design-vehicle check | stretch |
 
