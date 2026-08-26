@@ -2006,3 +2006,22 @@ button {
 .selstrip-kind.is-node {
   color: #7FB2E5;
 }
+
+/* "You are looking at an old build." Prominent, because it is always actionable. */
+.update-notice {
+  padding: 4px 9px;
+  border: 1px solid var(--warn-fill);
+  border-radius: 20px;
+  background: var(--warn-fill);
+  color: var(--accent-ink);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.update-notice:hover {
+  filter: brightness(1.08);
+}

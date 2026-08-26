@@ -155,3 +155,48 @@ describe('tightestRadius', () => {
     expect(tightestRadius(circle)).toBeCloseTo(radius, 0);
   });
 });
+
+describe('drawing straight segments and arcs in one line', () => {
+  // What the pen leaves behind: a rounded street whose straight-placed points stay hard
+  // corners. This is the whole mechanism behind the Straight/Arc toggle, and it is worth
+  // a test of its own because nothing else pins the two halves together.
+  const ORIGIN: [number, number] = [-84.52, 39.11];
+  const M_PER_LAT = 111132;
+  const M_PER_LNG = 111412 * Math.cos((39.11 * Math.PI) / 180);
+  const at = (e: number, n: number): [number, number] => [
+    ORIGIN[0] + e / M_PER_LNG,
+    ORIGIN[1] + n / M_PER_LAT,
+  ];
+
+  const controls: [number, number][] = [at(-80, 0), at(0, 0), at(0, 80), at(80, 80)];
+
+  it('rounds the corners nobody pinned', () => {
+    const line = tessellate(controls, { mode: 'rounded', radiusMeters: 20 });
+    expect(line.length).toBeGreaterThan(controls.length);
+  });
+
+  it('leaves a pinned corner square', () => {
+    // Index 1 placed in straight mode: the arc must not cut that corner, whatever it does
+    // to the other one.
+    const line = tessellate(controls, {
+      mode: 'rounded',
+      radiusMeters: 20,
+      sharpVertices: [1],
+    });
+    const kept = line.some(
+      (point) => distanceMeters(point, controls[1]!) < 0.01,
+    );
+    expect(kept).toBe(true);
+
+    // And the corner that was NOT pinned is gone, replaced by an arc.
+    const rounded = line.some((point) => distanceMeters(point, controls[2]!) < 0.01);
+    expect(rounded).toBe(false);
+  });
+
+  it('is identical to a plain polyline when every point was placed straight', () => {
+    // What the editor stores as `mode: 'straight'` rather than carrying an inert setting.
+    const all = controls.map((_, index) => index);
+    const line = tessellate(controls, { mode: 'rounded', radiusMeters: 20, sharpVertices: all });
+    expect(line).toEqual(controls);
+  });
+});
