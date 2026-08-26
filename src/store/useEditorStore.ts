@@ -6,7 +6,7 @@ import type { Area, CrossSection, JunctionNode, SectionComponent, Street } from 
 import { newId } from '../model/types';
 import { autoAnchorOffset, geometricCentreOffset } from '../model/section';
 import { applyConnections, planConnections } from '../geo/connect';
-import { detectJunctions } from '../geo/junctions';
+import { createCincinnatiProject } from '../demo/cincinnati';
 import type { DisplayUnits } from '../lib/units';
 import type { BasemapId } from '../map/basemaps';
 import { DEFAULT_VINTAGE } from '../map/basemaps';
@@ -228,20 +228,22 @@ interface EditorState extends Snapshot {
    * The bridge between the two models: one click and the graph is yours, with every
    * junction already where it was and nothing to redraw.
    */
-  materialiseNodes: () => number;
+  /** Place an intersection at one crossing, making it yours to edit. Returns its id. */
+  placeNodeAt: (position: [number, number]) => string;
   setJunctionMode: (mode: 'auto' | 'nodes') => void;
   setAutoConnect: (on: boolean) => void;
   setPointAction: (action: 'move' | 'sharp' | 'remove') => void;
-  /**
-   * Weld loose ends onto the streets they were drawn to meet.
+/**
+   * Weld ONE loose end onto the street it was drawn to meet.
    *
-   * `streetIds` restricts what may MOVE, never what may be met — "connect this street"
-   * must not quietly rearrange the rest of the project inside the same undo step. Absent
-   * means every street is fair game, which is the "tidy up the whole thing" button.
+   * One end at a time on purpose. A button that tidied the whole project moved geometry the
+   * user drew, in places they were not looking, inside a single undo step — and every end
+   * it touched was a judgement it had made on their behalf. Each end is now its own
+   * decision, taken where you can see it.
    *
-   * Returns how many ends moved, so the caller can say so rather than guess.
+   * Returns whether anything moved.
    */
-  connectEnds: (streetIds?: readonly string[]) => number;
+  connectEnd: (streetId: string, end: 'start' | 'end') => boolean;
   setSegmentMode: (mode: 'straight' | 'curved') => void;
   setDrawRadius: (metres: number) => void;
   /** Drop every selection. What Escape does, and what clicking bare ground does. */
@@ -300,7 +302,8 @@ interface EditorState extends Snapshot {
   setCenterline: (streetId: string, centerline: [number, number][]) => void;
   removeStreet: (streetId: string) => void;
   clearStreets: () => void;
-  loadDemo: () => void;
+  /** Load a worked example. 'cincinnati' is the ten-street baseline; 'park' the two-street one. */
+  loadDemo: (which?: 'cincinnati' | 'park') => void;
 
   /** Create a street from a freshly drawn centerline. Returns its id. */
   addStreet: (
@@ -565,33 +568,34 @@ export const useEditorStore = create<EditorState>((set, get) => {
       });
     },
 
-    materialiseNodes: () => {
-      const { streets, nodes, junctionMergeSlackMeters } = get();
-      const { junctions } = detectJunctions(streets, {
-        mergeSlackMeters: junctionMergeSlackMeters,
-        nodes,
-      });
-      // Only the ones that are not already a node: running this twice must not double up.
-      const fresh = junctions
-        .filter((junction) => !junction.nodeId)
-        .map<JunctionNode>((junction) => ({ id: newId('node'), position: junction.position }));
-      if (fresh.length === 0) return 0;
-      commit({ nodes: [...nodes, ...fresh] });
-      return fresh.length;
+    /**
+     * Take ownership of one crossing.
+     *
+     * This replaced a button that placed a node at every crossing in the project at once.
+     * Taking ownership of an intersection is a decision about that intersection — which
+     * corners to tighten, which arm yields — and forty of them made in one click is forty
+     * decisions nobody made. The detector already handles the ones you have not thought
+     * about yet; a node is for the one you have.
+     */
+    placeNodeAt: (position) => {
+      const node: JunctionNode = { id: newId('node'), position };
+      commit({ nodes: [...get().nodes, node] });
+      set({ selectedNodeId: node.id, selectedJunctionKey: null });
+      return node.id;
     },
 
     setJunctionMode: (junctionMode) => set({ junctionMode }),
     setAutoConnect: (autoConnect) => set({ autoConnect }),
     setPointAction: (pointAction) => set({ pointAction }),
 
-    connectEnds: (streetIds) => {
+    connectEnd: (streetId, end) => {
       const streets = get().streets;
-      const plan = planConnections(streets, {
-        ...(streetIds ? { moveOnly: new Set(streetIds) } : {}),
-      });
-      if (plan.length === 0) return 0;
-      commit({ streets: applyConnections(streets, plan) });
-      return plan.length;
+      const one = planConnections(streets, { moveOnly: new Set([streetId]) }).filter(
+        (c) => c.end === end,
+      );
+      if (one.length === 0) return false;
+      commit({ streets: applyConnections(streets, one) });
+      return true;
     },
     setSegmentMode: (segmentMode) => set({ segmentMode }),
     setDrawRadius: (drawRadiusMeters) => set({ drawRadiusMeters }),
@@ -806,10 +810,25 @@ export const useEditorStore = create<EditorState>((set, get) => {
       set({ selectedStreetId: null, selectedComponentId: null, selectedAreaId: null });
     },
 
-    loadDemo: () => {
-      const streets = createDemoStreets();
-      commit({ streets });
-      set({ selectedStreetId: streets[0]?.id ?? null, selectedComponentId: null, swipe: 0.5 });
+    loadDemo: (which = 'cincinnati') => {
+      if (which === 'park') {
+        const streets = createDemoStreets();
+        commit({ streets, junctionOverrides: {} });
+        set({ selectedStreetId: streets[0]?.id ?? null, selectedComponentId: null, swipe: 0.5 });
+        return;
+      }
+
+      const demo = createCincinnatiProject();
+      // The overrides come with it: the intersections in this one are already designed,
+      // and loading the streets without them would show a worked example with its work
+      // stripped out.
+      commit({ streets: demo.streets, junctionOverrides: demo.junctionOverrides, areas: [], nodes: [] });
+      set({
+        projectName: demo.name,
+        selectedStreetId: demo.streets[0]?.id ?? null,
+        selectedComponentId: null,
+        swipe: 0.5,
+      });
     },
 
     addStreet: (centerline, curve, name) => {

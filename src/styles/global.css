@@ -18,25 +18,38 @@
    ============================================================================ */
 
 :root {
-  --ground: #e7eae9;
-  --panel: #f7f8f8;
-  --panel-2: #edf0ef;
-  --sunk: #dde2e1;
-  --line: #cbd2d1;
-  --line-soft: #dce1e0;
-  --ink: #151b1d;
-  --ink-2: #3d484c;
-  --ink-dim: #6c787c;
+  /* Concrete: a warm grey, because cured concrete is warm and a neutral one reads dead. */
+  --ground: #dee2e0;
+  --panel: #f6f8f7;
+  --panel-2: #e9edeb;
+  --surface: #fdfefd;
+  --sunk: #d5dbd9;
+  --line: #bfc7c5;
+  --line-soft: #d6dcda;
+  --ink: #11171a;
+  --ink-2: #3a4549;
+  --ink-dim: #69757a;
+
+  /* Thermoplastic yellow: what YOU chose. Selection, and nothing else. */
   --accent: #8a6206;
   --accent-fill: #f2c14e;
   --accent-ink: #1a1305;
-  --good: #2e7d52;
+
+  /* Signal cyan: what the TOOL worked out. Junctions, snapping, measurement, drafts.
+     The split is the point — colour here answers "did I put this here, or did it?" */
+  --derived: #0d6d68;
+  --derived-fill: #3fb5aa;
+  --derived-ink: #04211f;
+
+  --good: #24704a;
   --good-fill: #4fb477;
-  --bad: #b3352f;
+  --bad: #a92f29;
   --bad-fill: #e05c5c;
   --warn: #8a5010;
   --warn-fill: #e4823c;
+  --focus: #2f7fc9;
   --shadow: 0 1px 2px rgba(10, 20, 22, 0.1), 0 8px 24px rgba(10, 20, 22, 0.07);
+  --shadow-lift: 0 2px 6px rgba(10, 20, 22, 0.12), 0 16px 40px rgba(10, 20, 22, 0.13);
 
   --font-ui: 'Overpass', 'Helvetica Neue', Arial, sans-serif;
   --font-mono: 'Overpass Mono', ui-monospace, 'SF Mono', Menlo, monospace;
@@ -47,42 +60,62 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --ground: #101416;
-    --panel: #191e21;
-    --panel-2: #20262a;
-    --sunk: #0c1012;
-    --line: #2e373c;
-    --line-soft: #252d31;
-    --ink: #e9eeef;
-    --ink-2: #b6c1c5;
-    --ink-dim: #7e8c92;
+    /* Night asphalt, with the blue cast wet tarmac actually has under sodium light. */
+    --ground: #0a0e10;
+    --panel: #151a1e;
+    --panel-2: #1d2429;
+    --surface: #212a2f;
+    --sunk: #080b0d;
+    --line: #313b41;
+    --line-soft: #232b30;
+    --ink: #eaf0f1;
+    --ink-2: #b3bfc4;
+    --ink-dim: #7c8b91;
     --accent: #f2c14e;
     --accent-fill: #f2c14e;
     --accent-ink: #14181a;
+    --derived: #6fd3c7;
+    --derived-fill: #4bbdb1;
+    --derived-ink: #04211f;
     --good: #5fc489;
+    --good-fill: #4fb477;
     --bad: #ec7a74;
+    --bad-fill: #e05c5c;
     --warn: #ee9a5b;
+    --warn-fill: #e4823c;
+    --focus: #6aa9e0;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 30px rgba(0, 0, 0, 0.35);
+    --shadow-lift: 0 2px 8px rgba(0, 0, 0, 0.5), 0 18px 46px rgba(0, 0, 0, 0.45);
   }
 }
 
 :root[data-theme='dark'] {
-  --ground: #101416;
-  --panel: #191e21;
-  --panel-2: #20262a;
-  --sunk: #0c1012;
-  --line: #2e373c;
-  --line-soft: #252d31;
-  --ink: #e9eeef;
-  --ink-2: #b6c1c5;
-  --ink-dim: #7e8c92;
+  /* Night asphalt, with the blue cast wet tarmac actually has under sodium light. */
+  --ground: #0a0e10;
+  --panel: #151a1e;
+  --panel-2: #1d2429;
+  --surface: #212a2f;
+  --sunk: #080b0d;
+  --line: #313b41;
+  --line-soft: #232b30;
+  --ink: #eaf0f1;
+  --ink-2: #b3bfc4;
+  --ink-dim: #7c8b91;
   --accent: #f2c14e;
   --accent-fill: #f2c14e;
   --accent-ink: #14181a;
+  --derived: #6fd3c7;
+  --derived-fill: #4bbdb1;
+  --derived-ink: #04211f;
   --good: #5fc489;
+  --good-fill: #4fb477;
   --bad: #ec7a74;
+  --bad-fill: #e05c5c;
   --warn: #ee9a5b;
+  --warn-fill: #e4823c;
+  --focus: #6aa9e0;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 30px rgba(0, 0, 0, 0.35);
+  --shadow-lift: 0 2px 8px rgba(0, 0, 0, 0.5), 0 18px 46px rgba(0, 0, 0, 0.45);
 }
 
 *,
@@ -314,7 +347,11 @@ button {
 
 .rail {
   min-height: 0;
-  overflow-y: auto;
+  /* The BODY scrolls, not the rail: the tab strip has to stay put, or navigating away
+     from the bottom of a long list leaves you looking at nothing. */
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
   background: var(--panel);
   border-right: 1px solid var(--line);
 }
@@ -1045,6 +1082,15 @@ button {
     border: none;
     border-top: 1px solid var(--line);
     overflow: visible;
+  }
+
+  /* One scroll on the page, not one per rail. */
+  .rail-body {
+    overflow: visible;
+  }
+
+  .rail-tabs {
+    position: static;
   }
 
   .map-wrap {
@@ -2151,4 +2197,189 @@ button {
   font-size: 12px;
   line-height: 1.45;
   color: var(--ink-2);
+}
+
+/* ============================================================================
+   Rail tabs.
+
+   The left rail shows one section at a time. The strip is also the project's
+   readout — counts sit on the tabs, so the shape of the project is legible
+   without opening anything, and a dot marks the section that needs attention.
+   ============================================================================ */
+
+.rail-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 1px;
+  padding: 0;
+  background: var(--line-soft);
+  border-bottom: 1px solid var(--line);
+}
+
+.rail-tabs button {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 2px 7px;
+  background: var(--panel-2);
+  color: var(--ink-dim);
+  border-bottom: 2px solid transparent;
+  transition: 0.12s;
+}
+
+.rail-tabs button:hover {
+  background: var(--surface);
+  color: var(--ink-2);
+}
+
+.rail-tabs button[aria-selected='true'] {
+  background: var(--panel);
+  color: var(--ink);
+  border-bottom-color: var(--accent-fill);
+}
+
+.rail-tab-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.rail-tab-label {
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+
+/* Counts, not decoration: they say how big the thing behind the tab is. */
+.rail-tab-count {
+  position: absolute;
+  top: 4px;
+  right: 5px;
+  font-size: 9px;
+  color: var(--ink-dim);
+}
+
+.rail-tabs button[aria-selected='true'] .rail-tab-count {
+  color: var(--accent);
+}
+
+/* Something in there wants looking at. Position matches the count so the two
+   never collide — a tab has one or the other showing at a time. */
+.rail-tab-dot {
+  position: absolute;
+  top: 5px;
+  left: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warn-fill);
+}
+
+.rail-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Loose ends, one row each — never a button that fixes all of them at once. */
+.loose-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.loose-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.loose-zoom {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 4px 6px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: var(--ink-2);
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--line-soft);
+}
+
+.loose-zoom:hover {
+  border-color: var(--warn-fill);
+  color: var(--ink);
+}
+
+.loose-zoom .mono {
+  font-size: 10px;
+  color: var(--ink-dim);
+}
+
+/* ============================================================================
+   Version and build, in the header.
+
+   Two facts, visually separated: what this is, and which compilation of it you
+   are looking at. The build is the one people come to check, so it reads as
+   data — monospace, dimmer, its own chip.
+   ============================================================================ */
+
+.brand-ver {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--sunk);
+  border: 1px solid var(--line-soft);
+  font-size: 10.5px;
+  cursor: help;
+}
+
+.brand-ver b {
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.brand-ver i {
+  font-style: normal;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--ink-dim);
+}
+
+/* ============================================================================
+   Signal cyan: things the tool worked out, as opposed to things you chose.
+
+   Yellow means "you selected this". Cyan means "this was derived" — a junction
+   found, a point snapped, a distance measured. Keeping the two apart means
+   colour answers a real question instead of decorating.
+   ============================================================================ */
+
+.selstrip-kind.is-junction,
+.selstrip-kind.is-node {
+  background: color-mix(in srgb, var(--derived-fill) 22%, transparent);
+  color: var(--derived);
+  border-color: color-mix(in srgb, var(--derived-fill) 45%, transparent);
+}
+
+.pill-derived {
+  background: color-mix(in srgb, var(--derived-fill) 16%, transparent);
+  color: var(--derived);
+}
+
+/* Focus that is visible on both grounds and never removed. */
+:where(button, a, input, select, textarea):focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+  border-radius: 4px;
 }

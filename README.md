@@ -272,10 +272,27 @@ the width that is really there, and save it as GeoJSON you can reopen and keep e
   inside the neighbour suppressed. One slider moves the threshold in both directions.
 - **Grade separation** — `level` marks a street as a tunnel or an overpass, and streets at
   different levels do not form junctions.
-- **801 unit tests** across geometry, curves, junction detection, intersection geometry,
+- **Performance, measured against a real ten-street downtown project.** Three things were
+  costing an order of magnitude more than they needed to, and all three got worse as a
+  project grew, which is what "it slows down the further you go" actually means:
+  - **Curves were sampled to a chord length, not an error.** A 1.2 m chord on a gentle
+    200 m bend moves the line by less than a millimetre; one traced street resolved to 309
+    points and cost more than the other nine together. Sampling to a *sagitta* — never more
+    than 5 cm from the true curve, an eighth of a pixel at working zoom — put that street
+    at 96 points and made the number a guarantee rather than a guess.
+  - **Every band was trimmed against every junction**, including ones across the map. Now a
+    junction cuts only the streets that meet there, which is also a correctness fix: a
+    street running past an intersection it does not join used to have a bite taken out of it.
+  - **The trim cache was keyed on every junction at once**, so one corner radius rebuilt the
+    whole project — and the key grew with the project while the edit stayed the same size.
+    Keyed per street, an edit costs what the edit is worth.
+  - Mid-drag, neighbours keep the trim they had; the street under the cursor is always
+    exact. A vertex drag went from **85 ms a frame to 27**.
+- **812 unit tests** across geometry, curves, junction detection, intersection geometry,
   complex and staggered junctions, merges, snapping, joining, road markings, the
   memoisation that keeps dragging affordable, cross-section arithmetic, the dimensional
-  audit, the asset catalogue, the project round-trip, and store history.
+  audit, the asset catalogue, the project round-trip, store history, and a baseline suite
+  that holds the real downtown project to budgets for vertex count and edit latency.
 
 - **Joining** — a line drawn over imagery never stops exactly where it was aimed, and the
   three ways it misses all read as "the intersections are a mess": an overshoot of one
@@ -338,6 +355,7 @@ junction detection.
 | W | Straight/arc segments while drawing, and a stale-build notice | done |
 | X | Joining — welding loose ends onto the streets they were drawn to meet | done |
 | Y | Every shortcut has a button, and a reference sheet that says which | done |
+| Z | Performance — error-bounded curves, per-street junction trimming | done |
 | G | Protected (Dutch) intersection, incl. the corner refuge island | next |
 | H | Roundabout, as a junction form | planned |
 | P | Signal phasing — which movements run together, and the conflicts left over | planned |

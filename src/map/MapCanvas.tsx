@@ -209,6 +209,12 @@ interface Props {
 
 const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] };
 
+/** Below this a stripe is thinner than the line drawn for it. */
+const MARKING_MIN_ZOOM = 15;
+
+/** Below this a pavement symbol is a few pixels of smudge. */
+const STAMP_MIN_ZOOM = 16;
+
 /** How close a click must land to a handle, in pixels, to count as hitting it. */
 const SNAP_PX = 14;
 
@@ -358,10 +364,17 @@ function addDesignLayers(map: MapLibreMap) {
   // aborts the rest of this function and leaves the whole design layer empty. So the split
   // is solid / dashed, the one thing that CANNOT travel on the feature, and colour and
   // width travel on the feature so every stripe style is covered by these two.
+  // Zoom floors on the paint layers.
+  //
+  // A lane arrow is four and a half metres long. Below z16 that is three pixels — a smudge
+  // that costs a fill pass over hundreds of polygons to draw something nobody can read.
+  // Stripes go a level lower because a line keeps its pixel width and still reads as a
+  // road having lanes at all.
   addLayerSafely(map, {
     id: 'marking-solid',
     type: 'line',
     source: 'markings',
+    minzoom: MARKING_MIN_ZOOM,
     filter: ['!=', ['get', 'dashed'], true],
     paint: {
       'line-color': ['get', 'color'],
@@ -374,6 +387,7 @@ function addDesignLayers(map: MapLibreMap) {
     id: 'marking-dashed',
     type: 'line',
     source: 'markings',
+    minzoom: MARKING_MIN_ZOOM,
     filter: ['==', ['get', 'dashed'], true],
     paint: {
       'line-color': ['get', 'color'],
@@ -389,6 +403,7 @@ function addDesignLayers(map: MapLibreMap) {
     id: 'stamp-fill',
     type: 'fill',
     source: 'stamps',
+    minzoom: STAMP_MIN_ZOOM,
     paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.94 },
   });
 
@@ -941,6 +956,9 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
       mergeBelowDegrees: latest.current.mergeBelowDegrees,
       nodes: latest.current.nodes,
       junctionMode: latest.current.junctionMode,
+      // Only a street vertex counts. Dragging an area or a node does not move a junction,
+      // so there is nothing for the neighbours to be stale about.
+      liveStreetId: dragRef.current?.kind === 'street' ? dragRef.current.streetId : null,
       selectedNodeId: latest.current.selectedNodeId,
       selectedJunctionKey: latest.current.selectedJunctionKey,
       showAllCenterlines: latest.current.showAllCenterlines,

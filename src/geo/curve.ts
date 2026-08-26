@@ -38,8 +38,25 @@ export interface CurveSettings {
 
 export const DEFAULT_CURVE: CurveSettings = { mode: 'straight', radiusMeters: 12 };
 
-/** Chord length target when tessellating an arc or a spline segment. */
-const CHORD_METRES = 1.2;
+/**
+ * How far the drawn line may stray from the true curve, in metres.
+ *
+ * Tessellation used to target a fixed chord LENGTH, which asks the wrong question. A
+ * 1.2 m chord on a gentle 200 m-radius bend moves the line by under a millimetre — it
+ * spends three hundred vertices to change nothing you could see — while the same chord on
+ * a tight kerb return is barely enough. Sampling to a deviation instead spends points
+ * where the curve actually bends, and the number becomes a guarantee that can be stated:
+ * the line is never more than five centimetres from the curve it represents.
+ *
+ * Five centimetres is an eighth of a pixel at the zoom this tool is worked at, and under
+ * two pixels at maximum zoom — comfortably finer than the width of the line drawn over it.
+ *
+ * This matters far past looking right. Every band, marking and junction trim downstream
+ * carries the centerline's vertex count into polygon offsetting and boolean clipping,
+ * where cost grows faster than linearly. One over-sampled street was costing more than the
+ * other nine put together.
+ */
+const SAGITTA_TOLERANCE_METRES = 0.05;
 
 /** Never emit more than this many points for one corner or segment. */
 const MAX_STEPS = 64;
@@ -63,8 +80,17 @@ function unit(p: PlanePoint): PlanePoint {
   return { x: p.x / l, y: p.y / l };
 }
 
-function steps(distance: number): number {
-  return Math.max(2, Math.min(MAX_STEPS, Math.ceil(distance / CHORD_METRES)));
+/**
+ * How many pieces a curve needs so no piece strays further than the tolerance.
+ *
+ * Sagitta falls with the square of the subdivision — halve a chord and its bulge drops to
+ * a quarter — so the count is the square root of the ratio. That is what makes this scale
+ * properly in both directions: a bend gentle enough to be a straight line gets one
+ * segment, a tight corner gets as many as it needs, and neither number is a guess.
+ */
+function stepsForSagitta(sagitta: number): number {
+  if (!(sagitta > SAGITTA_TOLERANCE_METRES)) return 1;
+  return Math.min(MAX_STEPS, Math.ceil(Math.sqrt(sagitta / SAGITTA_TOLERANCE_METRES)));
 }
 
 // -------------------------------------------------------------------------- rounded
@@ -129,7 +155,8 @@ function roundCorner(
     while (sweep > Math.PI * 2) sweep -= Math.PI * 2;
   }
 
-  const count = steps(Math.abs(sweep) * applied);
+  // Exact for a circle: the bulge of a chord spanning the whole sweep is R(1 - cos(θ/2)).
+  const count = stepsForSagitta(applied * (1 - Math.cos(Math.abs(sweep) / 2)));
   const out: PlanePoint[] = [];
   for (let i = 0; i <= count; i++) {
     const angle = startAngle + (sweep * i) / count;
@@ -170,16 +197,32 @@ function catmullRom(points: readonly PlanePoint[], sharp: ReadonlySet<number>): 
     const t2 = t1 + Math.sqrt(len(sub(p2, p1))) || t1 + EPS;
     const t3 = t2 + Math.sqrt(len(sub(p3, p2))) || t2 + EPS;
 
-    const count = steps(len(sub(p2, p1)));
-    for (let s = 1; s <= count; s++) {
-      const t = t1 + ((t2 - t1) * s) / count;
-
+    const at = (t: number): PlanePoint => {
       const a1 = lerpT(p0, p1, t0, t1, t);
       const a2 = lerpT(p1, p2, t1, t2, t);
       const a3 = lerpT(p2, p3, t2, t3, t);
       const b1 = lerpT(a1, a2, t0, t2, t);
       const b2 = lerpT(a2, a3, t1, t3, t);
-      out.push(lerpT(b1, b2, t1, t2, t));
+      return lerpT(b1, b2, t1, t2, t);
+    };
+
+    // How far this piece of spline actually bows away from its own chord.
+    //
+    // Three probes rather than one, because a segment shaped like a shallow S crosses its
+    // chord at the middle: a single midpoint sample would read that as flat and draw a
+    // curve as a straight line. The quarter points catch it.
+    const chord = (k: number): PlanePoint => ({
+      x: p1.x + (p2.x - p1.x) * k,
+      y: p1.y + (p2.y - p1.y) * k,
+    });
+    let sagitta = 0;
+    for (const k of [0.25, 0.5, 0.75]) {
+      sagitta = Math.max(sagitta, len(sub(at(t1 + (t2 - t1) * k), chord(k))));
+    }
+
+    const count = stepsForSagitta(sagitta);
+    for (let s = 1; s <= count; s++) {
+      out.push(at(t1 + ((t2 - t1) * s) / count));
     }
   }
 

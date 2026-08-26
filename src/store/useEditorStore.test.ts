@@ -268,19 +268,16 @@ describe('placed intersections', () => {
     expect(useEditorStore.getState().selectedNodeId).toBeNull();
   });
 
-  it('places one at every crossing, and does not double up when run twice', () => {
+  it('takes ownership of one crossing at a time, and selects what it made', () => {
+    // This replaced a button that placed a node at every crossing at once. Owning an
+    // intersection is a decision about that intersection, and forty at a stroke is forty
+    // decisions nobody made.
     useEditorStore.getState().loadDemo();
-    // Earlier cases in this file leave nodes behind, so the baseline is whatever is
-    // already there rather than zero.
     const before = useEditorStore.getState().nodes.length;
 
-    const first = useEditorStore.getState().materialiseNodes();
-    expect(first).toBeGreaterThan(0);
-    expect(useEditorStore.getState().nodes).toHaveLength(before + first);
-
-    const second = useEditorStore.getState().materialiseNodes();
-    expect(second).toBe(0);
-    expect(useEditorStore.getState().nodes).toHaveLength(before + first);
+    const id = useEditorStore.getState().placeNodeAt([-84.5155, 39.1105]);
+    expect(useEditorStore.getState().nodes).toHaveLength(before + 1);
+    expect(useEditorStore.getState().selectedNodeId).toBe(id);
   });
 });
 
@@ -382,29 +379,35 @@ describe('joining ends on demand', () => {
     store.addStreet([at(40, -80), at(40, 2)]);
   }
 
-  it('reports how many ends it moved', () => {
-    messy();
-    expect(useEditorStore.getState().connectEnds()).toBe(2);
-  });
-
-  it('is a no-op on a project that is already sound, and adds no history', () => {
-    messy();
-    useEditorStore.getState().connectEnds();
-    const past = useEditorStore.getState().past.length;
-    expect(useEditorStore.getState().connectEnds()).toBe(0);
-    expect(useEditorStore.getState().past.length).toBe(past);
-  });
-
-  it('moves only the street it was given', () => {
+  it('joins the one end it was given, and leaves the others alone', () => {
     messy();
     const ids = useEditorStore.getState().streets.map((s) => s.id);
-    expect(useEditorStore.getState().connectEnds([ids[1]!])).toBe(1);
+    const others = useEditorStore.getState().streets.filter((s) => s.id !== ids[1]);
+    const before = others.map((s) => s.centerline);
+
+    expect(useEditorStore.getState().connectEnd(ids[1]!, 'end')).toBe(true);
+
+    const after = useEditorStore
+      .getState()
+      .streets.filter((s) => s.id !== ids[1])
+      .map((s) => s.centerline);
+    expect(after).toEqual(before);
+  });
+
+  it('says so, and adds no history, when that end already meets', () => {
+    messy();
+    const ids = useEditorStore.getState().streets.map((s) => s.id);
+    // The start of this street is a dead end in open ground — nothing to meet.
+    const past = useEditorStore.getState().past.length;
+    expect(useEditorStore.getState().connectEnd(ids[1]!, 'start')).toBe(false);
+    expect(useEditorStore.getState().past.length).toBe(past);
   });
 
   it('undoes as a single step', () => {
     messy();
+    const ids = useEditorStore.getState().streets.map((s) => s.id);
     const before = useEditorStore.getState().streets;
-    useEditorStore.getState().connectEnds();
+    useEditorStore.getState().connectEnd(ids[1]!, 'end');
     useEditorStore.getState().undo();
     expect(useEditorStore.getState().streets).toEqual(before);
   });

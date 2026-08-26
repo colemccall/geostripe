@@ -82,6 +82,8 @@ export interface DesignData {
 const empty = (): FeatureCollection => ({ type: 'FeatureCollection', features: [] });
 
 export interface BuildOptions {
+  /** The street under the cursor during a drag. See DeriveOptions.liveStreetId. */
+  liveStreetId?: string | null;
   areas?: readonly Area[];
   selectedAreaId?: string | null;
   overrides?: Readonly<Record<string, JunctionOverride>>;
@@ -183,6 +185,7 @@ export function buildDesignData(
     mergeBelowDegrees: options.mergeBelowDegrees,
     nodes: options.nodes,
     junctionMode: options.junctionMode,
+    liveStreetId: options.liveStreetId ?? null,
   });
 
   for (const street of streets) {

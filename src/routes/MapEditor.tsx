@@ -31,6 +31,7 @@ import TemplatePicker from '../components/TemplatePicker';
 import JunctionInspector from '../components/JunctionInspector';
 import MapDock from '../components/MapDock';
 import { planConnections } from '../geo/connect';
+import type { Connection } from '../geo/connect';
 import ShortcutSheet from '../components/ShortcutSheet';
 import MapViewControls from '../components/MapViewControls';
 import SelectionStrip from '../components/SelectionStrip';
@@ -61,6 +62,23 @@ const CURVE_MODES: { id: CurveMode; label: string; hint: string }[] = [
     label: 'Smooth',
     hint: 'A spline through every control point. Best for tracing a street that genuinely curves, where you do not know the radius.',
   },
+];
+
+/**
+ * The left rail, one section at a time.
+ *
+ * These used to be five panels stacked in a single scrolling column, which meant the
+ * intersection you were editing could be four screens below the street list and there was
+ * no way to tell what was down there without going to look.
+ */
+type RailTab = 'project' | 'streets' | 'land' | 'junctions' | 'sections';
+
+const RAIL_TABS: { id: RailTab; label: string; icon: string; hint: string }[] = [
+  { id: 'project', label: 'Project', icon: '◲', hint: 'Name it, save it, open one' },
+  { id: 'streets', label: 'Streets', icon: '═', hint: 'Every street, and what it is made of' },
+  { id: 'land', label: 'Land', icon: '▰', hint: 'Parks, water, buildings, plazas' },
+  { id: 'junctions', label: 'Junctions', icon: '✛', hint: 'Where streets meet, and how' },
+  { id: 'sections', label: 'Sections', icon: '≡', hint: 'Cross-sections to apply' },
 ];
 
 const TOOLS: { id: Tool; label: string; key: string; hint: string; icon: string }[] = [
@@ -190,11 +208,11 @@ export default function MapEditor() {
     toggleNodeDisabled,
     selectNode,
     moveNodeLive,
-    materialiseNodes,
+    placeNodeAt,
     setJunctionMode,
     setAutoConnect,
     setPointAction,
-    connectEnds,
+    connectEnd,
     setSegmentMode,
     setDrawRadius,
     clearSelection,
@@ -238,6 +256,7 @@ export default function MapEditor() {
     layerCount: number;
   } | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [railTab, setRailTab] = useState<RailTab>('streets');
   const mapWrapRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapHandle | null>(null);
 
@@ -410,30 +429,17 @@ export default function MapEditor() {
   }
 
   /**
-   * Weld loose ends, and say what happened.
+   * Weld one loose end, and say exactly what moved.
    *
    * Reports rather than acting silently: this MOVES geometry the user drew, so it has to
    * be visible that it did, and undoable if it guessed wrong.
    */
-  const handleConnect = (streetIds?: readonly string[]) => {
-    const moved = connectEnds(streetIds);
-    if (moved === 0) {
-      setNotice({
-        kind: 'success',
-        title: streetIds ? 'That street already meets its neighbours' : 'Every end already meets',
-        details: [],
-      });
-      return;
-    }
+  const handleConnect = (connection: Connection) => {
+    if (!connectEnd(connection.streetId, connection.end)) return;
     setNotice({
       kind: 'success',
-      title: `Joined ${moved} loose end${moved === 1 ? '' : 's'}`,
-      // Filtered to what was actually asked for: "join this street" naming three others
-      // would read as though it had gone off and edited them too.
-      details: loosePlan
-        .filter((c) => !streetIds || streetIds.includes(c.streetId))
-        .slice(0, 6)
-        .map((c) => `${streetNames[c.streetId] ?? c.streetId} — ${c.label}`),
+      title: `${streetNames[connection.streetId] ?? 'Street'} — ${connection.label}`,
+      details: ['Ctrl+Z puts it back.'],
     });
   };
 
@@ -452,466 +458,521 @@ export default function MapEditor() {
     <div className={`workspace-grid${railOpen ? '' : ' is-collapsed'}`}>
       {/* ---------------------------------------------------------------- left rail */}
       <aside className="rail">
-        <section className="panel">
-          <header className="panel-head">
-            <span className="label">Project</span>
-          </header>
-          <input
-            className="text-input"
-            value={projectName}
-            aria-label="Project name"
-            onChange={(e) => setProjectName(e.target.value)}
-          />
-          <div className="btn-row" style={{ marginTop: 8 }}>
-            <button type="button" className="btn btn-solid" onClick={handleSave}>
-              Save .geojson
-            </button>
-            <button type="button" className="btn btn-ghost" onClick={handleOpen}>
-              Open…
-            </button>
-          </div>
-          <p className="hint">
-            Plain GeoJSON — editable by hand, openable in QGIS, and still fully parametric
-            when you load it back.
-          </p>
-        </section>
-
-        <section className="panel">
-          <header className="panel-head">
-            <span className="label">Streets</span>
-            <span className="label mono">{streets.length}</span>
-          </header>
-
-          {streets.length === 0 ? (
-            <p className="empty-note">
-              No streets yet. Choose <b>Draw street</b> above the map and click along a
-              centerline, or load the Washington Park example.
-            </p>
-          ) : (
-            <ul className="cards">
-              {streets.map((s) => (
-                <li key={s.id}>
-                  <div className={`street-card${s.id === selectedStreetId ? ' is-active' : ''}`}>
-                    <button
-                      type="button"
-                      className="card street-card-main"
-                      onClick={() => selectStreet(s.id)}
-                      onDoubleClick={() => mapRef.current?.zoomTo(s.centerline)}
-                    >
-                      <span className="card-title">{s.name}</span>
-                      <span className="chip-row" aria-hidden="true">
-                        {s.section.components.map((c) => (
-                          <i
-                            key={c.id}
-                            style={{
-                              flexGrow: c.widthMeters,
-                              background: c.colorOverride ?? PRIMITIVES[c.componentType].color,
-                            }}
-                          />
-                        ))}
-                      </span>
-                      <span className="card-meta">
-                        <span>
-                          {s.section.components.length} bands ·{' '}
-                          {formatWidth(lineLengthMeters(resolveCenterline(s)), units, {
-                            decimals: 0,
-                            withUnit: true,
-                          })}{' '}
-                          long
-                        </span>
-                        <span className="mono">
-                          {formatWidth(totalWidth(s.section.components), units, {
-                            withUnit: true,
-                          })}
-                        </span>
-                      </span>
-                    </button>
-
-                    <div className="street-card-tools">
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        title={s.visible ? 'Hide' : 'Show'}
-                        aria-label={s.visible ? `Hide ${s.name}` : `Show ${s.name}`}
-                        onClick={() => toggleStreetVisible(s.id)}
-                      >
-                        {s.visible ? '◉' : '○'}
-                      </button>
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        title="Zoom to"
-                        aria-label={`Zoom to ${s.name}`}
-                        onClick={() => mapRef.current?.zoomTo(s.centerline)}
-                      >
-                        ⤢
-                      </button>
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        title="Duplicate"
-                        aria-label={`Duplicate ${s.name}`}
-                        onClick={() => duplicateStreet(s.id)}
-                      >
-                        ⧉
-                      </button>
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        title="Delete"
-                        aria-label={`Delete ${s.name}`}
-                        onClick={() => removeStreet(s.id)}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <label className="toggle-row">
-            <input
-              type="checkbox"
-              checked={showAllCenterlines}
-              onChange={(e) => setShowAllCenterlines(e.target.checked)}
-            />
-            <span>Show every centerline</span>
-          </label>
-          <p className="hint">
-            A centerline is an editing handle, not part of the design — it is the one line on
-            the map that does not exist on the ground. Off, it appears only for the street
-            you have selected, which is the moment it means anything.
-          </p>
-
-          <div className="btn-row">
-            <button type="button" className="btn btn-ghost" onClick={loadDemo}>
-              Load example
-            </button>
-            <button type="button" className="btn btn-ghost" onClick={clearStreets}>
-              Clear all
-            </button>
-          </div>
-        </section>
-
-        <section className="panel">
-          <header className="panel-head">
-            <span className="label">Land cover</span>
-            <span className="label mono">{areas.length}</span>
-          </header>
-          {areas.length === 0 ? (
-            <p className="empty-note">
-              None yet. Choose <b>Land</b> above the map to cover ground with grass, plaza,
-              water and the rest.
-            </p>
-          ) : (
-            <ul className="cards">
-              {areas.map((a) => (
-                <li key={a.id}>
-                  <div className={`street-card${a.id === selectedAreaId ? ' is-active' : ''}`}>
-                    <button
-                      type="button"
-                      className="card street-card-main"
-                      onClick={() => selectArea(a.id)}
-                      onDoubleClick={() => mapRef.current?.zoomTo(a.ring)}
-                    >
-                      <span className="card-title">{a.name}</span>
-                      <span className="card-meta">
-                        <span>
-                          <i
-                            className="swatch swatch-inline"
-                            style={{ background: LANDCOVERS[a.landcover].color }}
-                          />
-                          {LANDCOVERS[a.landcover].label}
-                        </span>
-                        <span className="mono">{a.ring.length} pts</span>
-                      </span>
-                    </button>
-                    <div className="street-card-tools">
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        title={a.visible ? 'Hide' : 'Show'}
-                        aria-label={a.visible ? `Hide ${a.name}` : `Show ${a.name}`}
-                        onClick={() => toggleAreaVisible(a.id)}
-                      >
-                        {a.visible ? '◉' : '○'}
-                      </button>
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        title="Zoom to"
-                        aria-label={`Zoom to ${a.name}`}
-                        onClick={() => mapRef.current?.zoomTo(a.ring)}
-                      >
-                        ⤢
-                      </button>
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        title="Duplicate"
-                        aria-label={`Duplicate ${a.name}`}
-                        onClick={() => duplicateArea(a.id)}
-                      >
-                        ⧉
-                      </button>
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        title="Delete"
-                        aria-label={`Delete ${a.name}`}
-                        onClick={() => removeArea(a.id)}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        <section className="panel">
-          <header className="panel-head">
-            <span className="label">Intersections</span>
-            <span className="label mono">{junctions.length}</span>
-          </header>
-
-          {/* Which model is in charge. Placed nodes always win where they sit; this
-              decides whether anything happens where they do not. */}
-          <div className="form-row" role="group" aria-label="How intersections are decided">
-            {(
-              [
-                ['auto', 'Found automatically'],
-                ['nodes', 'Only where I place one'],
-              ] as const
-            ).map(([mode, label]) => (
+        {/* One panel at a time, not six stacked in an endless scroll.
+            The counts are the point of putting them here: the tab strip doubles as the
+            project's readout, so "how many streets, are any ends loose" is answered
+            without opening anything. */}
+        <nav className="rail-tabs" role="tablist" aria-label="Project">
+          {RAIL_TABS.map((t) => {
+            const count =
+              t.id === 'streets'
+                ? streets.length
+                : t.id === 'land'
+                  ? areas.length
+                  : t.id === 'junctions'
+                    ? junctions.length + nodes.length
+                    : null;
+            return (
               <button
-                key={mode}
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={railTab === t.id}
+                title={t.hint}
+                onClick={() => setRailTab(t.id)}
+              >
+                <span className="rail-tab-icon" aria-hidden="true">
+                  {t.icon}
+                </span>
+                <span className="rail-tab-label">{t.label}</span>
+                {count !== null && count > 0 && <span className="rail-tab-count mono">{count}</span>}
+                {t.id === 'junctions' && loosePlan.length > 0 && (
+                  <span className="rail-tab-dot" title={`${loosePlan.length} loose ends`} />
+                )}
+              </button>
+            );
+          })}
+        </nav>
+
+        <div className="rail-body">
+        {railTab === 'project' && (
+          <section className="panel">
+            <header className="panel-head">
+              <span className="label">Project</span>
+            </header>
+            <input
+              className="text-input"
+              value={projectName}
+              aria-label="Project name"
+              onChange={(e) => setProjectName(e.target.value)}
+            />
+            <div className="btn-row" style={{ marginTop: 8 }}>
+              <button type="button" className="btn btn-solid" onClick={handleSave}>
+                Save .geojson
+              </button>
+              <button type="button" className="btn btn-ghost" onClick={handleOpen}>
+                Open…
+              </button>
+            </div>
+            <p className="hint">
+              Plain GeoJSON — editable by hand, openable in QGIS, and still fully parametric
+              when you load it back.
+            </p>
+          </section>
+        )}
+
+        {railTab === 'streets' && (
+          <section className="panel">
+            <header className="panel-head">
+              <span className="label">Streets</span>
+              <span className="label mono">{streets.length}</span>
+            </header>
+
+            {streets.length === 0 ? (
+              <p className="empty-note">
+                No streets yet. Choose <b>Draw street</b> above the map and click along a
+                centerline, or load the Washington Park example.
+              </p>
+            ) : (
+              <ul className="cards">
+                {streets.map((s) => (
+                  <li key={s.id}>
+                    <div className={`street-card${s.id === selectedStreetId ? ' is-active' : ''}`}>
+                      <button
+                        type="button"
+                        className="card street-card-main"
+                        onClick={() => selectStreet(s.id)}
+                        onDoubleClick={() => mapRef.current?.zoomTo(s.centerline)}
+                      >
+                        <span className="card-title">{s.name}</span>
+                        <span className="chip-row" aria-hidden="true">
+                          {s.section.components.map((c) => (
+                            <i
+                              key={c.id}
+                              style={{
+                                flexGrow: c.widthMeters,
+                                background: c.colorOverride ?? PRIMITIVES[c.componentType].color,
+                              }}
+                            />
+                          ))}
+                        </span>
+                        <span className="card-meta">
+                          <span>
+                            {s.section.components.length} bands ·{' '}
+                            {formatWidth(lineLengthMeters(resolveCenterline(s)), units, {
+                              decimals: 0,
+                              withUnit: true,
+                            })}{' '}
+                            long
+                          </span>
+                          <span className="mono">
+                            {formatWidth(totalWidth(s.section.components), units, {
+                              withUnit: true,
+                            })}
+                          </span>
+                        </span>
+                      </button>
+
+                      <div className="street-card-tools">
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          title={s.visible ? 'Hide' : 'Show'}
+                          aria-label={s.visible ? `Hide ${s.name}` : `Show ${s.name}`}
+                          onClick={() => toggleStreetVisible(s.id)}
+                        >
+                          {s.visible ? '◉' : '○'}
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          title="Zoom to"
+                          aria-label={`Zoom to ${s.name}`}
+                          onClick={() => mapRef.current?.zoomTo(s.centerline)}
+                        >
+                          ⤢
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          title="Duplicate"
+                          aria-label={`Duplicate ${s.name}`}
+                          onClick={() => duplicateStreet(s.id)}
+                        >
+                          ⧉
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          title="Delete"
+                          aria-label={`Delete ${s.name}`}
+                          onClick={() => removeStreet(s.id)}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            <label className="toggle-row">
+              <input
+                type="checkbox"
+                checked={showAllCenterlines}
+                onChange={(e) => setShowAllCenterlines(e.target.checked)}
+              />
+              <span>Show every centerline</span>
+            </label>
+            <p className="hint">
+              A centerline is an editing handle, not part of the design — it is the one line on
+              the map that does not exist on the ground. Off, it appears only for the street
+              you have selected, which is the moment it means anything.
+            </p>
+
+            <div className="btn-row">
+              <button
                 type="button"
                 className="btn btn-ghost"
-                aria-pressed={junctionMode === mode}
-                onClick={() => setJunctionMode(mode)}
+                title="Ten streets in downtown Cincinnati, with the intersections already designed"
+                onClick={() => loadDemo('cincinnati')}
               >
-                {label}
+                Load example
               </button>
-            ))}
-          </div>
+              <button type="button" className="btn btn-ghost" onClick={clearStreets}>
+                Clear all
+              </button>
+            </div>
+          </section>
+        )}
 
-          <div className="btn-row">
-            <button
-              type="button"
-              className="btn btn-ghost"
-              title="Put a node at every crossing there is now, so the graph is yours"
-              onClick={() => {
-                const placed = materialiseNodes();
-                setNotice(
-                  placed === 0
-                    ? {
-                        kind: 'success',
-                        title: 'Nothing to place',
-                        details: ['Every crossing already has an intersection of its own.'],
-                      }
-                    : {
-                        kind: 'success',
-                        title: `Placed ${placed} intersection${placed === 1 ? '' : 's'}`,
-                        details: [
-                          'They are yours now — select, drag, disable or delete any of them.',
-                        ],
-                      },
-                );
-              }}
-            >
-              Place one at every crossing
-            </button>
-          </div>
-          <p className="hint">
-            {junctionMode === 'nodes'
-              ? 'Nothing is an intersection unless you put one there. Two roads that cross without a node simply overlap.'
-              : 'Crossings become intersections on their own. Anywhere you place a node, the node is in charge instead — including a node set to no junction, which is how two roads cross without meeting.'}
-          </p>
-          {nodes.length > 0 && (
-            <ul className="cards" style={{ marginTop: 9 }}>
-              {nodes.map((node, index) => (
-                <li key={node.id}>
-                  <div className={`street-card${node.id === selectedNodeId ? ' is-active' : ''}`}>
-                    <button
-                      type="button"
-                      className="card street-card-main"
-                      onClick={() => selectNode(node.id)}
-                      onDoubleClick={() => mapRef.current?.zoomTo([node.position])}
-                    >
-                      <span className="card-title">
-                        {node.name || `Intersection ${index + 1}`}
-                      </span>
-                      <span className="card-meta">
-                        <span>
-                          {node.disabled
-                            ? 'no junction — the roads just cross'
-                            : (junctions.find((j) => j.nodeId === node.id)?.legCount ?? 0) +
-                              ' legs'}
-                        </span>
-                        <span className="mono">placed</span>
-                      </span>
-                    </button>
-                    <div className="street-card-tools">
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        title={node.disabled ? 'Make it a junction again' : 'No junction here'}
-                        aria-label={node.disabled ? 'Enable' : 'Disable'}
-                        onClick={() => toggleNodeDisabled(node.id)}
-                      >
-                        {node.disabled ? '○' : '◉'}
-                      </button>
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        title="Zoom to"
-                        aria-label="Zoom to"
-                        onClick={() => mapRef.current?.zoomTo([node.position])}
-                      >
-                        ⤢
-                      </button>
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        title="Delete"
-                        aria-label="Delete"
-                        onClick={() => removeNode(node.id)}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {selectedNode && (
-            <label className="field" style={{ marginTop: 9 }}>
-              <span className="label">Name this intersection</span>
-              <input
-                className="text-input"
-                value={selectedNode.name ?? ''}
-                placeholder="Fifth and Race"
-                onChange={(e) => renameNode(selectedNode.id, e.target.value)}
-              />
-            </label>
-          )}
-
-          {/* Loose ends first, above the junctions that DID form. An end that does not
-              meet anything is the reason a junction is missing from the list below, so
-              reading the list without it is reading half the story. */}
-          {loosePlan.length > 0 && (
-            <div className="loose-note">
-              <p>
-                <b>
-                  {loosePlan.length} street end{loosePlan.length === 1 ? '' : 's'}
-                </b>{' '}
-                {loosePlan.length === 1 ? 'does' : 'do'} not quite meet what{' '}
-                {loosePlan.length === 1 ? 'it was' : 'they were'} drawn to meet — marked in
-                orange on the map. Until they do, an overshoot reads as an extra leg and a
-                gap reads as no junction at all.
+        {railTab === 'land' && (
+          <section className="panel">
+            <header className="panel-head">
+              <span className="label">Land cover</span>
+              <span className="label mono">{areas.length}</span>
+            </header>
+            {areas.length === 0 ? (
+              <p className="empty-note">
+                None yet. Choose <b>Land</b> above the map to cover ground with grass, plaza,
+                water and the rest.
               </p>
-              <div className="btn-row">
-                <button type="button" className="btn btn-solid" onClick={() => handleConnect()}>
-                  Join {loosePlan.length === 1 ? 'it' : 'them all'}
+            ) : (
+              <ul className="cards">
+                {areas.map((a) => (
+                  <li key={a.id}>
+                    <div className={`street-card${a.id === selectedAreaId ? ' is-active' : ''}`}>
+                      <button
+                        type="button"
+                        className="card street-card-main"
+                        onClick={() => selectArea(a.id)}
+                        onDoubleClick={() => mapRef.current?.zoomTo(a.ring)}
+                      >
+                        <span className="card-title">{a.name}</span>
+                        <span className="card-meta">
+                          <span>
+                            <i
+                              className="swatch swatch-inline"
+                              style={{ background: LANDCOVERS[a.landcover].color }}
+                            />
+                            {LANDCOVERS[a.landcover].label}
+                          </span>
+                          <span className="mono">{a.ring.length} pts</span>
+                        </span>
+                      </button>
+                      <div className="street-card-tools">
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          title={a.visible ? 'Hide' : 'Show'}
+                          aria-label={a.visible ? `Hide ${a.name}` : `Show ${a.name}`}
+                          onClick={() => toggleAreaVisible(a.id)}
+                        >
+                          {a.visible ? '◉' : '○'}
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          title="Zoom to"
+                          aria-label={`Zoom to ${a.name}`}
+                          onClick={() => mapRef.current?.zoomTo(a.ring)}
+                        >
+                          ⤢
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          title="Duplicate"
+                          aria-label={`Duplicate ${a.name}`}
+                          onClick={() => duplicateArea(a.id)}
+                        >
+                          ⧉
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          title="Delete"
+                          aria-label={`Delete ${a.name}`}
+                          onClick={() => removeArea(a.id)}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        )}
+
+        {railTab === 'junctions' && (
+          <section className="panel">
+            <header className="panel-head">
+              <span className="label">Intersections</span>
+              <span className="label mono">{junctions.length}</span>
+            </header>
+
+            {/* Which model is in charge. Placed nodes always win where they sit; this
+                decides whether anything happens where they do not. */}
+            <div className="form-row" role="group" aria-label="How intersections are decided">
+              {(
+                [
+                  ['auto', 'Found automatically'],
+                  ['nodes', 'Only where I place one'],
+                ] as const
+              ).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className="btn btn-ghost"
+                  aria-pressed={junctionMode === mode}
+                  onClick={() => setJunctionMode(mode)}
+                >
+                  {label}
                 </button>
+              ))}
+            </div>
+
+            {selectedJunction && !selectedJunction.nodeId && (
+              <div className="btn-row">
                 <button
                   type="button"
                   className="btn btn-ghost"
-                  onClick={() => mapRef.current?.zoomTo(looseEndPoints)}
+                  title="Take ownership of this one crossing, so you can drag it, disable it or keep its design when the streets change"
+                  onClick={() => {
+                    placeNodeAt(selectedJunction.position);
+                    setNotice({
+                      kind: 'success',
+                      title: 'This intersection is yours now',
+                      details: ['Drag it, rename it, disable it, or delete it to hand it back.'],
+                    });
+                  }}
                 >
-                  Show me
+                  Make this one mine
                 </button>
               </div>
-            </div>
-          )}
-
-          {junctions.length === 0 && nodes.length === 0 ? (
-            <p className="empty-note">
-              None yet. Draw two streets that cross, or use the <b>Intersection</b> tool to
-              place one exactly where you want it.
+            )}
+            <p className="hint">
+              {junctionMode === 'nodes'
+                ? 'Nothing is an intersection unless you put one there. Two roads that cross without a node simply overlap.'
+                : 'Crossings become intersections on their own. Anywhere you place a node, the node is in charge instead — including a node set to no junction, which is how two roads cross without meeting.'}
             </p>
-          ) : (
-            <ul className="cards">
-              {junctions.map((j) => (
-                <li key={j.key}>
-                  <button
-                    type="button"
-                    className={`card${j.key === selectedJunctionKey ? ' is-active' : ''}`}
-                    onClick={() => selectJunction(j.key)}
-                    onDoubleClick={() => mapRef.current?.zoomTo([j.position])}
-                  >
-                    <span className="card-title">
-                      {j.legs
-                        .map((leg) => streetNames[leg.streetId] ?? 'Street')
-                        .filter((name, i, all) => all.indexOf(name) === i)
-                        .join(' × ')}
-                    </span>
-                    <span className="card-meta">
-                      <span>
-                        {j.legCount} legs · {j.form === 'merge' ? 'merge' : j.kind}
-                      </span>
-                      <span className="mono">
-                        {formatWidth(
-                          Math.max(...j.legs.map((l) => l.crossingDistanceMeters)),
-                          units,
-                          { withUnit: true },
-                        )}{' '}
-                        max crossing
-                      </span>
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-          <label className="toggle-row">
-            <input
-              type="checkbox"
-              checked={trimAtJunctions}
-              onChange={(e) => setTrimAtJunctions(e.target.checked)}
-            />
-            <span>Trim streets at intersections</span>
-          </label>
+            {nodes.length > 0 && (
+              <ul className="cards" style={{ marginTop: 9 }}>
+                {nodes.map((node, index) => (
+                  <li key={node.id}>
+                    <div className={`street-card${node.id === selectedNodeId ? ' is-active' : ''}`}>
+                      <button
+                        type="button"
+                        className="card street-card-main"
+                        onClick={() => selectNode(node.id)}
+                        onDoubleClick={() => mapRef.current?.zoomTo([node.position])}
+                      >
+                        <span className="card-title">
+                          {node.name || `Intersection ${index + 1}`}
+                        </span>
+                        <span className="card-meta">
+                          <span>
+                            {node.disabled
+                              ? 'no junction — the roads just cross'
+                              : (junctions.find((j) => j.nodeId === node.id)?.legCount ?? 0) +
+                                ' legs'}
+                          </span>
+                          <span className="mono">placed</span>
+                        </span>
+                      </button>
+                      <div className="street-card-tools">
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          title={node.disabled ? 'Make it a junction again' : 'No junction here'}
+                          aria-label={node.disabled ? 'Enable' : 'Disable'}
+                          onClick={() => toggleNodeDisabled(node.id)}
+                        >
+                          {node.disabled ? '○' : '◉'}
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          title="Zoom to"
+                          aria-label="Zoom to"
+                          onClick={() => mapRef.current?.zoomTo([node.position])}
+                        >
+                          ⤢
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          title="Delete"
+                          aria-label="Delete"
+                          onClick={() => removeNode(node.id)}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
 
-          <label className="field" style={{ marginTop: 9 }}>
-            <span className="label">
-              Merge nearby crossings <span className="mono">{junctionMergeSlackMeters} m</span>
-            </span>
-            <input
-              type="range"
-              min={-12}
-              max={30}
-              step={1}
-              value={junctionMergeSlackMeters}
-              onChange={(e) => setJunctionMergeSlack(Number(e.target.value))}
-            />
-            <span className="hint">
-              Two crossings inside one street&rsquo;s width are treated as one junction, which
-              is right nearly always. Push this up for a plaza that reads as a single place,
-              and down to keep a staggered pair of T&rsquo;s apart.
-            </span>
-          </label>
-        </section>
+            {selectedNode && (
+              <label className="field" style={{ marginTop: 9 }}>
+                <span className="label">Name this intersection</span>
+                <input
+                  className="text-input"
+                  value={selectedNode.name ?? ''}
+                  placeholder="Fifth and Race"
+                  onChange={(e) => renameNode(selectedNode.id, e.target.value)}
+                />
+              </label>
+            )}
 
-        <section className="panel">
-          <header className="panel-head">
-            <span className="label">Cross-sections</span>
-            <span className="label">apply to the selected street</span>
-          </header>
-          <TemplatePicker
-            recent={recentTemplateIds}
-            units={units}
-            disabled={!street}
-            onPick={(t) => applyTemplate('street', t.id)}
-          />
-        </section>
+            {/* Loose ends first, above the junctions that DID form. An end that does not
+                meet anything is the reason a junction is missing from the list below, so
+                reading the list without it is reading half the story. */}
+            {loosePlan.length > 0 && (
+              <div className="loose-note">
+                <p>
+                  <b>
+                    {loosePlan.length} street end{loosePlan.length === 1 ? '' : 's'}
+                  </b>{' '}
+                  {loosePlan.length === 1 ? 'does' : 'do'} not quite meet what{' '}
+                  {loosePlan.length === 1 ? 'it was' : 'they were'} drawn to meet — ringed in
+                  orange on the map. Until they do, an overshoot reads as an extra leg and a
+                  gap reads as no junction at all.
+                </p>
+                <ul className="loose-list">
+                  {loosePlan.map((c) => (
+                    <li key={`${c.streetId}:${c.end}`}>
+                      <button
+                        type="button"
+                        className="loose-zoom"
+                        title="Show me where"
+                        onClick={() => mapRef.current?.zoomTo([c.point])}
+                      >
+                        {streetNames[c.streetId] ?? 'Street'} <span className="mono">{c.label}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        onClick={() => handleConnect(c)}
+                      >
+                        Join
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {junctions.length === 0 && nodes.length === 0 ? (
+              <p className="empty-note">
+                None yet. Draw two streets that cross, or use the <b>Intersection</b> tool to
+                place one exactly where you want it.
+              </p>
+            ) : (
+              <ul className="cards">
+                {junctions.map((j) => (
+                  <li key={j.key}>
+                    <button
+                      type="button"
+                      className={`card${j.key === selectedJunctionKey ? ' is-active' : ''}`}
+                      onClick={() => selectJunction(j.key)}
+                      onDoubleClick={() => mapRef.current?.zoomTo([j.position])}
+                    >
+                      <span className="card-title">
+                        {j.legs
+                          .map((leg) => streetNames[leg.streetId] ?? 'Street')
+                          .filter((name, i, all) => all.indexOf(name) === i)
+                          .join(' × ')}
+                      </span>
+                      <span className="card-meta">
+                        <span>
+                          {j.legCount} legs · {j.form === 'merge' ? 'merge' : j.kind}
+                        </span>
+                        <span className="mono">
+                          {formatWidth(
+                            Math.max(...j.legs.map((l) => l.crossingDistanceMeters)),
+                            units,
+                            { withUnit: true },
+                          )}{' '}
+                          max crossing
+                        </span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <label className="toggle-row">
+              <input
+                type="checkbox"
+                checked={trimAtJunctions}
+                onChange={(e) => setTrimAtJunctions(e.target.checked)}
+              />
+              <span>Trim streets at intersections</span>
+            </label>
+
+            <label className="field" style={{ marginTop: 9 }}>
+              <span className="label">
+                Merge nearby crossings <span className="mono">{junctionMergeSlackMeters} m</span>
+              </span>
+              <input
+                type="range"
+                min={-12}
+                max={30}
+                step={1}
+                value={junctionMergeSlackMeters}
+                onChange={(e) => setJunctionMergeSlack(Number(e.target.value))}
+              />
+              <span className="hint">
+                Two crossings inside one street&rsquo;s width are treated as one junction, which
+                is right nearly always. Push this up for a plaza that reads as a single place,
+                and down to keep a staggered pair of T&rsquo;s apart.
+              </span>
+            </label>
+          </section>
+        )}
+
+        {railTab === 'sections' && (
+          <section className="panel">
+            <header className="panel-head">
+              <span className="label">Cross-sections</span>
+              <span className="label">apply to the selected street</span>
+            </header>
+            <TemplatePicker
+              recent={recentTemplateIds}
+              units={units}
+              disabled={!street}
+              onPick={(t) => applyTemplate('street', t.id)}
+            />
+          </section>
+        )}
+
+        </div>
       </aside>
 
       {/* -------------------------------------------------------------------- stage */}
@@ -1095,17 +1156,20 @@ export default function MapEditor() {
                   ))}
                 </div>
 
-                {street && (
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    title="Move this street's loose ends onto the streets they were drawn to meet"
-                    disabled={!loosePlan.some((c) => c.streetId === street.id)}
-                    onClick={() => handleConnect([street.id])}
-                  >
-                    Join its ends
-                  </button>
-                )}
+                {street &&
+                  loosePlan
+                    .filter((c) => c.streetId === street.id)
+                    .map((c) => (
+                      <button
+                        key={c.end}
+                        type="button"
+                        className="btn btn-ghost"
+                        title={c.label}
+                        onClick={() => handleConnect(c)}
+                      >
+                        Join {c.end === 'start' ? 'start' : 'end'}
+                      </button>
+                    ))}
 
                 <span className="pill pill-note">
                   {pointAction === 'move'
@@ -1185,15 +1249,24 @@ export default function MapEditor() {
                 id: 'connect',
                 label:
                   loosePlan.length > 0
-                    ? `Join ${loosePlan.length} loose end${loosePlan.length === 1 ? '' : 's'}`
-                    : 'Everything is joined',
+                    ? `${loosePlan.length} loose end${loosePlan.length === 1 ? '' : 's'}`
+                    : 'Every end is joined',
                 icon: '⚯',
                 hint:
                   loosePlan.length > 0
-                    ? 'Move ends onto the streets they were drawn to meet. Ctrl+Z undoes it.'
+                    ? 'Go to the next end that does not meet what it was drawn to meet'
                     : 'No street ends are left hanging',
                 disabled: loosePlan.length === 0,
-                onClick: () => handleConnect(),
+                // Takes you there rather than fixing it from across the map: each of these
+                // is a judgement about a specific corner, and it should be made looking at
+                // that corner.
+                onClick: () => {
+                  const next = loosePlan[0];
+                  if (!next) return;
+                  selectStreet(next.streetId);
+                  setRailTab('junctions');
+                  mapRef.current?.zoomTo([next.point]);
+                },
               },
               {
                 id: 'duplicate',

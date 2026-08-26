@@ -190,6 +190,22 @@ export interface DeriveOptions {
    * still finds crossings, so a design works before anyone has thought about junctions.
    */
   junctionMode?: 'auto' | 'nodes';
+  /**
+   * The one street being dragged right now, if any.
+   *
+   * Trimming a band against a junction is a polygon boolean, and polygon booleans are the
+   * whole cost of a redraw — a few milliseconds each, against a budget of sixteen for the
+   * frame. Dragging a vertex moves the junctions that street meets, which invalidates the
+   * trim for every OTHER street at those junctions too, and re-clipping all of them is
+   * what makes a drag stutter on a project with real intersections in it.
+   *
+   * While a drag is in flight the neighbours keep the trim they had. The street under the
+   * cursor is always exact; its neighbours are behind by however far the junction has
+   * moved this gesture, which is a few centimetres of kerb line nobody is looking at. The
+   * gesture ending clears this and everything is re-derived properly, so nothing stale
+   * survives the mouse button coming up.
+   */
+  liveStreetId?: string | null;
 }
 
 // ------------------------------------------------------------------------ raw bands
@@ -321,6 +337,83 @@ function geometryFor(
 // ---------------------------------------------------------------------- subtraction
 
 type Ring = [number, number][];
+
+/**
+ * Junction rings, each with the box it occupies.
+ *
+ * Trimming used to hand every band the whole list of junctions, so a band on one side of
+ * the map was booleaned against a junction on the other — a full polygon clip to discover
+ * two shapes do not touch. On a real project that is 66 bands against 13 junctions, and
+ * the bands are hundreds of vertices long where a street curves.
+ *
+ * A box test is a handful of comparisons and rejects nearly all of those pairs outright.
+ * The clip itself is unchanged: this only decides which clips are worth attempting.
+ */
+interface Hole {
+  ring: Ring;
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+function toHole(ring: Ring): Hole {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const [x, y] of ring) {
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (x > maxX) maxX = x;
+    if (y > maxY) maxY = y;
+  }
+  return { ring, minX, minY, maxX, maxY };
+}
+
+/** Bounds of a feature's coordinates, at any nesting depth. */
+function boundsOf(coords: unknown): { minX: number; minY: number; maxX: number; maxY: number } {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  const walk = (node: unknown): void => {
+    if (!Array.isArray(node)) return;
+    if (typeof node[0] === 'number' && typeof node[1] === 'number') {
+      const x = node[0] as number;
+      const y = node[1] as number;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+      return;
+    }
+    for (const child of node) walk(child);
+  };
+
+  walk(coords);
+  return { minX, minY, maxX, maxY };
+}
+
+/**
+ * The holes that could possibly touch these bounds.
+ *
+ * Slack is zero on purpose. Two shapes whose boxes merely abut cannot overlap in area, and
+ * a trim that removes nothing is the case being avoided.
+ */
+function holesNear(
+  holes: readonly Hole[],
+  bounds: { minX: number; minY: number; maxX: number; maxY: number },
+): Ring[] {
+  const near: Ring[] = [];
+  for (const hole of holes) {
+    if (hole.maxX < bounds.minX || hole.minX > bounds.maxX) continue;
+    if (hole.maxY < bounds.minY || hole.minY > bounds.maxY) continue;
+    near.push(hole.ring);
+  }
+  return near;
+}
 
 /**
  * Cut the junction footprints out of a band.
@@ -672,6 +765,7 @@ export function deriveProject(
     mergeBelowDegrees = 40,
     nodes,
     junctionMode = 'auto',
+    liveStreetId = null,
   } = options;
 
   const visible = streets.filter((s) => s.visible);
@@ -713,23 +807,57 @@ export function deriveProject(
   // Two hole sets, and the split is the point: asphalt runs through the junction and is
   // cut only at the kerb-to-kerb box, while footway and verge stop at the wider footprint
   // so the corner sidewalk drawn underneath shows through and turns the corner.
-  const pavedHoles: Ring[] = [];
-  const roadwayHoles: Ring[] = [];
-  const footprintHoles: Ring[] = [];
-  const daylightHoles: Ring[] = [];
+  //
+  // Both are keyed by street, because a junction cuts the streets that MEET there and no
+  // others. Handing every band every hole was not only the whole cost of a redraw — 66
+  // bands clipped against 13 junctions, nearly all of which they never touch — it was
+  // wrong: a street running past an intersection it does not join was getting a bite taken
+  // out of it whenever the box happened to reach that far.
+  const pavedHoles = new Map<string, Hole[]>();
+  const roadwayHoles = new Map<string, Hole[]>();
+  const footprintHoles = new Map<string, Hole[]>();
+  const daylightHoles = new Map<string, Hole[]>();
+
+  const addHole = (map: Map<string, Hole[]>, streetId: string, ring: LngLat[]) => {
+    if (ring.length <= 3) return;
+    const list = map.get(streetId);
+    if (list) list.push(toHole(ring as Ring));
+    else map.set(streetId, [toHole(ring as Ring)]);
+  };
+
   for (const entry of geometry) {
-    if (entry.paved.length > 3) pavedHoles.push(entry.paved as Ring);
-    if (entry.roadwayCut.length > 3) roadwayHoles.push(entry.roadwayCut as Ring);
-    if (entry.footprint.length > 3) footprintHoles.push(entry.footprint as Ring);
+    // One junction reaches several streets; a street appears on two legs of the same
+    // junction when it passes straight through, hence the de-duplication.
+    const touched = new Set(entry.legs.map((leg) => leg.streetId));
+    for (const streetId of touched) {
+      addHole(pavedHoles, streetId, entry.paved);
+      addHole(roadwayHoles, streetId, entry.roadwayCut);
+      addHole(footprintHoles, streetId, entry.footprint);
+    }
+    // Daylighting is per leg, so it belongs only to the street that leg runs down.
     for (const zone of entry.daylightZones) {
-      if (zone.ring.length > 3) daylightHoles.push(zone.ring as Ring);
+      const streetId = entry.legs[zone.legIndex]?.streetId;
+      if (streetId) addHole(daylightHoles, streetId, zone.ring);
     }
   }
 
+  // A street's trim depends on the junctions it MEETS, and on nothing else.
+  //
+  // The key used to be every junction's signature joined together, which meant nudging one
+  // corner radius threw away the trim for every street in the project and re-clipped the
+  // lot. On a design with a dozen intersections that turned a one-corner edit into a full
+  // rebuild — which is exactly the "it gets slower the further you go" shape, because the
+  // key grows with the project while the edit stays the same size.
+  //
   // The signature already encodes leg geometry, corner overrides and the default radius,
-  // so reusing it here is exact. Deriving the key from ring lengths instead would miss a
-  // radius change that happened to leave the vertex count the same.
-  const trimKey = entries.map((entry) => entry.signature).join('||');
+  // so reusing it is exact. Deriving a key from ring lengths instead would miss a radius
+  // change that happened to leave the vertex count the same.
+  const trimKeys = new Map<string, string>();
+  for (const entry of entries) {
+    for (const streetId of new Set(entry.geometry.legs.map((leg) => leg.streetId))) {
+      trimKeys.set(streetId, `${trimKeys.get(streetId) ?? ''}${entry.signature}||`);
+    }
+  }
 
   const byStreet = new Map<string, StreetGeometry>();
   const warnings: DerivedProject['warnings'] = [];
@@ -740,27 +868,43 @@ export function deriveProject(
       warnings.push({ streetId: street.id, streetName: street.name, warnings: raw.warnings });
     }
 
+    const trimKey = trimKeys.get(street.id) ?? '';
     const cached = trimCache.get(street.id);
     if (cached && cached.bands === raw.bands && cached.trimKey === trimKey) {
       byStreet.set(street.id, cached.result);
       continue;
     }
 
+    // Mid-drag, a neighbour keeps what it had. Only when its own bands are unchanged —
+    // a street whose geometry really moved is re-clipped whatever else is going on, or it
+    // would render its old shape.
+    if (liveStreetId && street.id !== liveStreetId && cached && cached.bands === raw.bands) {
+      byStreet.set(street.id, cached.result);
+      continue;
+    }
+
+    const myPaved = pavedHoles.get(street.id) ?? [];
+    const myRoadway = roadwayHoles.get(street.id) ?? [];
+    const myFootprint = footprintHoles.get(street.id) ?? [];
+    const myDaylight = daylightHoles.get(street.id) ?? [];
+
     const bands: Feature[] = [];
     for (const band of raw.bands) {
       const type = band.properties.componentType;
       const roadway = PRIMITIVES[type].isRoadway;
+      const bandBounds = boundsOf(band.geometry.coordinates);
 
       // Roadway is cut against the UN-bulbed box, not the paved fill. The difference
       // between those two rings is exactly the ground a curb extension reclaims: no lane
       // band is drawn there, and the footway ring underneath shows through instead.
-      const trimmed = subtractRings(band, roadway ? roadwayHoles : footprintHoles);
+      const trimmed = subtractRings(band, holesNear(roadway ? myRoadway : myFootprint, bandBounds));
       if (!trimmed) continue;
       // Carried onto the feature so the map can draw a tunnel translucent and an overpass
       // with a deck edge, without needing to know which street a band came from.
       trimmed.properties = { ...trimmed.properties, level: street.level ?? 0 };
 
-      if (!roadway || !isParking(type) || daylightHoles.length === 0) {
+      const daylightNear = holesNear(myDaylight, bandBounds);
+      if (!roadway || !isParking(type) || daylightNear.length === 0) {
         bands.push(trimmed);
         continue;
       }
@@ -768,7 +912,7 @@ export function deriveProject(
       // Daylighting removes the parking, not the pavement. The cleared stretch is still
       // roadway, so it is recoloured rather than cut out — a hole here would show footway
       // through the middle of the carriageway.
-      for (const zone of daylightHoles) {
+      for (const zone of daylightNear) {
         const cleared = intersectRings(trimmed, zone);
         if (!cleared) continue;
         bands.push({
@@ -781,14 +925,20 @@ export function deriveProject(
         });
       }
 
-      const kept = subtractRings(trimmed, daylightHoles);
+      const kept = subtractRings(trimmed, daylightNear);
       if (kept) bands.push(kept);
     }
 
     // Lane markings belong to the street, not the intersection; inside the box the
     // junction draws its own.
     const markings: Feature[] = [];
-    for (const marking of raw.markings) markings.push(...clipLineOutside(marking, pavedHoles));
+    for (const marking of raw.markings) {
+      const near = holesNear(
+        myPaved,
+        boundsOf(marking.geometry.type === 'GeometryCollection' ? [] : marking.geometry.coordinates),
+      );
+      markings.push(...clipLineOutside(marking, near));
+    }
 
     // A symbol is either on the road or it is not — clipping one in half would read as a
     // rendering fault rather than as a junction. Drop any whose centre lands in the box.
@@ -797,7 +947,14 @@ export function deriveProject(
       const first = stamp.geometry.coordinates[0]?.[0];
       if (!first) return false;
       const centre = ringCentroid(first);
-      return !pavedHoles.some((hole) => pointInRing(centre, hole));
+      return !myPaved.some(
+        (hole) =>
+          centre[0] >= hole.minX &&
+          centre[0] <= hole.maxX &&
+          centre[1] >= hole.minY &&
+          centre[1] <= hole.maxY &&
+          pointInRing(centre, hole.ring),
+      );
     });
 
     const result: StreetGeometry = { bands, markings, stamps, warnings: raw.warnings };
