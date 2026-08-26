@@ -210,3 +210,76 @@ describe('setComponentMarkings', () => {
     expect(after[1]!.stripeLeft).toBeUndefined();
   });
 });
+
+describe('placed intersections', () => {
+  it('places, selects and deletes one, and undo brings it back', () => {
+    const before = useEditorStore.getState().nodes.length;
+    const id = useEditorStore.getState().addNode([-84.52, 39.11]);
+
+    expect(useEditorStore.getState().nodes).toHaveLength(before + 1);
+    expect(useEditorStore.getState().selectedNodeId).toBe(id);
+
+    useEditorStore.getState().removeNode(id);
+    expect(useEditorStore.getState().nodes).toHaveLength(before);
+    expect(useEditorStore.getState().selectedNodeId).toBeNull();
+
+    useEditorStore.getState().undo();
+    expect(useEditorStore.getState().nodes.some((n) => n.id === id)).toBe(true);
+  });
+
+  it('takes its junction settings with it when deleted', () => {
+    // The key is the node id, so nothing can ever claim those settings again. Leaving
+    // them would be a slow leak that survives every save and load.
+    const id = useEditorStore.getState().addNode([-84.52, 39.11]);
+    useEditorStore.getState().updateCorner(`node:${id}`, 0, { radiusMeters: 3 });
+    expect(useEditorStore.getState().junctionOverrides[`node:${id}`]).toBeDefined();
+
+    useEditorStore.getState().removeNode(id);
+    expect(useEditorStore.getState().junctionOverrides[`node:${id}`]).toBeUndefined();
+  });
+
+  it('drags a street END along with the node, and leaves a street it passes through alone', () => {
+    // The behaviour a road-building game has, and for the same reason: an endpoint at the
+    // node IS the node, while a street the node sits on is one the node slides along.
+    const state = useEditorStore.getState();
+    const through = state.streets[0]!;
+    const start = through.centerline[0]!;
+
+    const id = state.addNode([start[0], start[1]]);
+    const moved: [number, number] = [start[0] + 0.0002, start[1] + 0.0002];
+    useEditorStore.getState().moveNodeLive(id, moved);
+
+    const after = useEditorStore.getState().streets.find((s) => s.id === through.id)!;
+    expect(after.centerline[0]).toEqual(moved);
+    // Everything that was not at the node is untouched.
+    expect(after.centerline[1]).toEqual(through.centerline[1]);
+  });
+
+  it('selecting a node puts down whatever else was selected', () => {
+    const street = useEditorStore.getState().streets[0]!;
+    useEditorStore.getState().selectStreet(street.id);
+    const id = useEditorStore.getState().addNode([-84.52, 39.11]);
+    useEditorStore.getState().selectNode(id);
+
+    expect(useEditorStore.getState().selectedStreetId).toBeNull();
+    expect(useEditorStore.getState().selectedNodeId).toBe(id);
+
+    useEditorStore.getState().clearSelection();
+    expect(useEditorStore.getState().selectedNodeId).toBeNull();
+  });
+
+  it('places one at every crossing, and does not double up when run twice', () => {
+    useEditorStore.getState().loadDemo();
+    // Earlier cases in this file leave nodes behind, so the baseline is whatever is
+    // already there rather than zero.
+    const before = useEditorStore.getState().nodes.length;
+
+    const first = useEditorStore.getState().materialiseNodes();
+    expect(first).toBeGreaterThan(0);
+    expect(useEditorStore.getState().nodes).toHaveLength(before + first);
+
+    const second = useEditorStore.getState().materialiseNodes();
+    expect(second).toBe(0);
+    expect(useEditorStore.getState().nodes).toHaveLength(before + first);
+  });
+});

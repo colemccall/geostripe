@@ -114,6 +114,46 @@ export interface Area {
   visible: boolean;
 }
 
+/**
+ * An intersection you placed, rather than one the geometry noticed.
+ *
+ * GeoStripe started by deriving every junction from where centerlines happen to cross, and
+ * that is still what happens where you have not said otherwise — it means a design works
+ * before you have thought about intersections at all. But a derived junction is not a
+ * thing you own: you cannot select the crossing itself, cannot move it independently of
+ * the streets, and cannot say "there is no junction here" about two roads that pass each
+ * other on the flat.
+ *
+ * A node fixes all three. It is the authority wherever it sits: the junction is AT the
+ * node, built from whichever streets pass within reach of it, keyed by the node's id — so
+ * its corner radii and crossings survive anything that happens to the streets, including
+ * being redrawn from scratch.
+ *
+ * Dragging one behaves the way it does in a road-building game, and for the same reason:
+ * a street that ENDS near the node has its endpoint carried along, because that endpoint
+ * and the node are the same place; a street that merely passes through lets the node slide
+ * along it, because the node is a point on that street and moving it should not bend it.
+ */
+export interface JunctionNode {
+  id: string;
+  name?: string;
+  /** WGS84. Authoritative: the junction is built here, not at the detected crossing. */
+  position: [number, number];
+  /**
+   * How far the node reaches for streets, in metres. Absent derives it from the widest
+   * section involved, which is right unless streets are stacked unusually close.
+   */
+  reachMeters?: number;
+  /**
+   * No junction here at all — the streets simply overlap.
+   *
+   * Not the same as deleting the node: deleting it hands the spot back to automatic
+   * detection, which would put the junction straight back. This is how you say two roads
+   * cross without meeting, which nothing else in the model can express.
+   */
+  disabled?: boolean;
+}
+
 export function newId(prefix: string): string {
   const rand =
     typeof crypto !== 'undefined' && 'randomUUID' in crypto

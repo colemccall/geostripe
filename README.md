@@ -229,6 +229,14 @@ the width that is really there, and save it as GeoJSON you can reopen and keep e
   lane-use arrow follows. A turn pocket is applied to the leg *before* any geometry is
   built, so it moves the kerb, the corner return and the crossing with it — and the crossing
   distance the inspector reports goes up by exactly what the pocket costs.
+- **Intersections you place.** The `Intersection` tool drops a node where you click, and
+  from then on that node is in charge: the junction is *at* it, keyed by *it*, and you can
+  select it, drag it, name it, disable it or delete it. Dragging one carries along any
+  street that ENDS there and lets a street that passes through slide under it. A node set
+  to **no junction** is the one thing nothing else in the model could say — two roads that
+  cross without meeting. One button places a node at every crossing there is, so the graph
+  becomes yours without redrawing anything, and a mode switch turns automatic detection off
+  entirely if you want nothing to be an intersection unless you put one there.
 - **Merges.** A road that joins another instead of crossing it is drawn as a merge, not an
   intersection: the road being joined is never cut, and the junction is the taper between
   the two kerbs, with a gore at the nose. Below 40° it is classified automatically —
@@ -259,7 +267,7 @@ the width that is really there, and save it as GeoJSON you can reopen and keep e
   inside the neighbour suppressed. One slider moves the threshold in both directions.
 - **Grade separation** — `level` marks a street as a tunnel or an overpass, and streets at
   different levels do not form junctions.
-- **741 unit tests** across geometry, curves, junction detection, intersection geometry,
+- **763 unit tests** across geometry, curves, junction detection, intersection geometry,
   complex and staggered junctions, merges, snapping, road markings, the memoisation that
   keeps dragging affordable, cross-section arithmetic, the dimensional audit, the asset
   catalogue, the project round-trip, and store history.
@@ -311,6 +319,7 @@ junction detection.
 | S | Snapping — to vertices, to centerlines, and to 15° increments | done |
 | T | Library browser — a two-level tree, search, recents, per-band actions | done |
 | U | On-map controls — dock, context bar, selection strip, layer switches | done |
+| V | Placed intersections — nodes you own, drag, disable, delete | done |
 | G | Protected (Dutch) intersection, incl. the corner refuge island | next |
 | H | Roundabout, as a junction form | planned |
 | P | Signal phasing — which movements run together, and the conflicts left over | planned |
@@ -346,6 +355,16 @@ Worth recording, because these are the calls that would be quietly re-litigated 
   special cases and produces the nose for free.
 - **A vertex beats an edge** (S), even when the edge is marginally nearer. An existing
   control point is a decision somebody made; a point on a segment is not.
+- **Both junction models, and neither wins quietly** (V). Detection is still the default,
+  because a design has to work before anyone has thought about intersections. A node is
+  authoritative in its own neighbourhood and the crossing there is dropped — two junctions
+  on one piece of asphalt would each carve the other's streets. A node's id is its junction
+  key, which is the most durable key there is: the streets can be deleted and redrawn and
+  the corner radii stay where they were put.
+- **Deselecting is as easy as selecting** (U). Clicking bare ground used to hold the
+  selection, on the grounds that losing the inspector by missing a band by two pixels is
+  maddening. The reverse was worse: with no other way out, the panel could not be put down
+  at all. Escape does it too, and Delete removes whatever is selected.
 - **The map is the workspace** (U). Every control that acts on what is under the cursor
   lives over the imagery, because a side rail costs a glance away from the thing being
   traced once per action, and drawing one street is a hundred actions. Tool selection lives

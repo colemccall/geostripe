@@ -4,7 +4,7 @@ import { COMPONENT_TYPES, PRIMITIVES } from '../library/primitives';
 import type { ComponentType, Direction } from '../library/primitives';
 import { bandsForStreet } from '../geo/banding';
 import { componentSchema } from './schema';
-import type { Area, SectionComponent, Street } from './types';
+import type { Area, JunctionNode, SectionComponent, Street } from './types';
 import { newId } from './types';
 import type { JunctionOverride } from '../geo/derived';
 import { MOVEMENTS } from '../geo/markings';
@@ -152,6 +152,7 @@ export type ProjectParseResult =
       streets: Street[];
       areas: Area[];
       junctionOverrides: Record<string, JunctionOverride>;
+      nodes: JunctionNode[];
       warnings: string[];
     }
   | { ok: false; errors: string[] };
@@ -178,6 +179,7 @@ export function toProjectGeoJSON(
   meta: Pick<ProjectMeta, 'name' | 'editorVersion'>,
   junctionOverrides: Readonly<Record<string, JunctionOverride>> = {},
   areas: readonly Area[] = [],
+  nodes: readonly JunctionNode[] = [],
 ): FeatureCollection {
   const features: Feature[] = [];
 
@@ -258,6 +260,23 @@ export function toProjectGeoJSON(
     });
   }
 
+  // Placed intersections. Real features rather than metadata, because a node is part of
+  // the design — QGIS should see it, and a plain Point with these properties can be
+  // authored by hand.
+  for (const node of nodes) {
+    features.push({
+      type: 'Feature',
+      id: node.id,
+      properties: {
+        geostripe: 'node',
+        ...(node.name ? { name: node.name } : {}),
+        ...(node.reachMeters !== undefined ? { reachMeters: round(node.reachMeters) } : {}),
+        ...(node.disabled ? { disabled: true } : {}),
+      },
+      geometry: { type: 'Point', coordinates: node.position },
+    });
+  }
+
   // Derived polygons, for anything downstream that just wants shapes.
   //
   // Built from the RESOLVED line, not the control points. A curved street whose exported
@@ -296,9 +315,10 @@ export function serializeProject(
   meta: Pick<ProjectMeta, 'name' | 'editorVersion'>,
   junctionOverrides: Readonly<Record<string, JunctionOverride>> = {},
   areas: readonly Area[] = [],
+  nodes: readonly JunctionNode[] = [],
 ): string {
   return `${JSON.stringify(
-    toProjectGeoJSON(streets, meta, junctionOverrides, areas),
+    toProjectGeoJSON(streets, meta, junctionOverrides, areas, nodes),
     null,
     2,
   )}\n`;
@@ -370,6 +390,7 @@ export function parseProject(text: string, defaults: ImportDefaults): ProjectPar
   }
 
   const streets: Street[] = [];
+  const nodes: JunctionNode[] = [];
   const areas: Area[] = [];
   const warnings: string[] = [];
   let bandsDropped = 0;
@@ -416,6 +437,34 @@ export function parseProject(text: string, defaults: ImportDefaults): ProjectPar
       props['featureClass'] === 'marking'
     ) {
       bandsDropped++;
+      return;
+    }
+
+    // A placed intersection. Read before anything geometric, because it is the one kind
+    // of feature that is a Point.
+    if (kind === 'node') {
+      // The surrounding loop works on unvalidated features, so the geometry is unknown
+      // here rather than a GeoJSON union. Narrowed by hand, once.
+      const geometry = feature.geometry as { type?: string; coordinates?: unknown } | undefined;
+      if (geometry?.type !== 'Point' || !Array.isArray(geometry.coordinates)) {
+        warnings.push(`${label}: an intersection needs a Point geometry.`);
+        skipped++;
+        return;
+      }
+      const [lng, lat] = geometry.coordinates as number[];
+      if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+        skipped++;
+        return;
+      }
+      nodes.push({
+        id: claimId(feature.id),
+        position: [lng!, lat!],
+        ...(typeof props['name'] === 'string' && props['name'] ? { name: props['name'] } : {}),
+        ...(typeof props['reachMeters'] === 'number' && Number.isFinite(props['reachMeters'])
+          ? { reachMeters: props['reachMeters'] }
+          : {}),
+        ...(props['disabled'] === true ? { disabled: true } : {}),
+      });
       return;
     }
 
@@ -549,7 +598,16 @@ export function parseProject(text: string, defaults: ImportDefaults): ProjectPar
   const stored = outer.data.metadata?.junctions ?? {};
   const junctionOverrides: Record<string, JunctionOverride> = {};
   let orphaned = 0;
+  const nodeIds = new Set(nodes.map((node) => node.id));
   for (const [key, value] of Object.entries(stored)) {
+    // Two key shapes, and they are checked against different things. A placed
+    // intersection is keyed by its node id and names no street at all; running it through
+    // the street check would throw away the settings on every node in the file.
+    if (key.startsWith('node:')) {
+      if (nodeIds.has(key.slice(5))) junctionOverrides[key] = value;
+      else orphaned++;
+      continue;
+    }
     const ids = key.split('#')[0]?.split('~') ?? [];
     if (ids.length > 0 && ids.every((id) => usedIds.has(id))) junctionOverrides[key] = value;
     else orphaned++;
@@ -560,5 +618,5 @@ export function parseProject(text: string, defaults: ImportDefaults): ProjectPar
     );
   }
 
-  return { ok: true, streets, areas, junctionOverrides, warnings };
+  return { ok: true, streets, areas, nodes, junctionOverrides, warnings };
 }

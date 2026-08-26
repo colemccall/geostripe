@@ -30,7 +30,7 @@ import type { CurvatureWarning } from './curvature';
 import type { LngLat, LocalPlane, PlanePoint } from './projection';
 import { PRIMITIVES } from '../library/primitives';
 import type { ComponentType } from '../library/primitives';
-import type { CrossSection, Street } from '../model/types';
+import type { CrossSection, JunctionNode, Street } from '../model/types';
 
 /**
  * The derivation pipeline, memoised.
@@ -183,6 +183,13 @@ export interface DeriveOptions {
    * are two. Negative pushes them apart, positive pulls them together.
    */
   junctionMergeSlackMeters?: number;
+  /** Intersections somebody placed. Authoritative wherever they sit. */
+  nodes?: readonly JunctionNode[];
+  /**
+   * 'nodes' means an intersection exists only where one was placed. The default 'auto'
+   * still finds crossings, so a design works before anyone has thought about junctions.
+   */
+  junctionMode?: 'auto' | 'nodes';
 }
 
 // ------------------------------------------------------------------------ raw bands
@@ -663,12 +670,16 @@ export function deriveProject(
     trimAtJunctions = true,
     junctionMergeSlackMeters = 0,
     mergeBelowDegrees = 40,
+    nodes,
+    junctionMode = 'auto',
   } = options;
 
   const visible = streets.filter((s) => s.visible);
   const byId = new Map(streets.map((street) => [street.id, street]));
   const { junctions, plane } = detectJunctions(streets, {
     mergeSlackMeters: junctionMergeSlackMeters,
+    nodes,
+    mode: junctionMode,
   });
 
   // Flares widen the legs, so they have to be applied before the geometry is built rather

@@ -1996,3 +1996,13 @@ button {
   border-color: var(--line);
   color: var(--ink);
 }
+
+.icon-btn.is-danger:hover {
+  background: var(--warn-fill);
+  color: var(--accent-ink);
+  border-color: var(--warn-fill);
+}
+
+.selstrip-kind.is-node {
+  color: #7FB2E5;
+}
