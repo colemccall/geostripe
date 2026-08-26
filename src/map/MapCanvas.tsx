@@ -236,7 +236,20 @@ function buildStyle(basemapId: BasemapId, options: TileSourceOptions): MapStyle 
         }
       : {},
     layers: tiles.length
-      ? [{ id: 'basemap', type: 'raster', source: 'basemap' }]
+      ? [
+          {
+            id: 'basemap',
+            type: 'raster',
+            source: 'basemap',
+            paint: {
+              // No cross-fade between zoom levels. The fade keeps BOTH levels of tiles
+              // alive and composites them for its duration, so every zoom step briefly
+              // costs twice the texture work — on imagery, for an effect that mostly
+              // reads as the map being slow to sharpen up.
+              'raster-fade-duration': 0,
+            },
+          },
+        ]
       : [],
   };
 }
@@ -1051,8 +1064,20 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
       style: buildStyle(basemapId, sourceOptions),
       center,
       zoom,
-      maxZoom: 22,
+      // Past z21 a pixel is under four centimetres of ground, which is finer than any
+      // aerial imagery this tool can load — the tiles are upsampled, and each level costs
+      // four times the requests of the one below for no more detail.
+      maxZoom: 21,
       attributionControl: false,
+      // Aerial imagery for a given capture date does not change. Re-fetching it when a
+      // cache header expires is pure traffic, and it happens while you are working.
+      refreshExpiredTiles: false,
+      // Bounded, so a long session does not accumulate every tile it has ever seen. This
+      // is the part of "it gets slower the further you go" that is about memory rather
+      // than about geometry.
+      maxTileCacheSize: 160,
+      // Matches the raster fade above: no cross-fade anywhere.
+      fadeDuration: 0,
       // North-up only. See the note at the top of this file.
       dragRotate: false,
       pitchWithRotate: false,

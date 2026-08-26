@@ -467,7 +467,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
     drawLandcover: 'grass',
     selectedComponentId: null,
     // Demo opens with the swipe on, so the redesign reads against the real street.
-    swipe: 0.5,
+    // Off until asked for. The divider is a thing you reach for to make a point, not a
+    // mode to work in — and it costs a clip of the whole design on every frame of every
+    // pan, so leaving it on by default made the editor feel broken for a feature nobody
+    // had switched on.
+    swipe: null,
 
     past: [],
     future: [],
@@ -814,7 +818,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       if (which === 'park') {
         const streets = createDemoStreets();
         commit({ streets, junctionOverrides: {} });
-        set({ selectedStreetId: streets[0]?.id ?? null, selectedComponentId: null, swipe: 0.5 });
+        set({ selectedStreetId: streets[0]?.id ?? null, selectedComponentId: null, swipe: null });
         return;
       }
 
@@ -827,7 +831,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         projectName: demo.name,
         selectedStreetId: demo.streets[0]?.id ?? null,
         selectedComponentId: null,
-        swipe: 0.5,
+        swipe: null,
       });
     },
 

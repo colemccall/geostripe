@@ -13,7 +13,7 @@ import { PRIMITIVES } from '../library/primitives';
 import { TEMPLATES, TEMPLATE_CATEGORIES, instantiateTemplate } from '../library/templates';
 import { basemapById } from '../map/basemaps';
 import MapCanvas from '../map/MapCanvas';
-import type { EntityKind, MapHandle, MapView } from '../map/MapCanvas';
+import type { EntityKind, MapHandle } from '../map/MapCanvas';
 import type { DesignData, JunctionSummary } from '../map/designLayers';
 import { describeWarnings } from '../geo/curvature';
 import { lineLengthMeters } from '../geo/measure';
@@ -33,6 +33,7 @@ import MapDock from '../components/MapDock';
 import { planConnections } from '../geo/connect';
 import type { Connection } from '../geo/connect';
 import ShortcutSheet from '../components/ShortcutSheet';
+import ViewReadout, { createViewSource } from '../components/ViewReadout';
 import MapViewControls from '../components/MapViewControls';
 import SelectionStrip from '../components/SelectionStrip';
 import NoticeBar from '../components/NoticeBar';
@@ -239,7 +240,10 @@ export default function MapEditor() {
     setDrawLandcover,
   } = useEditorStore.getState();
 
-  const [view, setView] = useState<MapView | null>(null);
+  // The map's viewport lives outside React. It changes on every frame of a pan, and the
+  // only thing that wants it is a two-cell readout in the status bar — routing that
+  // through component state re-rendered the entire editor several times a second.
+  const viewSource = useRef(createViewSource()).current;
   const [warnings, setWarnings] = useState<DesignData['warnings']>([]);
   const [draft, setDraft] = useState<{ points: number; metres: number }>({
     points: 0,
@@ -1357,7 +1361,7 @@ export default function MapEditor() {
             swipe={swipe}
             center={DEMO_CENTER}
             zoom={DEMO_ZOOM}
-            onViewChange={setView}
+            onViewChange={viewSource.publish}
             onSelectStreet={selectStreet}
             onSelectJunction={selectJunction}
             onWarnings={setWarnings}
@@ -1519,9 +1523,23 @@ export default function MapEditor() {
         </div>
 
         <footer className="statusbar">
+          <ViewReadout source={viewSource}>
+            {(view) => (
+              <>
+                <div className="cell">
+                  <span className="label">Center</span>
+                  <b className="mono">
+                    {view ? `${view.lat.toFixed(5)}, ${view.lng.toFixed(5)}` : '—'}
+                  </b>
+                </div>
+                <div className="cell">
+                  <span className="label">Zoom</span>
+                  <b className="mono">{view ? `z${view.zoom.toFixed(1)}` : '—'}</b>
+                </div>
+              </>
+            )}
+          </ViewReadout>
           {[
-            ['Center', view ? `${view.lat.toFixed(5)}, ${view.lng.toFixed(5)}` : '—'],
-            ['Zoom', view ? `z${view.zoom.toFixed(1)}` : '—'],
             ['Imagery', basemap.label],
             ['Street', street?.name ?? '—'],
             [
