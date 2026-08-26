@@ -3,6 +3,8 @@ import { resolveCenterline } from './curve';
 import type { LngLat, LocalPlane, PlanePoint } from './projection';
 import { sectionExtent, travelwayWidth } from '../model/section';
 import type { JunctionNode, Street } from '../model/types';
+import { levelAt, levelsMeet } from './grade';
+import type { GradePoint } from './grade';
 
 /**
  * Where streets meet.
@@ -90,7 +92,10 @@ export interface Junction {
 
 interface Track {
   streetId: string;
+  /** Flat level, and the fallback wherever there is no profile. */
   level: number;
+  /** Where this street leaves the ground, if it does. */
+  grade?: readonly GradePoint[];
   pts: PlanePoint[];
   /** Cumulative distance from the start at each vertex. */
   stations: number[];
@@ -115,6 +120,7 @@ function buildTrack(street: Street, plane: LocalPlane): Track | null {
   return {
     streetId: street.id,
     level: street.level ?? 0,
+    ...(street.grade && street.grade.length > 0 ? { grade: street.grade } : {}),
     pts,
     stations,
     length: stations[stations.length - 1]!,
@@ -509,11 +515,16 @@ export function detectJunctions(
   if ((options.mode ?? 'auto') === 'auto') {
     for (let i = 0; i < list.length; i++) {
       for (let j = i + 1; j < list.length; j++) {
-        // Different levels never meet. An overpass crossing the street below it is not an
-        // intersection, and detecting one would carve a hole through both.
-        if (list[i]!.level !== list[j]!.level) continue;
         // Self-intersection is a curvature problem, not a junction, so pairs only.
-        crossings.push(...crossingsBetween(list[i]!, list[j]!, slack));
+        // Level is checked per crossing rather than per street: a street that climbs over
+        // one road and comes back down still meets everything at either end, and rejecting
+        // the whole pair on the street's nominal level would delete those junctions.
+        crossings.push(...crossingsBetween(list[i]!, list[j]!, slack).filter((crossing) =>
+          levelsMeet(
+            levelAt(list[i]!.grade, crossing.stations.get(list[i]!.streetId) ?? 0, list[i]!.level),
+            levelAt(list[j]!.grade, crossing.stations.get(list[j]!.streetId) ?? 0, list[j]!.level),
+          ),
+        ));
       }
     }
   }

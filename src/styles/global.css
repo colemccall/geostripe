@@ -2383,3 +2383,101 @@ button {
   outline-offset: 1px;
   border-radius: 4px;
 }
+
+/* The crossing switch, on the leg it belongs to. Continental bars as the icon,
+   because that is what the switch draws on the ground. */
+.leg-list li {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.leg-list .leg-row {
+  flex: 1;
+  min-width: 0;
+}
+
+.leg-mark {
+  flex: none;
+  width: 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--ink-dim);
+  font-size: 13px;
+  letter-spacing: -2px;
+  transition: 0.12s;
+}
+
+.leg-mark:hover {
+  color: var(--ink);
+  border-color: var(--ink-dim);
+}
+
+.leg-mark.is-on {
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
+  color: var(--accent-ink);
+}
+
+/* ============================================================================
+   Grade separation, crossing by crossing.
+
+   The list is the interchange authoring tool: every road this street meets,
+   with a three-way switch for under / at grade / over. Ramps are implied by
+   the profile, so choosing "over" on one crossing leaves the street on the
+   ground for the next one.
+   ============================================================================ */
+
+.grade-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.grade-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.grade-where {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 4px 7px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--ink-2);
+  font-size: 11.5px;
+  text-align: left;
+}
+
+.grade-where:hover {
+  border-color: var(--derived-fill);
+  color: var(--ink);
+}
+
+.grade-where .mono {
+  font-size: 9.5px;
+  color: var(--ink-dim);
+}
+
+.grade-pick {
+  flex: none;
+}
+
+.grade-pick button {
+  min-width: 26px;
+  padding: 4px 0;
+  font-size: 12px;
+}

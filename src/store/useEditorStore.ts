@@ -7,6 +7,10 @@ import { newId } from '../model/types';
 import { autoAnchorOffset, geometricCentreOffset } from '../model/section';
 import { applyConnections, planConnections } from '../geo/connect';
 import { createCincinnatiProject } from '../demo/cincinnati';
+import { overpassProfile } from '../geo/grade';
+import type { GradePoint } from '../geo/grade';
+import { lineLengthMeters } from '../geo/measure';
+import { resolveCenterline } from '../geo/curve';
 import type { DisplayUnits } from '../lib/units';
 import type { BasemapId } from '../map/basemaps';
 import { DEFAULT_VINTAGE } from '../map/basemaps';
@@ -314,6 +318,22 @@ interface EditorState extends Snapshot {
   renameStreet: (streetId: string, name: string) => void;
   /** 0 at grade, +1 overpass, -1 tunnel. */
   setStreetLevel: (streetId: string, level: number) => void;
+  /**
+   * Carry a street over or under one specific crossing, with ramps either side.
+   *
+   * The answer to "how does an overpass come back to ground level". A flat `level` could
+   * only say the whole street was elevated — so it met nothing, anywhere, for its entire
+   * length. This raises it around one station and puts it back down, which is what makes
+   * a flyover something you can build an interchange out of rather than a floating road.
+   */
+  setStreetGrade: (streetId: string, grade: GradePoint[] | null) => void;
+  /** Raise or lower the street over the junction at `stationMeters`, ramps included. */
+  gradeSeparateAt: (
+    streetId: string,
+    stationMeters: number,
+    direction: 1 | -1,
+    options?: { rampMeters?: number; holdMeters?: number },
+  ) => void;
   toggleStreetVisible: (streetId: string) => void;
   duplicateStreet: (streetId: string) => void;
   loadStreets: (
@@ -872,7 +892,40 @@ export const useEditorStore = create<EditorState>((set, get) => {
       commit({ streets: editStreet(streetId, (s) => ({ ...s, name })) }),
 
     setStreetLevel: (streetId, level) =>
-      commit({ streets: editStreet(streetId, (s) => ({ ...s, level })) }),
+      commit({
+        streets: editStreet(streetId, (s) => {
+          const next = { ...s, level };
+          // A flat level and a profile would contradict each other. Setting one clears the
+          // other, so what is on screen is always what is stored.
+          delete next.grade;
+          return next;
+        }),
+      }),
+
+    setStreetGrade: (streetId, grade) =>
+      commit({
+        streets: editStreet(streetId, (s) => {
+          const next = { ...s };
+          if (grade && grade.length > 0) next.grade = grade;
+          else delete next.grade;
+          return next;
+        }),
+      }),
+
+    gradeSeparateAt: (streetId, stationMeters, direction, options = {}) => {
+      const street = get().streets.find((s) => s.id === streetId);
+      if (!street) return;
+      const length = lineLengthMeters(resolveCenterline(street));
+      const grade = overpassProfile(length, stationMeters, { ...options, direction });
+      commit({
+        streets: editStreet(streetId, (s) => {
+          const next = { ...s, grade };
+          // The profile is now in charge; a leftover flat level would fight it.
+          delete next.level;
+          return next;
+        }),
+      });
+    },
 
     toggleStreetVisible: (streetId) =>
       commit({ streets: editStreet(streetId, (s) => ({ ...s, visible: !s.visible })) }),

@@ -215,6 +215,9 @@ const MARKING_MIN_ZOOM = 15;
 /** Below this a pavement symbol is a few pixels of smudge. */
 const STAMP_MIN_ZOOM = 16;
 
+/** How near, in screen pixels, a click has to be to claim an existing junction. */
+const NODE_CLAIM_PX = 22;
+
 /** How close a click must land to a handle, in pixels, to count as hitting it. */
 const SNAP_PX = 14;
 
@@ -278,6 +281,7 @@ const DESIGN_SOURCES = [
   'measure',
   'measure-points',
   'nodes',
+  'grade',
   'loose-ends',
   'snap',
 ] as const;
@@ -336,7 +340,34 @@ function addDesignLayers(map: MapLibreMap) {
     id: 'junction-paved-fill',
     type: 'fill',
     source: 'junction-paved',
-    paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.82 },
+    paint: {
+      'fill-color': ['get', 'color'],
+      // A touch more solid than the road running into it, so the intersection reads as its
+      // own surface rather than as a place where several streets happen to overlap.
+      'fill-opacity': ['case', ['get', 'selected'], 0.94, 0.88],
+    },
+  });
+
+  // The kerb line around the intersection.
+  //
+  // Without these an intersection was the same asphalt as the road at the same opacity
+  // with a hairline around it — so the one thing that gives a junction its shape, the curb
+  // return sweeping from one street into the next, was invisible. That is the shape being
+  // designed. Two lines: the outer edge of the whole intersection area, and the kerb itself
+  // where asphalt meets footway.
+  addLayerSafely(map, {
+    id: 'junction-footprint-outline',
+    type: 'line',
+    source: 'junction-footprint',
+    minzoom: 14,
+    paint: {
+      'line-color': ['case', ['get', 'selected'], '#F2C14E', 'rgba(20,26,28,0.35)'],
+      'line-width': ['case', ['get', 'selected'], 2.2, 0.9],
+      // Constant, not a `case`: line-dasharray is one of the paint properties MapLibre
+      // cannot drive from feature data, and an expression here fails the whole layer
+      // rather than falling back — which is how it silently takes the outline off the map.
+      'line-dasharray': [3, 2],
+    },
   });
 
   addLayerSafely(map, {
@@ -344,8 +375,14 @@ function addDesignLayers(map: MapLibreMap) {
     type: 'line',
     source: 'junction-paved',
     paint: {
-      'line-color': ['case', ['get', 'selected'], '#F2C14E', 'rgba(0,0,0,0.55)'],
-      'line-width': ['case', ['get', 'selected'], 1.8, 0.6],
+      // A real kerb reads as a light edge against dark asphalt, not a dark one. Matching
+      // that is what makes the curb return legible at a glance instead of on inspection.
+      'line-color': ['case', ['get', 'selected'], '#F2C14E', 'rgba(233,227,210,0.7)'],
+      'line-width': [
+        'interpolate', ['linear'], ['zoom'],
+        15, ['case', ['get', 'selected'], 1.8, 0.8],
+        19, ['case', ['get', 'selected'], 3.2, 1.8],
+      ],
     },
   });
 
@@ -407,6 +444,64 @@ function addDesignLayers(map: MapLibreMap) {
       'line-width': ['coalesce', ['get', 'lineWidth'], 1.1],
       'line-opacity': 0.85,
       'line-dasharray': [3, 2.5],
+    },
+  });
+
+  // Where a street leaves the ground.
+  //
+  // Two layers off one source, because a deck and a ramp say different things. The deck is
+  // structure — a hard edge you could walk to and stop at — so it gets a solid casing at
+  // the section's own width. The ramp is ground rising to meet it, so it gets dashes that
+  // read as a climb rather than as a wall. Drawing both the same way loses exactly what
+  // somebody is looking for when they ask how the road gets back down.
+  addLayerSafely(map, {
+    id: 'grade-deck',
+    type: 'line',
+    source: 'grade',
+    filter: ['==', ['get', 'kind'], 'deck'],
+    layout: { 'line-cap': 'butt' },
+    paint: {
+      'line-color': ['case', ['<', ['get', 'direction'], 0], '#7FB2E5', '#E9E3D2'],
+      'line-width': [
+        'interpolate', ['exponential', 2], ['zoom'],
+        12, ['*', ['get', 'halfWidthMeters'], 0.02],
+        22, ['*', ['get', 'halfWidthMeters'], 20],
+      ],
+      'line-opacity': 0.4,
+    },
+  });
+
+  addLayerSafely(map, {
+    id: 'grade-deck-edge',
+    type: 'line',
+    source: 'grade',
+    filter: ['==', ['get', 'kind'], 'deck'],
+    paint: {
+      'line-color': ['case', ['<', ['get', 'direction'], 0], '#4E7FB0', '#B9AE90'],
+      'line-width': 1.6,
+      'line-gap-width': [
+        'interpolate', ['exponential', 2], ['zoom'],
+        12, ['*', ['get', 'halfWidthMeters'], 0.02],
+        22, ['*', ['get', 'halfWidthMeters'], 20],
+      ],
+    },
+  });
+
+  addLayerSafely(map, {
+    id: 'grade-ramp',
+    type: 'line',
+    source: 'grade',
+    filter: ['==', ['get', 'kind'], 'ramp'],
+    layout: { 'line-cap': 'butt' },
+    paint: {
+      'line-color': ['case', ['<', ['get', 'direction'], 0], '#7FB2E5', '#E9E3D2'],
+      'line-width': [
+        'interpolate', ['exponential', 2], ['zoom'],
+        12, ['*', ['get', 'halfWidthMeters'], 0.02],
+        22, ['*', ['get', 'halfWidthMeters'], 20],
+      ],
+      'line-opacity': 0.28,
+      'line-dasharray': [0.35, 0.35],
     },
   });
 
@@ -728,6 +823,15 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
   const draftRef = useRef<LngLat[]>([]);
   /** Which draft points were placed in straight mode, and so stay hard corners. */
   const draftSharpRef = useRef<number[]>([]);
+  /**
+   * Where the detector currently thinks the junctions are.
+   *
+   * Node mode snaps to these. Placing an intersection is nearly always an act of taking
+   * ownership of one that is already there — and a node dropped two metres off the crossing
+   * does not claim it, it competes with it, and then two junctions fight over one piece of
+   * asphalt.
+   */
+  const junctionSpotsRef = useRef<LngLat[]>([]);
   const hoverRef = useRef<LngLat | null>(null);
   const measureRef = useRef<LngLat[]>([]);
   const dragRef = useRef<{ kind: EntityKind; streetId: string; index: number } | null>(null);
@@ -735,6 +839,27 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
   const statsTimer = useRef<number | null>(null);
   const frameRef = useRef<number | null>(null);
   const measureReportedAt = useRef(0);
+
+  /**
+   * The junction near this point, if a click here should claim one.
+   *
+   * Tolerance in screen pixels rather than metres so it feels the same at every zoom — a
+   * fixed ground distance is an easy target zoomed in and an impossible one zoomed out,
+   * which is exactly backwards.
+   */
+  const nearestJunction = (cursor: LngLat, map: MapLibreMap): LngLat | null => {
+    let best: { point: LngLat; px: number } | null = null;
+    const here = map.project(cursor);
+
+    for (const spot of junctionSpotsRef.current) {
+      const there = map.project(spot);
+      const px = Math.hypot(here.x - there.x, here.y - there.y);
+      if (px > NODE_CLAIM_PX) continue;
+      if (!best || px < best.px) best = { point: spot, px };
+    }
+
+    return best?.point ?? null;
+  };
 
   const drawDraft = useCallback(() => {
     const map = mapRef.current;
@@ -1006,7 +1131,9 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     setData(map, 'vertices', data.vertices);
     setData(map, 'midpoints', data.midpoints);
     setData(map, 'junction-points', data.junctionPoints);
+    junctionSpotsRef.current = data.junctions.map((j) => j.position);
     setData(map, 'nodes', data.nodes);
+    setData(map, 'grade', data.gradeLines);
     setData(map, 'loose-ends', pointsFC(latest.current.looseEnds ?? []));
     setData(map, 'stop-lines', data.stopLines);
 
@@ -1198,10 +1325,15 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
 
       if (active === 'node') {
         const existing = nodeUnder();
-        if (existing) latest.current.onSelectNode?.(existing);
-        // Snapped, so a node placed on a crossing lands ON both centerlines rather than
-        // a metre off one of them — which is the difference between a junction and none.
-        else latest.current.onPlaceNode?.(snapFor(event, null).point);
+        if (existing) {
+          latest.current.onSelectNode?.(existing);
+        } else {
+          // A detected junction beats a snapped centerline point, which beats the raw
+          // cursor. Claiming an intersection that already exists is the common case by a
+          // wide margin, and landing a couple of metres off does not claim it.
+          const claimed = nearestJunction(event.lngLat.toArray() as LngLat, map);
+          latest.current.onPlaceNode?.(claimed ?? snapFor(event, null).point);
+        }
         return;
       }
 
@@ -1314,6 +1446,19 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
           hoverRef.current = result.point;
           drawMeasure();
         }
+        return;
+      }
+
+      if (active === 'node') {
+        // Show what a click would claim. Taking over an intersection that exists and
+        // placing one in open ground are different acts with different consequences, and
+        // until this was on screen the only way to tell them apart was to click and see.
+        const claimed = nearestJunction(event.lngLat.toArray() as LngLat, map);
+        showSnap(
+          claimed
+            ? { point: claimed, kind: 'vertex', label: 'take this intersection' }
+            : { point: snapFor(event, null).point, kind: 'edge', label: 'new intersection here' },
+        );
         return;
       }
 

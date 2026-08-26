@@ -1,5 +1,6 @@
 import type { ComponentType, Direction } from '../library/primitives';
 import type { CurveSettings } from '../geo/curve';
+import type { GradePoint } from '../geo/grade';
 import type { GlyphId } from '../geo/glyphs';
 import type { StripeStyle } from '../geo/markings';
 import type { LandcoverType } from '../library/landcover';
@@ -84,8 +85,19 @@ export interface Street {
    * tunnel. Streets at different levels do not form junctions, which is the entire point —
    * a freeway crossing a street underneath it is not an intersection, and treating it as
    * one would carve a hole through both.
+   *
+   * Applies to the whole street. For one that climbs, crosses and comes back down, use
+   * `grade` instead; this is the flat case and the fallback when there is no profile.
    */
   level?: number;
+  /**
+   * Where the street leaves the ground and where it returns, along its own length.
+   *
+   * The thing a single `level` cannot say. An overpass is four breakpoints — ground, up,
+   * up, ground — and the sloping stretches between them are its ramps. Absent means flat
+   * at `level`.
+   */
+  grade?: GradePoint[];
   section: CrossSection;
   /** Measured curb-to-curb of the real street, for the fit check. */
   existingWidthMeters?: number;

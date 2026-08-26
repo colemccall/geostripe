@@ -10,6 +10,7 @@ import type { JunctionOverride } from '../geo/derived';
 import { MOVEMENTS } from '../geo/markings';
 import { closeRing, resolveCenterline, resolveRing } from '../geo/curve';
 import type { CurveSettings } from '../geo/curve';
+import type { GradePoint } from '../geo/grade';
 import { LANDCOVER_TYPES } from '../library/landcover';
 
 /**
@@ -56,6 +57,23 @@ const streetPropertiesSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   curve: curveSchema.optional(),
   level: z.number().int().min(-5).max(5).optional(),
+  /**
+   * Where the street leaves the ground and comes back, along its own length.
+   *
+   * Levels here are NOT integers: a ramp is at a fraction of a level between its ends, and
+   * that is the whole reason the profile exists. Bounded in count so a malformed file
+   * cannot hand the tessellator a million breakpoints.
+   */
+  grade: z
+    .array(
+      z.object({
+        stationMeters: z.number().finite().min(0).max(100000),
+        level: z.number().finite().min(-5).max(5),
+      }),
+    )
+    .min(2)
+    .max(64)
+    .optional(),
   visible: z.boolean().optional(),
   existingWidthMeters: z.number().finite().positive().max(300).optional(),
   sectionName: z.string().min(1).max(120).optional(),
@@ -239,6 +257,14 @@ export function toProjectGeoJSON(
         // the bands, so a curved street stays as editable after a round-trip as before it.
         ...(street.curve && street.curve.mode !== 'straight' ? { curve: street.curve } : {}),
         ...(street.level ? { level: street.level } : {}),
+        ...(street.grade && street.grade.length > 1
+          ? {
+              grade: street.grade.map((p) => ({
+                stationMeters: round(p.stationMeters),
+                level: round(p.level),
+              })),
+            }
+          : {}),
         anchorOffsetMeters:
           street.section.anchorOffsetMeters === null
             ? null
@@ -358,6 +384,7 @@ function makeStreet(
   visible: boolean,
   curve?: CurveSettings,
   level?: number,
+  grade?: GradePoint[],
 ): Street {
   return {
     id,
@@ -366,6 +393,7 @@ function makeStreet(
     visible,
     ...(curve ? { curve } : {}),
     ...(level ? { level } : {}),
+    ...(grade && grade.length > 1 ? { grade } : {}),
     ...(existingWidthMeters !== undefined ? { existingWidthMeters } : {}),
     section: {
       id: newId('sec'),
@@ -565,6 +593,7 @@ export function parseProject(text: string, defaults: ImportDefaults): ProjectPar
         data.visible ?? true,
         data.curve,
         data.level,
+        data.grade,
       ),
     );
   });

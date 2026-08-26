@@ -69,6 +69,8 @@ export interface DesignData {
   nodes: FeatureCollection;
   /** Crosswalk stripes, edge lines, raised tables and stop bars. */
   crossings: FeatureCollection;
+  /** Deck edges and ramp runs, for streets that leave the ground. */
+  gradeLines: FeatureCollection;
   /** Stop lines across each leg of the selected junction. */
   stopLines: FeatureCollection;
   /** Junctions close enough that their geometry interacts. */
@@ -123,6 +125,7 @@ export function buildDesignData(
   const nodes = empty();
   const stopLines = empty();
   const crossings = empty();
+  const gradeLines = empty();
 
   // Land cover first: it is the ground everything else is drawn on, and giving it its own
   // pass keeps the street pipeline unaware that areas exist at all.
@@ -259,6 +262,7 @@ export function buildDesignData(
   }
 
   crossings.features.push(...derived.crossings);
+  gradeLines.features.push(...derived.gradeLines);
   stamps.features.push(...derived.approachStamps);
   // Turn pockets are bands: they are roadway, they carry a component type, and they should
   // read as part of the street rather than as decoration belonging to the junction.
@@ -274,7 +278,7 @@ export function buildDesignData(
       junctionFootprint.features.push({
         type: 'Feature',
         id: `${geometry.key}:foot`,
-        properties: { junctionKey: geometry.key, color: PRIMITIVES.sidewalk.color },
+        properties: { junctionKey: geometry.key, color: PRIMITIVES.sidewalk.color, selected },
         geometry: { type: 'Polygon', coordinates: [geometry.footprint] },
       });
     }
@@ -337,6 +341,7 @@ export function buildDesignData(
     junctionPoints,
     nodes,
     crossings,
+    gradeLines,
     stopLines,
     warnings: derived.warnings,
     junctions,

@@ -31,6 +31,7 @@ import TemplatePicker from '../components/TemplatePicker';
 import JunctionInspector from '../components/JunctionInspector';
 import MapDock from '../components/MapDock';
 import { planConnections } from '../geo/connect';
+import { levelAt, stationAt } from '../geo/grade';
 import type { Connection } from '../geo/connect';
 import ShortcutSheet from '../components/ShortcutSheet';
 import ViewReadout, { createViewSource } from '../components/ViewReadout';
@@ -224,6 +225,8 @@ export default function MapEditor() {
     removeVertex,
     setCurve,
     setStreetLevel,
+    setStreetGrade,
+    gradeSeparateAt,
     toggleSharpVertex,
     addArea,
     selectArea,
@@ -312,6 +315,31 @@ export default function MapEditor() {
     () => loosePlan.map((c) => c.point),
     [loosePlan],
   );
+
+  /**
+   * The junctions along the selected street, with how far each sits from its start.
+   *
+   * Station is measured rather than stored: a junction knows where it IS, and a grade
+   * profile is written against distance along the street it belongs to, so the two have to
+   * be reconciled somewhere. Here, where the street is already resolved.
+   */
+  const crossingsAlong = useMemo(() => {
+    if (!street) return [];
+    const line = resolveCenterline(street);
+    return junctions
+      .filter((j) => j.legs.some((leg) => leg.streetId === street.id))
+      .map((j) => ({
+        key: j.key,
+        position: j.position,
+        stationMeters: stationAt(line, j.position),
+        level: levelAt(street.grade, stationAt(line, j.position), street.level ?? 0),
+        label: j.legs
+          .map((leg) => streetNames[leg.streetId] ?? 'Street')
+          .filter((name, i, all) => all.indexOf(name) === i && name !== street.name)
+          .join(' × ') || 'Crossing',
+      }))
+      .sort((a, b) => a.stationMeters - b.stationMeters);
+  }, [street, junctions, streetNames]);
 
   /** The section a newly drawn street gets — also the fallback for a bare line import. */
   const drawingSection = useMemo(() => {
@@ -1745,21 +1773,83 @@ export default function MapEditor() {
               )}
 
               <label className="field" style={{ marginTop: 9 }}>
-                <span className="label">Level</span>
+                <span className="label">Level, end to end</span>
                 <select
                   className="text-input"
-                  value={street.level ?? 0}
-                  onChange={(e) => setStreetLevel(street.id, Number(e.target.value))}
+                  value={street.grade ? 'profile' : String(street.level ?? 0)}
+                  onChange={(e) => {
+                    if (e.target.value === 'profile') return;
+                    setStreetLevel(street.id, Number(e.target.value));
+                  }}
                 >
                   <option value={-1}>Tunnel — below grade</option>
                   <option value={0}>At grade</option>
                   <option value={1}>Overpass — above grade</option>
+                  {street.grade && (
+                    <option value="profile">Rises and falls — set per crossing below</option>
+                  )}
                 </select>
                 <span className="hint">
-                  Streets at different levels do not form an intersection, which is what
-                  keeps a viaduct from carving a hole through the street beneath it.
+                  For a street that is elevated its whole length. One that climbs over a
+                  single road and comes back down is set crossing by crossing, below.
                 </span>
               </label>
+
+              {/* -------------------------------------------------- grade separation */}
+              {crossingsAlong.length > 0 && (
+                <div className="field" style={{ marginTop: 11 }}>
+                  <span className="label">Crossings along this street</span>
+                  <p className="hint" style={{ marginTop: 2 }}>
+                    Carry it over or under any one of these. The ramps either side are part
+                    of the profile, so the road comes back to ground before the next
+                    crossing — which is what makes this an interchange rather than a
+                    viaduct.
+                  </p>
+                  <ul className="grade-list">
+                    {crossingsAlong.map((c) => (
+                      <li key={c.key}>
+                        <button
+                          type="button"
+                          className="grade-where"
+                          title="Show me this crossing"
+                          onClick={() => {
+                            selectJunction(c.key);
+                            mapRef.current?.zoomTo([c.position]);
+                          }}
+                        >
+                          <span>{c.label}</span>
+                          <span className="mono">
+                            {formatWidth(c.stationMeters, units, { decimals: 0, withUnit: true })}{' '}
+                            along
+                          </span>
+                        </button>
+                        <div className="segmented grade-pick" role="group" aria-label="Grade">
+                          {(
+                            [
+                              [-1, '↓', 'Run under it'],
+                              [0, '—', 'Meet it at grade'],
+                              [1, '↑', 'Carry over it'],
+                            ] as const
+                          ).map(([dir, glyph, hint]) => (
+                            <button
+                              key={dir}
+                              type="button"
+                              aria-pressed={Math.round(c.level) === dir}
+                              title={hint}
+                              onClick={() => {
+                                if (dir === 0) setStreetGrade(street.id, null);
+                                else gradeSeparateAt(street.id, c.stationMeters, dir);
+                              }}
+                            >
+                              {glyph}
+                            </button>
+                          ))}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
 
               {curveMode !== 'straight' && (
                 <p className="hint">

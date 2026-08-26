@@ -123,10 +123,6 @@ export default function JunctionInspector({
     0,
   );
 
-  const everyLegMarked = legs.every((l) => l.hasCrosswalk);
-  const everyCornerBulbed = corners.every(
-    (c) => c.angleDegrees > 179 || c.treatment === 'bulbOut',
-  );
 
   return (
     <>
@@ -283,6 +279,35 @@ export default function JunctionInspector({
                     )}
                   </span>
                 </button>
+                {/* The crossing toggle lives on the leg it belongs to.
+                    There used to be a "mark all crossings" button instead, which decided
+                    four approaches at once — and whether a leg gets a marked crossing is a
+                    decision about that approach. Putting the switch on the row keeps every
+                    leg one click away without any of them being assumed. */}
+                <button
+                  type="button"
+                  className={`leg-mark${entry.hasCrosswalk ? ' is-on' : ''}`}
+                  aria-pressed={entry.hasCrosswalk}
+                  title={
+                    entry.hasCrosswalk
+                      ? 'Remove the marked crossing on this leg'
+                      : 'Mark a crossing on this leg'
+                  }
+                  onClick={() => {
+                    setActiveLeg(i);
+                    onLeg(i, {
+                      crosswalk: entry.hasCrosswalk
+                        ? null
+                        : {
+                            style: 'continental',
+                            widthMeters: DEFAULT_CROSSWALK_WIDTH_METRES,
+                            setbackMeters: 0,
+                          },
+                    });
+                  }}
+                >
+                  ⋮⋮
+                </button>
               </li>
             );
           })}
@@ -301,42 +326,6 @@ export default function JunctionInspector({
           </p>
         )}
 
-        <div className="btn-row">
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={() =>
-              legs.forEach((_, i) =>
-                onLeg(i, {
-                  crosswalk: everyLegMarked
-                    ? null
-                    : {
-                        style: 'continental',
-                        widthMeters: DEFAULT_CROSSWALK_WIDTH_METRES,
-                        setbackMeters: 0,
-                      },
-                }),
-              )
-            }
-          >
-            {everyLegMarked ? 'Clear crossings' : 'Mark all crossings'}
-          </button>
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={() =>
-              corners.forEach((c, i) => {
-                if (c.angleDegrees > 179) return;
-                onCorner(i, {
-                  treatment: everyCornerBulbed ? 'plain' : 'bulbOut',
-                  bulbOutMeters: DEFAULT_BULB_OUT_METRES,
-                });
-              })
-            }
-          >
-            {everyCornerBulbed ? 'Remove curb extensions' : 'Extend every curb'}
-          </button>
-        </div>
       </section>
 
       {/* ------------------------------------------------------------------ crossings */}

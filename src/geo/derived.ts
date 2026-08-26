@@ -18,6 +18,8 @@ import type { CurveSettings } from './curve';
 import type { Junction } from './junctions';
 import { DEFAULT_CORNER_RADIUS_METRES, junctionGeometry } from './intersection';
 import { classifyJunction, mergeGeometry } from './merge';
+import { gradeSpans, sliceLine } from './grade';
+import { sectionExtent } from '../model/section';
 import type { JunctionForm } from './merge';
 import type {
   CornerTreatment,
@@ -75,6 +77,15 @@ export interface DerivedProject {
   approachStamps: Feature[];
   /** Extra approach lanes added at a junction, drawn as bands. */
   flares: Feature[];
+  /**
+   * Where streets leave the ground and come back: deck edges and ramp runs.
+   *
+   * Lines rather than a property on the bands, because a grade profile changes ALONG a
+   * street while a band is one polygon for its whole length. Splitting every band at every
+   * breakpoint would multiply the geometry — and the thing worth seeing is the edge of the
+   * structure and the run of the ramp, which are lines anyway.
+   */
+  gradeLines: Feature[];
   /**
    * Junctions close enough that their geometry interacts — a staggered pair of T's, or a
    * crossing right beside a slip road. Reported rather than silently merged.
@@ -1100,6 +1111,30 @@ export function deriveProject(
     });
   });
 
+  // ---- grade: the structure, and the ramps that reach it.
+  const gradeLines: Feature[] = [];
+  for (const street of visible) {
+    const spans = gradeSpans(street.grade);
+    if (spans.length === 0) continue;
+
+    const line = resolveCenterline(street);
+    const extent = sectionExtent(street.section);
+    for (const span of spans) {
+      const piece = sliceLine(line, span.fromMeters, span.toMeters);
+      if (piece.length < 2) continue;
+      gradeLines.push({
+        type: 'Feature',
+        properties: {
+          streetId: street.id,
+          kind: span.kind,
+          direction: span.direction,
+          halfWidthMeters: Math.max(extent.left, extent.right),
+        },
+        geometry: { type: 'LineString', coordinates: piece },
+      });
+    }
+  }
+
   const offsetWarnings = offsetPairs.map(
     (pair) =>
       `Two junctions sit ${pair.separationMeters.toFixed(0)} m apart on ${
@@ -1117,6 +1152,7 @@ export function deriveProject(
     crossings,
     approachStamps: approach,
     flares,
+    gradeLines,
     offsetPairs,
     plane,
     warnings,

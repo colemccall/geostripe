@@ -270,8 +270,20 @@ the width that is really there, and save it as GeoJSON you can reopen and keep e
   place. Those stay two junctions on purpose — averaging them would put both side streets
   somewhere neither of them is — and the pair is reported, with any crossing that would land
   inside the neighbour suppressed. One slider moves the threshold in both directions.
-- **Grade separation** — `level` marks a street as a tunnel or an overpass, and streets at
-  different levels do not form junctions.
+- **Grade separation, along a street rather than across all of it.** `level` marks a whole
+  street as a tunnel or a viaduct, which is enough to stop a freeway carving a hole through
+  the road beneath it but cannot say the thing every real overpass does: climb, cross, come
+  back down. A street elevated end to end has no ramps, and meets nothing anywhere.
+  A **grade profile** is a handful of breakpoints along the centerline with the level
+  straight-lined between them — so an overpass is four points, and the two sloping stretches
+  are its ramps. Levels are checked per crossing, so a street flies over the one road it was
+  raised for and still meets everything at either end. That is what makes an **interchange**
+  buildable out of parts that already exist: a flyover, the merges the ramps make where they
+  rejoin, and ordinary junctions at the feet. Set crossing by crossing from the street
+  inspector — every road this one meets, with an under / at-grade / over switch.
+  Deliberately not an elevation in metres: the question is which of two things is on top,
+  which is ordinal, and a real height would invite a gradient check this tool has no
+  business claiming to do.
 - **Performance, measured against a real ten-street downtown project.** Three things were
   costing an order of magnitude more than they needed to, and all three got worse as a
   project grew, which is what "it slows down the further you go" actually means:
@@ -288,7 +300,7 @@ the width that is really there, and save it as GeoJSON you can reopen and keep e
     Keyed per street, an edit costs what the edit is worth.
   - Mid-drag, neighbours keep the trim they had; the street under the cursor is always
     exact. A vertex drag went from **85 ms a frame to 27**.
-- **812 unit tests** across geometry, curves, junction detection, intersection geometry,
+- **855 unit tests** across geometry, curves, junction detection, intersection geometry,
   complex and staggered junctions, merges, snapping, joining, road markings, the
   memoisation that keeps dragging affordable, cross-section arithmetic, the dimensional
   audit, the asset catalogue, the project round-trip, store history, and a baseline suite
@@ -356,6 +368,7 @@ junction detection.
 | X | Joining — welding loose ends onto the streets they were drawn to meet | done |
 | Y | Every shortcut has a button, and a reference sheet that says which | done |
 | Z | Performance — error-bounded curves, per-street junction trimming | done |
+| AA | Grade profiles — an overpass that climbs, crosses and comes back down | done |
 | G | Protected (Dutch) intersection, incl. the corner refuge island | next |
 | H | Roundabout, as a junction form | planned |
 | P | Signal phasing — which movements run together, and the conflicts left over | planned |
