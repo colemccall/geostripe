@@ -1,5 +1,6 @@
 import type { ComponentType, Direction } from '../library/primitives';
 import type { CurveSettings } from '../geo/curve';
+import type { LandcoverType } from '../library/landcover';
 
 /**
  * One band of a cross-section. `id` is runtime-only — it is regenerated on load and
@@ -64,6 +65,28 @@ export interface Street {
   section: CrossSection;
   /** Measured curb-to-curb of the real street, for the fit check. */
   existingWidthMeters?: number;
+  visible: boolean;
+}
+
+/**
+ * A land-cover polygon: everything a design places that is not a band along a street.
+ *
+ * Deliberately its own entity rather than a component type. A street's geometry is derived
+ * from a centerline and a stack of widths; an area has neither, and forcing it through the
+ * banding engine would mean inventing a centerline for a pond. It shares the curve
+ * machinery, though — a park boundary curves for the same reasons a street does.
+ */
+export interface Area {
+  id: string;
+  name: string;
+  landcover: LandcoverType;
+  /**
+   * Control points of a closed ring, WGS84, with the first point NOT repeated at the end.
+   * Closing is a rendering concern; repeating it here would mean every edit had to keep
+   * two copies of one vertex in step.
+   */
+  ring: [number, number][];
+  curve?: CurveSettings;
   visible: boolean;
 }
 

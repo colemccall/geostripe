@@ -13,11 +13,12 @@ import { PRIMITIVES } from '../library/primitives';
 import { TEMPLATES, instantiateTemplate, templateTotalWidth } from '../library/templates';
 import { basemapById } from '../map/basemaps';
 import MapCanvas from '../map/MapCanvas';
-import type { MapHandle, MapView } from '../map/MapCanvas';
+import type { EntityKind, MapHandle, MapView } from '../map/MapCanvas';
 import type { DesignData, JunctionSummary } from '../map/designLayers';
 import { describeWarnings } from '../geo/curvature';
 import { lineLengthMeters } from '../geo/measure';
 import { DEFAULT_CURVE, resolveCenterline, tightestRadius } from '../geo/curve';
+import { LANDCOVERS } from '../library/landcover';
 import type { CurveMode } from '../geo/curve';
 import { downloadText, pickTextFile } from '../model/assetFile';
 import { parseProject, projectFilename, serializeProject } from '../model/project';
@@ -25,6 +26,7 @@ import { DEMO_CENTER, DEMO_ZOOM } from '../demo/washingtonPark';
 import CrossSectionSvg from '../components/CrossSectionSvg';
 import ComponentStack from '../components/ComponentStack';
 import PrimitivePalette from '../components/PrimitivePalette';
+import LandcoverPalette from '../components/LandcoverPalette';
 import JunctionInspector from '../components/JunctionInspector';
 import NoticeBar from '../components/NoticeBar';
 
@@ -69,6 +71,12 @@ const TOOLS: { id: Tool; label: string; key: string; hint: string }[] = [
     hint: 'Click along the centerline. Enter or double-click finishes it, Backspace removes the last point, Esc cancels.',
   },
   {
+    id: 'area',
+    label: 'Land',
+    key: 'A',
+    hint: 'Click around a patch of ground to cover it. Enter or double-click closes the shape, Esc cancels.',
+  },
+  {
     id: 'measure',
     label: 'Measure',
     key: 'M',
@@ -90,6 +98,9 @@ export default function MapEditor() {
   const notice = useEditorStore((s) => s.notice);
   const tool = useEditorStore((s) => s.tool);
   const drawSectionId = useEditorStore((s) => s.drawSectionId);
+  const areas = useEditorStore((s) => s.areas);
+  const selectedAreaId = useEditorStore((s) => s.selectedAreaId);
+  const drawLandcover = useEditorStore((s) => s.drawLandcover);
   const selectedJunctionKey = useEditorStore((s) => s.selectedJunctionKey);
   const junctionOverrides = useEditorStore((s) => s.junctionOverrides);
   const defaultCornerRadiusMeters = useEditorStore((s) => s.defaultCornerRadiusMeters);
@@ -134,6 +145,19 @@ export default function MapEditor() {
     removeVertex,
     setCurve,
     toggleSharpVertex,
+    addArea,
+    selectArea,
+    renameArea,
+    setAreaLandcover,
+    setAreaCurve,
+    toggleAreaVisible,
+    duplicateArea,
+    removeArea,
+    moveAreaVertexLive,
+    insertAreaVertexLive,
+    removeAreaVertex,
+    toggleAreaSharpVertex,
+    setDrawLandcover,
   } = useEditorStore.getState();
 
   const [view, setView] = useState<MapView | null>(null);
@@ -169,6 +193,7 @@ export default function MapEditor() {
   const curveMode = street?.curve?.mode ?? 'straight';
   const sharpCount = street?.curve?.sharpVertices?.length ?? 0;
   const actualRadius = street ? tightestRadius(resolveCenterline(street)) : Infinity;
+  const area = areas.find((a) => a.id === selectedAreaId) ?? null;
   const selectedJunction = junctions.find((j) => j.key === selectedJunctionKey) ?? null;
   const streetNames = useMemo(
     () => Object.fromEntries(streets.map((s) => [s.id, s.name])),
@@ -221,7 +246,7 @@ export default function MapEditor() {
   // -------------------------------------------------------------------- project file
 
   function handleSave() {
-    if (streets.length === 0) {
+    if (streets.length === 0 && areas.length === 0) {
       setNotice({
         kind: 'warning',
         title: 'Nothing to save yet',
@@ -235,12 +260,15 @@ export default function MapEditor() {
         streets,
         { name: projectName, editorVersion: EDITOR_VERSION },
         junctionOverrides,
+        areas,
       ),
       'application/geo+json',
     );
     setNotice({
       kind: 'success',
-      title: `Saved ${streets.length} street${streets.length === 1 ? '' : 's'}`,
+      title:
+        `Saved ${streets.length} street${streets.length === 1 ? '' : 's'}` +
+        (areas.length > 0 ? ` and ${areas.length} land area${areas.length === 1 ? '' : 's'}` : ''),
       details: [
         'Centerlines carry their cross-section; the band polygons travel with them for QGIS.',
       ],
@@ -265,11 +293,15 @@ export default function MapEditor() {
       return;
     }
 
-    loadStreets(result.streets, result.junctionOverrides);
+    loadStreets(result.streets, result.junctionOverrides, result.areas);
     mapRef.current?.zoomTo(result.streets[0]?.centerline ?? []);
     setNotice({
       kind: result.warnings.length ? 'warning' : 'success',
-      title: `Loaded ${result.streets.length} street${result.streets.length === 1 ? '' : 's'}`,
+      title:
+        `Loaded ${result.streets.length} street${result.streets.length === 1 ? '' : 's'}` +
+        (result.areas.length > 0
+          ? ` and ${result.areas.length} land area${result.areas.length === 1 ? '' : 's'}`
+          : ''),
       details: result.warnings,
     });
   }
@@ -407,6 +439,84 @@ export default function MapEditor() {
               Clear all
             </button>
           </div>
+        </section>
+
+        <section className="panel">
+          <header className="panel-head">
+            <span className="label">Land cover</span>
+            <span className="label mono">{areas.length}</span>
+          </header>
+          {areas.length === 0 ? (
+            <p className="empty-note">
+              None yet. Choose <b>Land</b> above the map to cover ground with grass, plaza,
+              water and the rest.
+            </p>
+          ) : (
+            <ul className="cards">
+              {areas.map((a) => (
+                <li key={a.id}>
+                  <div className={`street-card${a.id === selectedAreaId ? ' is-active' : ''}`}>
+                    <button
+                      type="button"
+                      className="card street-card-main"
+                      onClick={() => selectArea(a.id)}
+                      onDoubleClick={() => mapRef.current?.zoomTo(a.ring)}
+                    >
+                      <span className="card-title">{a.name}</span>
+                      <span className="card-meta">
+                        <span>
+                          <i
+                            className="swatch swatch-inline"
+                            style={{ background: LANDCOVERS[a.landcover].color }}
+                          />
+                          {LANDCOVERS[a.landcover].label}
+                        </span>
+                        <span className="mono">{a.ring.length} pts</span>
+                      </span>
+                    </button>
+                    <div className="street-card-tools">
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        title={a.visible ? 'Hide' : 'Show'}
+                        aria-label={a.visible ? `Hide ${a.name}` : `Show ${a.name}`}
+                        onClick={() => toggleAreaVisible(a.id)}
+                      >
+                        {a.visible ? '◉' : '○'}
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        title="Zoom to"
+                        aria-label={`Zoom to ${a.name}`}
+                        onClick={() => mapRef.current?.zoomTo(a.ring)}
+                      >
+                        ⤢
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        title="Duplicate"
+                        aria-label={`Duplicate ${a.name}`}
+                        onClick={() => duplicateArea(a.id)}
+                      >
+                        ⧉
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        title="Delete"
+                        aria-label={`Delete ${a.name}`}
+                        onClick={() => removeArea(a.id)}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
 
         <section className="panel">
@@ -560,6 +670,36 @@ export default function MapEditor() {
             </>
           )}
 
+          {tool === 'area' && (
+            <>
+              <label className="control">
+                <span className="label">Land type</span>
+                <LandcoverPalette
+                  value={drawLandcover}
+                  onChange={setDrawLandcover}
+                  variant="compact"
+                />
+              </label>
+              <span className="pill pill-note mono">{draft.points} pt</span>
+              <button
+                type="button"
+                className="btn btn-solid"
+                disabled={draft.points < 3}
+                onClick={() => mapRef.current?.finishDraw()}
+              >
+                Close shape
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={draft.points === 0}
+                onClick={() => mapRef.current?.undoDraftPoint()}
+              >
+                Undo point
+              </button>
+            </>
+          )}
+
           {tool === 'measure' && (
             <>
               <span className="pill pill-note mono">
@@ -631,10 +771,26 @@ export default function MapEditor() {
             onDrawComplete={(points) => addStreet(points)}
             onGestureStart={beginGesture}
             onGestureEnd={endGesture}
-            onVertexMove={moveVertexLive}
-            onVertexInsert={insertVertexLive}
-            onVertexDelete={removeVertex}
-            onVertexSharp={toggleSharpVertex}
+            areas={areas}
+            selectedAreaId={selectedAreaId}
+            onSelectArea={selectArea}
+            onAreaComplete={(ring) => addArea(ring)}
+            onVertexMove={(kind: EntityKind, id, index, point) =>
+              kind === 'area'
+                ? moveAreaVertexLive(id, index, point)
+                : moveVertexLive(id, index, point)
+            }
+            onVertexInsert={(kind: EntityKind, id, index, point) =>
+              kind === 'area'
+                ? insertAreaVertexLive(id, index, point)
+                : insertVertexLive(id, index, point)
+            }
+            onVertexDelete={(kind: EntityKind, id, index) =>
+              kind === 'area' ? removeAreaVertex(id, index) : removeVertex(id, index)
+            }
+            onVertexSharp={(kind: EntityKind, id, index) =>
+              kind === 'area' ? toggleAreaSharpVertex(id, index) : toggleSharpVertex(id, index)
+            }
             onMeasureChange={(points, metres) => setMeasure({ points: points.length, metres })}
             onRenderStats={setRenderStats}
           />
@@ -719,7 +875,76 @@ export default function MapEditor() {
 
       {/* --------------------------------------------------------------- right rail */}
       <aside className="rail rail-right">
-        {selectedJunction ? (
+        {area ? (
+          <>
+            <section className="panel">
+              <header className="panel-head">
+                <span className="label">Land cover</span>
+                <span className="label mono">{area.ring.length} points</span>
+              </header>
+              <input
+                className="text-input"
+                value={area.name}
+                aria-label="Area name"
+                onChange={(e) => renameArea(area.id, e.target.value)}
+              />
+              <p className="hint">
+                Drag a point to reshape, alt-click to remove it, or drag a hollow handle
+                between two to add one. {LANDCOVERS[area.landcover].note}
+              </p>
+            </section>
+
+            <section className="panel">
+              <header className="panel-head">
+                <span className="label">Edge</span>
+              </header>
+              <div className="segmented" role="group" aria-label="Area edge">
+                {CURVE_MODES.map((mode) => (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    aria-pressed={(area.curve?.mode ?? 'straight') === mode.id}
+                    title={mode.hint}
+                    onClick={() => setAreaCurve(area.id, { mode: mode.id })}
+                  >
+                    {mode.label}
+                  </button>
+                ))}
+              </div>
+              {(area.curve?.mode ?? 'straight') === 'rounded' && (
+                <label className="field" style={{ marginTop: 9 }}>
+                  <span className="label">Corner radius ({units})</span>
+                  <input
+                    className="text-input mono"
+                    type="number"
+                    min={0}
+                    step={stepFor(units)}
+                    value={formatWidth(
+                      area.curve?.radiusMeters ?? DEFAULT_CURVE.radiusMeters,
+                      units,
+                      { decimals: 0 },
+                    )}
+                    onChange={(e) => {
+                      const value = Number(e.target.value);
+                      if (!Number.isFinite(value) || value < 0) return;
+                      setAreaCurve(area.id, { radiusMeters: displayToMetres(value, units) });
+                    }}
+                  />
+                </label>
+              )}
+            </section>
+
+            <section className="panel">
+              <header className="panel-head">
+                <span className="label">Material</span>
+              </header>
+              <LandcoverPalette
+                value={area.landcover}
+                onChange={(type) => setAreaLandcover(area.id, type)}
+              />
+            </section>
+          </>
+        ) : selectedJunction ? (
           <>
             <button
               type="button"

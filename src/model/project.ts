@@ -4,11 +4,12 @@ import { COMPONENT_TYPES, PRIMITIVES } from '../library/primitives';
 import type { ComponentType, Direction } from '../library/primitives';
 import { bandsForStreet } from '../geo/banding';
 import { componentSchema } from './schema';
-import type { Street } from './types';
+import type { Area, Street } from './types';
 import { newId } from './types';
 import type { JunctionOverride } from '../geo/derived';
-import { resolveCenterline } from '../geo/curve';
+import { closeRing, resolveCenterline, resolveRing } from '../geo/curve';
 import type { CurveSettings } from '../geo/curve';
+import { LANDCOVER_TYPES } from '../library/landcover';
 
 /**
  * The project interchange format: plain GeoJSON, editable by hand and readable by QGIS.
@@ -58,6 +59,18 @@ const streetPropertiesSchema = z.object({
   sectionName: z.string().min(1).max(120).optional(),
   anchorOffsetMeters: z.number().finite().nullable().optional(),
   components: z.array(componentSchema).min(1).max(64),
+});
+
+const polygonSchema = z.object({
+  type: z.literal('Polygon'),
+  coordinates: z.array(z.array(positionSchema).min(4)).min(1),
+});
+
+const areaPropertiesSchema = z.object({
+  name: z.string().min(1).max(200).optional(),
+  landcover: z.enum(LANDCOVER_TYPES),
+  visible: z.boolean().optional(),
+  curve: curveSchema.optional(),
 });
 
 const featureCollectionSchema = z.object({
@@ -118,6 +131,7 @@ export type ProjectParseResult =
   | {
       ok: true;
       streets: Street[];
+      areas: Area[];
       junctionOverrides: Record<string, JunctionOverride>;
       warnings: string[];
     }
@@ -144,8 +158,49 @@ export function toProjectGeoJSON(
   streets: readonly Street[],
   meta: Pick<ProjectMeta, 'name' | 'editorVersion'>,
   junctionOverrides: Readonly<Record<string, JunctionOverride>> = {},
+  areas: readonly Area[] = [],
 ): FeatureCollection {
   const features: Feature[] = [];
+
+  // Land cover first, so a reader that respects document order draws the ground before
+  // the streets that sit on it.
+  for (const area of areas) {
+    features.push({
+      type: 'Feature',
+      id: area.id,
+      properties: {
+        geostripe: 'area',
+        name: area.name,
+        landcover: area.landcover,
+        visible: area.visible,
+        ...(area.curve && area.curve.mode !== 'straight' ? { curve: area.curve } : {}),
+      },
+      // CONTROL points, not the resolved edge. This is the parametric truth and the only
+      // thing read back, exactly as a street's geometry is its centerline rather than its
+      // bands — writing the tessellated ring here would discard the control points on the
+      // next load and freeze the curve.
+      //
+      // Closed for GeoJSON; stored unclosed, because repeating the first point would mean
+      // every edit had to keep two copies of one vertex in step.
+      geometry: { type: 'Polygon', coordinates: [closeRing(area.ring)] },
+    });
+
+    // The resolved edge rides along for external readers, like the band polygons do, and
+    // is discarded on load. Only worth writing when it differs from the control ring.
+    if (area.visible && area.curve && area.curve.mode !== 'straight') {
+      features.push({
+        type: 'Feature',
+        id: `${area.id}:shape`,
+        properties: {
+          geostripe: 'areaShape',
+          areaId: area.id,
+          landcover: area.landcover,
+          name: area.name,
+        },
+        geometry: { type: 'Polygon', coordinates: [closeRing(resolveRing(area))] },
+      });
+    }
+  }
 
   for (const street of streets) {
     features.push({
@@ -217,8 +272,13 @@ export function serializeProject(
   streets: readonly Street[],
   meta: Pick<ProjectMeta, 'name' | 'editorVersion'>,
   junctionOverrides: Readonly<Record<string, JunctionOverride>> = {},
+  areas: readonly Area[] = [],
 ): string {
-  return `${JSON.stringify(toProjectGeoJSON(streets, meta, junctionOverrides), null, 2)}\n`;
+  return `${JSON.stringify(
+    toProjectGeoJSON(streets, meta, junctionOverrides, areas),
+    null,
+    2,
+  )}\n`;
 }
 
 export function projectFilename(name: string): string {
@@ -290,6 +350,7 @@ export function parseProject(text: string, defaults: ImportDefaults): ProjectPar
   }
 
   const streets: Street[] = [];
+  const areas: Area[] = [];
   const warnings: string[] = [];
   let bandsDropped = 0;
   let skipped = 0;
@@ -328,8 +389,45 @@ export function parseProject(text: string, defaults: ImportDefaults): ProjectPar
     const label = `Feature ${index + 1}`;
 
     // Derived geometry is regenerated from the centerline, never read back.
-    if (kind === 'band' || props['featureClass'] === 'band' || props['featureClass'] === 'marking') {
+    if (
+      kind === 'band' ||
+      kind === 'areaShape' ||
+      props['featureClass'] === 'band' ||
+      props['featureClass'] === 'marking'
+    ) {
       bandsDropped++;
+      return;
+    }
+
+    // Land cover: a polygon that says it is one. Anything else polygonal is not ours.
+    if (kind === 'area') {
+      const shape = polygonSchema.safeParse(feature.geometry);
+      const props2 = areaPropertiesSchema.safeParse(props);
+      if (!shape.success || !props2.success) {
+        if (!props2.success) warnings.push(...describe(props2.error, label));
+        else warnings.push(`${label}: land cover needs a Polygon geometry.`);
+        skipped++;
+        return;
+      }
+
+      // Drop the repeated closing point: rings are stored open.
+      const outer = shape.data.coordinates[0]!;
+      const ringPoints = outer
+        .slice(0, outer.length - 1)
+        .map((position) => [position[0]!, position[1]!] as [number, number]);
+      if (ringPoints.length < 3) {
+        skipped++;
+        return;
+      }
+
+      areas.push({
+        id: claimId(feature.id),
+        name: props2.data.name ?? `Land ${areas.length + 1}`,
+        landcover: props2.data.landcover,
+        ring: ringPoints,
+        visible: props2.data.visible ?? true,
+        ...(props2.data.curve ? { curve: props2.data.curve } : {}),
+      });
       return;
     }
 
@@ -398,11 +496,11 @@ export function parseProject(text: string, defaults: ImportDefaults): ProjectPar
     );
   });
 
-  if (streets.length === 0) {
+  if (streets.length === 0 && areas.length === 0) {
     return {
       ok: false,
       errors: [
-        'No street centerlines found in that file.',
+        'No street centerlines or land cover found in that file.',
         ...warnings,
         'A project needs LineString features. Polygons alone are not enough — GeoStripe rebuilds those from the centerline.',
       ],
@@ -438,5 +536,5 @@ export function parseProject(text: string, defaults: ImportDefaults): ProjectPar
     );
   }
 
-  return { ok: true, streets, junctionOverrides, warnings };
+  return { ok: true, streets, areas, junctionOverrides, warnings };
 }

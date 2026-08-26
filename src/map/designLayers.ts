@@ -1,11 +1,12 @@
 import * as polyclip from 'polyclip-ts';
 import type { Feature, FeatureCollection, MultiPolygon, Polygon } from 'geojson';
-import type { Street } from '../model/types';
+import type { Area, Street } from '../model/types';
 import { deriveProject } from '../geo/derived';
 import type { JunctionOverride } from '../geo/derived';
 import type { JunctionGeometry } from '../geo/intersection';
 import { midpoint } from '../geo/measure';
-import { resolveCenterline } from '../geo/curve';
+import { closeRing, resolveCenterline, resolveRing } from '../geo/curve';
+import { LANDCOVERS } from '../library/landcover';
 import type { CurvatureWarning } from '../geo/curvature';
 import { PRIMITIVES } from '../library/primitives';
 
@@ -35,6 +36,8 @@ export interface JunctionSummary {
 }
 
 export interface DesignData {
+  /** Land cover, drawn beneath everything else in the design. */
+  areas: FeatureCollection;
   bands: FeatureCollection;
   markings: FeatureCollection;
   centerlines: FeatureCollection;
@@ -59,6 +62,8 @@ export interface DesignData {
 const empty = (): FeatureCollection => ({ type: 'FeatureCollection', features: [] });
 
 export interface BuildOptions {
+  areas?: readonly Area[];
+  selectedAreaId?: string | null;
   overrides?: Readonly<Record<string, JunctionOverride>>;
   defaultCornerRadiusMeters?: number;
   trimAtJunctions?: boolean;
@@ -70,6 +75,7 @@ export function buildDesignData(
   selectedStreetId: string | null,
   options: BuildOptions = {},
 ): DesignData {
+  const areas = empty();
   const bands = empty();
   const markings = empty();
   const centerlines = empty();
@@ -80,6 +86,58 @@ export function buildDesignData(
   const junctionPoints = empty();
   const stopLines = empty();
   const crossings = empty();
+
+  // Land cover first: it is the ground everything else is drawn on, and giving it its own
+  // pass keeps the street pipeline unaware that areas exist at all.
+  for (const area of options.areas ?? []) {
+    if (!area.visible) continue;
+    const ring = closeRing(resolveRing(area));
+    if (ring.length < 4) continue;
+
+    const spec = LANDCOVERS[area.landcover];
+    const selected = area.id === options.selectedAreaId;
+
+    areas.features.push({
+      type: 'Feature',
+      id: area.id,
+      properties: {
+        areaId: area.id,
+        landcover: area.landcover,
+        name: area.name,
+        color: spec.color,
+        opacity: spec.opacity,
+        selected,
+      },
+      geometry: { type: 'Polygon', coordinates: [ring] },
+    });
+
+    if (selected) {
+      const sharp = new Set(area.curve?.sharpVertices ?? []);
+      const curved = (area.curve?.mode ?? 'straight') !== 'straight';
+      area.ring.forEach((position, index) => {
+        vertices.features.push({
+          type: 'Feature',
+          id: `${area.id}:v${index}`,
+          properties: {
+            kind: 'area',
+            streetId: area.id,
+            index,
+            sharp: curved && sharp.has(index),
+          },
+          geometry: { type: 'Point', coordinates: position },
+        });
+
+        // Wraps: the handle after the last vertex splits the closing segment.
+        const next = area.ring[(index + 1) % area.ring.length]!;
+        midpoints.features.push({
+          type: 'Feature',
+          id: `${area.id}:m${index}`,
+          properties: { kind: 'area', streetId: area.id, index },
+          geometry: { type: 'Point', coordinates: midpoint(position, next) },
+        });
+      });
+    }
+  }
 
   const derived = deriveProject(streets, {
     overrides: options.overrides,
@@ -116,7 +174,12 @@ export function buildDesignData(
           id: `${street.id}:v${index}`,
           // `sharp` only means anything on a curved street; on a polyline every corner
           // is already hard and flagging them would be noise.
-          properties: { streetId: street.id, index, sharp: curved && sharp.has(index) },
+          properties: {
+            kind: 'street',
+            streetId: street.id,
+            index,
+            sharp: curved && sharp.has(index),
+          },
           geometry: { type: 'Point', coordinates: position },
         });
 
@@ -126,7 +189,7 @@ export function buildDesignData(
         midpoints.features.push({
           type: 'Feature',
           id: `${street.id}:m${index}`,
-          properties: { streetId: street.id, index },
+          properties: { kind: 'street', streetId: street.id, index },
           geometry: { type: 'Point', coordinates: midpoint(position, next) },
         });
       });
@@ -193,6 +256,7 @@ export function buildDesignData(
   });
 
   return {
+    areas,
     bands,
     markings,
     centerlines,

@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { ComponentType, Direction } from '../library/primitives';
 import { PRIMITIVES } from '../library/primitives';
 import { TEMPLATES, instantiateTemplate } from '../library/templates';
-import type { CrossSection, SectionComponent, Street } from '../model/types';
+import type { Area, CrossSection, SectionComponent, Street } from '../model/types';
 import { newId } from '../model/types';
 import { autoAnchorOffset, geometricCentreOffset } from '../model/section';
 import type { DisplayUnits } from '../lib/units';
@@ -12,6 +12,8 @@ import { createDemoStreets } from '../demo/washingtonPark';
 import { DEFAULT_CORNER_RADIUS_METRES } from '../geo/intersection';
 import type { CornerOverride, JunctionOverride, LegOverride } from '../geo/derived';
 import { DEFAULT_CURVE } from '../geo/curve';
+import { LANDCOVERS } from '../library/landcover';
+import type { LandcoverType } from '../library/landcover';
 import type { CurveSettings } from '../geo/curve';
 
 /**
@@ -40,7 +42,7 @@ export type AnchorMode = 'travelway' | 'geometric' | 'leftEdge' | 'custom';
  * centerline and dragging an existing vertex both start with a mousedown on the map, and
  * guessing between them gets it wrong exactly when the user is being precise.
  */
-export type Tool = 'select' | 'draw' | 'measure';
+export type Tool = 'select' | 'draw' | 'area' | 'measure';
 
 /**
  * Which cross-section a newly drawn street gets. A template id, or DRAFT_SECTION to use
@@ -57,6 +59,7 @@ export interface Notice {
 
 interface Snapshot {
   streets: Street[];
+  areas: Area[];
   draftSection: CrossSection;
   /**
    * Per-junction customisation, keyed by the junction's stable key.
@@ -90,6 +93,7 @@ interface EditorState extends Snapshot {
 
   // ---- selection
   selectedStreetId: string | null;
+  selectedAreaId: string | null;
   selectedComponentId: string | null;
 
   /** Swipe divider position, 0..1 across the map. null = off. */
@@ -159,7 +163,29 @@ interface EditorState extends Snapshot {
   renameStreet: (streetId: string, name: string) => void;
   toggleStreetVisible: (streetId: string) => void;
   duplicateStreet: (streetId: string) => void;
-  loadStreets: (streets: Street[], junctionOverrides?: Record<string, JunctionOverride>) => void;
+  loadStreets: (
+    streets: Street[],
+    junctionOverrides?: Record<string, JunctionOverride>,
+    areas?: Area[],
+  ) => void;
+
+  // ---- areas
+  addArea: (ring: [number, number][], landcover?: LandcoverType) => string;
+  selectArea: (id: string | null) => void;
+  renameArea: (areaId: string, name: string) => void;
+  setAreaLandcover: (areaId: string, landcover: LandcoverType) => void;
+  setAreaCurve: (areaId: string, patch: Partial<CurveSettings>) => void;
+  toggleAreaVisible: (areaId: string) => void;
+  duplicateArea: (areaId: string) => void;
+  removeArea: (areaId: string) => void;
+  /** Vertex editing, mirroring the street methods. */
+  moveAreaVertexLive: (areaId: string, index: number, point: [number, number]) => void;
+  insertAreaVertexLive: (areaId: string, afterIndex: number, point: [number, number]) => void;
+  removeAreaVertex: (areaId: string, index: number) => void;
+  toggleAreaSharpVertex: (areaId: string, index: number) => void;
+  /** The land type a newly drawn area gets. */
+  drawLandcover: LandcoverType;
+  setDrawLandcover: (type: LandcoverType) => void;
 
   // ---- curves
   setCurve: (streetId: string, patch: Partial<CurveSettings>) => void;
@@ -207,8 +233,8 @@ export function cloneSection(section: CrossSection, name?: string): CrossSection
 
 export const useEditorStore = create<EditorState>((set, get) => {
   const snapshot = (): Snapshot => {
-    const { streets, draftSection, junctionOverrides } = get();
-    return { streets, draftSection, junctionOverrides };
+    const { streets, areas, draftSection, junctionOverrides } = get();
+    return { streets, areas, draftSection, junctionOverrides };
   };
 
   /** Captured at gesture start; null when no gesture is in flight. */
@@ -216,6 +242,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
   const editStreet = (streetId: string, fn: (street: Street) => Street) =>
     get().streets.map((s) => (s.id === streetId ? fn(s) : s));
+
+  const editArea = (areaId: string, fn: (area: Area) => Area) =>
+    get().areas.map((a) => (a.id === areaId ? fn(a) : a));
 
   const commit = (next: Partial<Snapshot>) => {
     const previous = snapshot();
@@ -254,6 +283,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     arcgisApiKey: '',
 
     streets: initialStreets,
+    areas: [],
     draftSection: instantiateTemplate(TEMPLATES[1]!),
     junctionOverrides: {},
 
@@ -265,6 +295,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
     trimAtJunctions: true,
 
     selectedStreetId: initialStreets[0]?.id ?? null,
+    selectedAreaId: null,
+    drawLandcover: 'grass',
     selectedComponentId: null,
     // Demo opens with the swipe on, so the redesign reads against the real street.
     swipe: 0.5,
@@ -316,7 +348,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     selectStreet: (selectedStreetId) =>
-      set({ selectedStreetId, selectedComponentId: null, selectedJunctionKey: null }),
+      set({
+        selectedStreetId,
+        selectedComponentId: null,
+        selectedJunctionKey: null,
+        selectedAreaId: null,
+      }),
     selectComponent: (selectedComponentId) => set({ selectedComponentId }),
 
     addComponent: (target, type, index) =>
@@ -428,8 +465,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     clearStreets: () => {
-      commit({ streets: [] });
-      set({ selectedStreetId: null, selectedComponentId: null });
+      commit({ streets: [], areas: [] });
+      set({ selectedStreetId: null, selectedComponentId: null, selectedAreaId: null });
     },
 
     loadDemo: () => {
@@ -481,12 +518,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
       set({ selectedStreetId: copy.id, selectedComponentId: null });
     },
 
-    loadStreets: (streets, junctionOverrides = {}) => {
-      commit({ streets, junctionOverrides });
+    loadStreets: (streets, junctionOverrides = {}, areas = []) => {
+      commit({ streets, junctionOverrides, areas });
       set({
         selectedStreetId: streets[0]?.id ?? null,
         selectedComponentId: null,
         selectedJunctionKey: null,
+        selectedAreaId: null,
       });
     },
 
@@ -496,6 +534,101 @@ export const useEditorStore = create<EditorState>((set, get) => {
           const centerline = [...s.centerline];
           centerline.splice(afterIndex + 1, 0, point);
           return { ...s, centerline };
+        }),
+      }),
+
+    setDrawLandcover: (drawLandcover) => set({ drawLandcover }),
+
+    addArea: (ring, landcoverType) => {
+      const { areas, drawLandcover } = get();
+      const type = landcoverType ?? drawLandcover;
+      const area: Area = {
+        id: newId('ar'),
+        name: `${LANDCOVERS[type].label} ${areas.length + 1}`,
+        landcover: type,
+        ring,
+        visible: true,
+      };
+      commit({ areas: [...areas, area] });
+      // Straight back to select, for the same reason drawing a street does: staying in
+      // draw mode makes the next stray click start another one.
+      set({ selectedAreaId: area.id, selectedStreetId: null, tool: 'select' });
+      return area.id;
+    },
+
+    selectArea: (selectedAreaId) =>
+      set({ selectedAreaId, selectedStreetId: null, selectedJunctionKey: null }),
+
+    renameArea: (areaId, name) => commit({ areas: editArea(areaId, (a) => ({ ...a, name })) }),
+
+    setAreaLandcover: (areaId, landcoverType) =>
+      commit({ areas: editArea(areaId, (a) => ({ ...a, landcover: landcoverType })) }),
+
+    setAreaCurve: (areaId, patch) =>
+      commit({
+        areas: editArea(areaId, (a) => ({
+          ...a,
+          curve: { ...DEFAULT_CURVE, ...a.curve, ...patch },
+        })),
+      }),
+
+    toggleAreaVisible: (areaId) =>
+      commit({ areas: editArea(areaId, (a) => ({ ...a, visible: !a.visible })) }),
+
+    duplicateArea: (areaId) => {
+      const source = get().areas.find((a) => a.id === areaId);
+      if (!source) return;
+      const copy: Area = {
+        ...source,
+        id: newId('ar'),
+        name: `${source.name} copy`,
+        ring: source.ring.map((p) => [p[0], p[1]] as [number, number]),
+      };
+      commit({ areas: [...get().areas, copy] });
+      set({ selectedAreaId: copy.id });
+    },
+
+    removeArea: (areaId) => {
+      commit({ areas: get().areas.filter((a) => a.id !== areaId) });
+      if (get().selectedAreaId === areaId) set({ selectedAreaId: null });
+    },
+
+    moveAreaVertexLive: (areaId, index, point) =>
+      set({
+        areas: editArea(areaId, (a) => {
+          if (index < 0 || index >= a.ring.length) return a;
+          const ring = [...a.ring];
+          ring[index] = point;
+          return { ...a, ring };
+        }),
+      }),
+
+    insertAreaVertexLive: (areaId, afterIndex, point) =>
+      set({
+        areas: editArea(areaId, (a) => {
+          const ring = [...a.ring];
+          ring.splice(afterIndex + 1, 0, point);
+          return { ...a, ring };
+        }),
+      }),
+
+    removeAreaVertex: (areaId, index) => {
+      const area = get().areas.find((a) => a.id === areaId);
+      // Three points is the minimum that still encloses anything.
+      if (!area || area.ring.length <= 3) return;
+      commit({
+        areas: editArea(areaId, (a) => ({ ...a, ring: a.ring.filter((_, i) => i !== index) })),
+      });
+    },
+
+    toggleAreaSharpVertex: (areaId, index) =>
+      commit({
+        areas: editArea(areaId, (a) => {
+          const curve = { ...DEFAULT_CURVE, ...a.curve };
+          const sharp = new Set(curve.sharpVertices ?? []);
+          if (sharp.has(index)) sharp.delete(index);
+          else sharp.add(index);
+          return { ...a, curve: { ...curve, sharpVertices: [...sharp].sort((x, y) => x - y) } };
         }),
       }),
 

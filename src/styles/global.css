@@ -1421,3 +1421,52 @@ button {
 .wheel-corner.is-bulbed.is-active {
   stroke: var(--accent-fill);
 }
+
+/* ---------------------------------------------------------------- filter chips */
+
+/*
+ * Category chips for the asset palettes. Sized for a list that will eventually be
+ * hundreds long, not for the twenty-odd land types that exist today.
+ */
+.chip-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 8px 0;
+}
+
+.chip-filter button {
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--ink-dim);
+  font-size: 10.5px;
+  transition: 0.13s;
+}
+
+.chip-filter button:hover {
+  color: var(--ink);
+  border-color: var(--ink-dim);
+}
+
+.chip-filter button[aria-pressed='true'] {
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
+  color: var(--accent-ink);
+}
+
+.prim.is-selected {
+  background: var(--sunk);
+  border-color: var(--accent-fill);
+}
+
+/* A swatch sitting inline with text rather than as a row marker. */
+.swatch-inline {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 5px;
+  border-radius: 2px;
+  vertical-align: baseline;
+}

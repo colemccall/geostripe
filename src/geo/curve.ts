@@ -265,11 +265,66 @@ export function tightestRadius(line: readonly LngLat[]): number {
   return tightest;
 }
 
+/**
+ * Resolve a closed ring, wrapping the curve around the closure.
+ *
+ * A ring has no ends, so every control point is an interior one — including the first.
+ * Reusing the open tessellator would leave a hard corner at whichever vertex happened to
+ * be index 0, which is an arbitrary artefact of how the shape was drawn rather than
+ * anything the user asked for.
+ *
+ * Input is unclosed (the first point is not repeated); output is unclosed too, so callers
+ * close it themselves the way GeoJSON wants.
+ */
+export function tessellateRing(
+  controlPoints: readonly LngLat[],
+  settings: CurveSettings = DEFAULT_CURVE,
+): LngLat[] {
+  const points = dedupe(controlPoints);
+  if (settings.mode === 'straight' || points.length < 3) return points;
+
+  const plane = localPlane(originFor(points));
+  const planar = points.map((p) => plane.toPlane(p));
+  const sharp = new Set(settings.sharpVertices ?? []);
+  const n = planar.length;
+  const back = (i: number) => planar[(i - 1 + n) % n]!;
+  const forward = (i: number) => planar[(i + 1) % n]!;
+
+  if (settings.mode === 'smooth') {
+    // Wrap two points either side so the spline is continuous across the closure.
+    const wrapped = [planar[n - 1]!, ...planar, planar[0]!, planar[1]!];
+    const shifted = new Set([...sharp].map((i) => i + 1));
+    const curve = catmullRom(wrapped, shifted);
+    // Drop the samples belonging to the wrapped padding segments.
+    const trimmed = curve.slice(1, curve.length - 1);
+    return dedupe(trimmed.map((p) => plane.toLngLat(p) as LngLat), 1e-11);
+  }
+
+  const out: PlanePoint[] = [];
+  for (let i = 0; i < n; i++) {
+    if (sharp.has(i)) {
+      out.push({ ...planar[i]! });
+      continue;
+    }
+    const arc = roundCorner(back(i), planar[i]!, forward(i), settings.radiusMeters);
+    if (arc) out.push(...arc);
+    else out.push({ ...planar[i]! });
+  }
+
+  return dedupe(out.map((p) => plane.toLngLat(p) as LngLat), 1e-11);
+}
+
 // -------------------------------------------------------------------- memoised access
 
 interface CurvedLine {
   id: string;
   centerline: readonly LngLat[];
+  curve?: CurveSettings | undefined;
+}
+
+interface CurvedRing {
+  id: string;
+  ring: readonly LngLat[];
   curve?: CurveSettings | undefined;
 }
 
@@ -305,4 +360,29 @@ export function resolveCenterline(street: CurvedLine): LngLat[] {
 /** Drop cached lines for streets that no longer exist. */
 export function pruneResolvedCache(liveIds: ReadonlySet<string>): void {
   for (const id of [...resolvedCache.keys()]) if (!liveIds.has(id)) resolvedCache.delete(id);
+}
+
+const resolvedRingCache = new Map<string, ResolvedEntry>();
+
+/** The closed ring an area is actually drawn as, memoised on input identity. */
+export function resolveRing(area: CurvedRing): LngLat[] {
+  const hit = resolvedRingCache.get(area.id);
+  if (hit && hit.centerline === area.ring && hit.curve === area.curve) return hit.resolved;
+  const resolved = tessellateRing(area.ring, area.curve ?? DEFAULT_CURVE);
+  resolvedRingCache.set(area.id, { centerline: area.ring, curve: area.curve, resolved });
+  return resolved;
+}
+
+export function pruneResolvedRingCache(liveIds: ReadonlySet<string>): void {
+  for (const id of [...resolvedRingCache.keys()]) if (!liveIds.has(id)) resolvedRingCache.delete(id);
+}
+
+/** Close a ring for GeoJSON: repeat the first point at the end. */
+export function closeRing(ring: readonly LngLat[]): LngLat[] {
+  if (ring.length === 0) return [];
+  const first = ring[0]!;
+  const last = ring[ring.length - 1]!;
+  const closed = ring.map((p) => [p[0], p[1]] as LngLat);
+  if (first[0] !== last[0] || first[1] !== last[1]) closed.push([first[0], first[1]]);
+  return closed;
 }

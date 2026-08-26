@@ -16,7 +16,7 @@ import { buildDesignData, clipEastOf, clipLinesEastOf } from './designLayers';
 import type { DesignData } from './designLayers';
 import type { JunctionOverride } from '../geo/derived';
 import { lineLengthMeters } from '../geo/measure';
-import type { Street } from '../model/types';
+import type { Area, Street } from '../model/types';
 import type { Tool } from '../store/useEditorStore';
 import type { DisplayUnits } from '../lib/units';
 /**
@@ -67,6 +67,9 @@ type MapStyle = NonNullable<MapOptions['style']>;
 
 type LngLat = [number, number];
 
+/** Streets and areas share the vertex-editing machinery; this says which one is meant. */
+export type EntityKind = 'street' | 'area';
+
 export interface MapView {
   lng: number;
   lat: number;
@@ -95,6 +98,10 @@ interface Props {
   zoom: number;
   onViewChange?: (view: MapView) => void;
   onSelectStreet?: (streetId: string) => void;
+  onSelectArea?: (areaId: string) => void;
+  onAreaComplete?: (ring: LngLat[]) => void;
+  areas?: readonly Area[];
+  selectedAreaId?: string | null;
   onSelectJunction?: (key: string) => void;
   onWarnings?: (warnings: DesignData['warnings']) => void;
   onJunctions?: (junctions: DesignData['junctions'], warnings: string[]) => void;
@@ -113,11 +120,11 @@ interface Props {
   // ---- centerline editing
   onGestureStart?: () => void;
   onGestureEnd?: () => void;
-  onVertexMove?: (streetId: string, index: number, point: LngLat) => void;
-  onVertexInsert?: (streetId: string, afterIndex: number, point: LngLat) => void;
-  onVertexDelete?: (streetId: string, index: number) => void;
+  onVertexMove?: (kind: EntityKind, id: string, index: number, point: LngLat) => void;
+  onVertexInsert?: (kind: EntityKind, id: string, afterIndex: number, point: LngLat) => void;
+  onVertexDelete?: (kind: EntityKind, id: string, index: number) => void;
   /** Shift-click a control point to pin or release it as a hard corner. */
-  onVertexSharp?: (streetId: string, index: number) => void;
+  onVertexSharp?: (kind: EntityKind, id: string, index: number) => void;
 
   // ---- measuring
   onMeasureChange?: (points: LngLat[], metres: number) => void;
@@ -165,6 +172,7 @@ function buildStyle(basemapId: BasemapId, options: TileSourceOptions): MapStyle 
 }
 
 const DESIGN_SOURCES = [
+  'areas',
   'junction-footprint',
   'junction-paved',
   'junction-points',
@@ -201,6 +209,24 @@ function addDesignLayers(map: MapLibreMap) {
   for (const id of DESIGN_SOURCES) {
     if (!map.getSource(id)) map.addSource(id, { type: 'geojson', data: EMPTY });
   }
+
+  // Land cover is the ground: below every part of the street design, above the imagery.
+  addLayerSafely(map, {
+    id: 'area-fill',
+    type: 'fill',
+    source: 'areas',
+    paint: { 'fill-color': ['get', 'color'], 'fill-opacity': ['get', 'opacity'] },
+  });
+
+  addLayerSafely(map, {
+    id: 'area-outline',
+    type: 'line',
+    source: 'areas',
+    paint: {
+      'line-color': ['case', ['get', 'selected'], '#F2C14E', 'rgba(0,0,0,0.45)'],
+      'line-width': ['case', ['get', 'selected'], 2, 0.8],
+    },
+  });
 
   // Order is load-bearing. The footprint goes down first in footway colour and the paved
   // area on top of it; streets are trimmed so roadway stops at the paved edge and footway
@@ -428,6 +454,10 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     zoom,
     onViewChange,
     onSelectStreet,
+    onSelectArea,
+    onAreaComplete,
+    areas,
+    selectedAreaId,
     onSelectJunction,
     onWarnings,
     onJunctions,
@@ -461,6 +491,10 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     swipe,
     onViewChange,
     onSelectStreet,
+    onSelectArea,
+    onAreaComplete,
+    areas,
+    selectedAreaId,
     onSelectJunction,
     onWarnings,
     onJunctions,
@@ -486,7 +520,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
   const draftRef = useRef<LngLat[]>([]);
   const hoverRef = useRef<LngLat | null>(null);
   const measureRef = useRef<LngLat[]>([]);
-  const dragRef = useRef<{ streetId: string; index: number } | null>(null);
+  const dragRef = useRef<{ kind: EntityKind; streetId: string; index: number } | null>(null);
   const statsTimer = useRef<number | null>(null);
   const frameRef = useRef<number | null>(null);
   const measureReportedAt = useRef(0);
@@ -496,7 +530,11 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     if (!map || !map.getSource('draft')) return;
     const committed = draftRef.current;
     const hover = hoverRef.current;
-    const rubber = hover && committed.length > 0 ? [...committed, hover] : committed;
+    const open = hover && committed.length > 0 ? [...committed, hover] : committed;
+    // An area closes back to its first point while you draw it, so the shape you are
+    // about to get is the shape you can see.
+    const rubber =
+      latest.current.tool === 'area' && open.length > 2 ? [...open, open[0]!] : open;
     setData(map, 'draft', lineFC(rubber));
     setData(map, 'draft-points', pointsFC(committed));
   }, []);
@@ -525,10 +563,19 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
 
   const finishDraw = useCallback(() => {
     const points = draftRef.current;
+    const forArea = latest.current.tool === 'area';
     draftRef.current = [];
     hoverRef.current = null;
     drawDraft();
     reportDraft();
+
+    if (forArea) {
+      // Three points is the minimum that encloses anything. The ring is stored unclosed —
+      // repeating the first point would mean every later edit had to keep two copies of
+      // one vertex in step.
+      if (points.length >= 3) latest.current.onAreaComplete?.(points);
+      return;
+    }
     // Two points is the minimum that describes a direction to offset from; anything less
     // is a stray click, not a street.
     if (points.length >= 2) latest.current.onDrawComplete?.(points);
@@ -611,6 +658,8 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     } = latest.current;
 
     const data = buildDesignData(s, sel, {
+      areas: latest.current.areas,
+      selectedAreaId: latest.current.selectedAreaId,
       overrides: latest.current.junctionOverrides,
       defaultCornerRadiusMeters: latest.current.defaultCornerRadiusMeters,
       trimAtJunctions: latest.current.trimAtJunctions,
@@ -640,6 +689,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
 
     // Editing handles are never clipped: they are UI, not design, and a handle that
     // disappears behind the swipe divider is a handle you cannot grab.
+    setData(map, 'areas', data.areas);
     setData(map, 'vertices', data.vertices);
     setData(map, 'midpoints', data.midpoints);
     setData(map, 'junction-points', data.junctionPoints);
@@ -754,7 +804,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
       const active = latest.current.tool;
       const here: LngLat = [event.lngLat.lng, event.lngLat.lat];
 
-      if (active === 'draw') {
+      if (active === 'draw' || active === 'area') {
         const draft = draftRef.current;
         // Clicking the last point again — which is also what the second half of a
         // double-click looks like — ends the line rather than stacking a duplicate.
@@ -799,7 +849,15 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
 
         const hits = map.queryRenderedFeatures(event.point, { layers: ['band-fill'] });
         const streetId = hits[0]?.properties?.['streetId'];
-        if (typeof streetId === 'string') latest.current.onSelectStreet?.(streetId);
+        if (typeof streetId === 'string') {
+          latest.current.onSelectStreet?.(streetId);
+          return;
+        }
+
+        // Land cover sits under the streets, so it is only reachable where none is drawn.
+        const ground = map.queryRenderedFeatures(event.point, { layers: ['area-fill'] });
+        const areaId = ground[0]?.properties?.['areaId'];
+        if (typeof areaId === 'string') latest.current.onSelectArea?.(areaId);
       } catch {
         // No design layers yet; nothing to select.
       }
@@ -807,7 +865,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
 
     map.on('mousemove', (event) => {
       const active = latest.current.tool;
-      if (active === 'draw' && draftRef.current.length > 0) {
+      if ((active === 'draw' || active === 'area') && draftRef.current.length > 0) {
         hoverRef.current = [event.lngLat.lng, event.lngLat.lat];
         drawDraft();
       } else if (active === 'measure' && measureRef.current.length === 1) {
@@ -817,7 +875,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     });
 
     map.on('dblclick', (event) => {
-      if (latest.current.tool !== 'draw') return;
+      if (latest.current.tool !== 'draw' && latest.current.tool !== 'area') return;
       // The two clicks that make up the double-click already committed their vertices;
       // this just closes the line out.
       event.preventDefault();
@@ -832,7 +890,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     const onDragMove = (event: MapMouseEvent) => {
       const drag = dragRef.current;
       if (!drag) return;
-      latest.current.onVertexMove?.(drag.streetId, drag.index, [
+      latest.current.onVertexMove?.(drag.kind, drag.streetId, drag.index, [
         event.lngLat.lng,
         event.lngLat.lat,
       ]);
@@ -848,8 +906,8 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
       latest.current.onGestureEnd?.();
     };
 
-    const beginDrag = (streetId: string, index: number) => {
-      dragRef.current = { streetId, index };
+    const beginDrag = (kind: EntityKind, streetId: string, index: number) => {
+      dragRef.current = { kind, streetId, index };
       map.dragPan.disable();
       map.getCanvas().style.cursor = 'grabbing';
       map.on('mousemove', onDragMove);
@@ -864,6 +922,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
       const props = event.features?.[0]?.properties;
       const streetId = props?.['streetId'];
       const index = props?.['index'];
+      const kind: EntityKind = props?.['kind'] === 'area' ? 'area' : 'street';
       if (typeof streetId !== 'string' || typeof index !== 'number') return;
 
       event.preventDefault();
@@ -871,16 +930,16 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
       // Alt-click removes, shift-click pins the corner. Both held rather than separate
       // modes, because each is a one-off correction, not somewhere you stay.
       if (event.originalEvent.altKey) {
-        latest.current.onVertexDelete?.(streetId, index);
+        latest.current.onVertexDelete?.(kind, streetId, index);
         return;
       }
       if (event.originalEvent.shiftKey) {
-        latest.current.onVertexSharp?.(streetId, index);
+        latest.current.onVertexSharp?.(kind, streetId, index);
         return;
       }
 
       latest.current.onGestureStart?.();
-      beginDrag(streetId, index);
+      beginDrag(kind, streetId, index);
     });
 
     // Grabbing a midpoint inserts a real vertex there and drags it in the same motion, so
@@ -890,12 +949,16 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
       const props = event.features?.[0]?.properties;
       const streetId = props?.['streetId'];
       const index = props?.['index'];
+      const kind: EntityKind = props?.['kind'] === 'area' ? 'area' : 'street';
       if (typeof streetId !== 'string' || typeof index !== 'number') return;
 
       event.preventDefault();
       latest.current.onGestureStart?.();
-      latest.current.onVertexInsert?.(streetId, index, [event.lngLat.lng, event.lngLat.lat]);
-      beginDrag(streetId, index + 1);
+      latest.current.onVertexInsert?.(kind, streetId, index, [
+        event.lngLat.lng,
+        event.lngLat.lat,
+      ]);
+      beginDrag(kind, streetId, index + 1);
     });
 
     const setCursor = (value: string) => () => {
@@ -933,12 +996,15 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
 
       if (event.key === 'Escape') {
         event.preventDefault();
-        if (tool === 'draw') cancelDraw();
+        if (tool === 'draw' || tool === 'area') cancelDraw();
         else clearMeasure();
-      } else if (tool === 'draw' && event.key === 'Enter') {
+      } else if ((tool === 'draw' || tool === 'area') && event.key === 'Enter') {
         event.preventDefault();
         finishDraw();
-      } else if (tool === 'draw' && (event.key === 'Backspace' || event.key === 'Delete')) {
+      } else if (
+        (tool === 'draw' || tool === 'area') &&
+        (event.key === 'Backspace' || event.key === 'Delete')
+      ) {
         event.preventDefault();
         undoDraftPoint();
       }
@@ -959,7 +1025,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     if (drawing) map.doubleClickZoom.disable();
     else map.doubleClickZoom.enable();
 
-    if (tool !== 'draw') cancelDraw();
+    if (tool !== 'draw' && tool !== 'area') cancelDraw();
     if (tool !== 'measure') clearMeasure();
   }, [tool, cancelDraw, clearMeasure]);
 
@@ -989,6 +1055,8 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     if (ready) scheduleRefresh();
   }, [
     streets,
+    areas,
+    selectedAreaId,
     selectedStreetId,
     swipe,
     ready,
