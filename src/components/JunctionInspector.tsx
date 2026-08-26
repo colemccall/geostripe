@@ -1,5 +1,12 @@
 import { useState } from 'react';
 import type { JunctionSummary } from '../map/designLayers';
+import type { CornerOverride, JunctionOverride, LegOverride } from '../geo/derived';
+import type { CrosswalkStyle } from '../geo/intersection';
+import {
+  DEFAULT_BULB_OUT_METRES,
+  DEFAULT_CROSSWALK_WIDTH_METRES,
+  DEFAULT_DAYLIGHT_METRES,
+} from '../geo/intersection';
 import { displayToMetres, formatWidth, stepFor } from '../lib/units';
 import type { DisplayUnits } from '../lib/units';
 
@@ -10,23 +17,32 @@ import type { DisplayUnits } from '../lib/units';
  * corner is only meaningful as the thing between two particular legs, and a list makes you
  * hold that mapping in your head. Clicking the corner you can see is the whole point.
  *
- * Two numbers are given top billing, because they are the argument this tool exists to
- * make. Crossing distance is how far someone on foot is exposed. Corner radius is how fast
- * a driver can take the turn. Every other control here is in service of moving those two.
+ * Crossing distance is given top billing throughout, and shown as a before/after wherever
+ * a curb extension has moved it. That number — how far someone on foot is exposed — is the
+ * pedestrian counterpart to a street's fit check, and it is what every control here is
+ * ultimately in service of.
  */
 
 interface Props {
   junction: JunctionSummary;
   units: DisplayUnits;
   streetNames: Readonly<Record<string, string>>;
-  overriddenCorners: readonly (number | null)[] | undefined;
-  onCornerRadius: (cornerIndex: number, metres: number | null) => void;
+  override: JunctionOverride | undefined;
+  onCorner: (cornerIndex: number, patch: Partial<CornerOverride>) => void;
+  onLeg: (legIndex: number, patch: Partial<LegOverride>) => void;
   onReset: () => void;
 }
 
 const R_OUTER = 52;
 const R_INNER = 20;
 const SIZE = 132;
+
+const CROSSWALK_STYLES: { id: CrosswalkStyle; label: string }[] = [
+  { id: 'continental', label: 'Continental' },
+  { id: 'ladder', label: 'Ladder' },
+  { id: 'transverse', label: 'Transverse' },
+  { id: 'raised', label: 'Raised table' },
+];
 
 /** Bearings are maths convention (0 = east, counter-clockwise); SVG y points down. */
 function pointAt(bearing: number, radius: number): [number, number] {
@@ -42,30 +58,47 @@ function arcPath(from: number, to: number, radius: number): string {
   return `M ${x1} ${y1} A ${radius} ${radius} 0 ${sweep > Math.PI ? 1 : 0} 0 ${x2} ${y2}`;
 }
 
+/** Eight-point compass label from a maths-convention bearing. */
+function compass(bearing: number): string {
+  const points = ['E', 'NE', 'N', 'NW', 'W', 'SW', 'S', 'SE'];
+  return points[Math.round((bearing / (Math.PI * 2)) * 8) % 8]!;
+}
+
 export default function JunctionInspector({
   junction,
   units,
   streetNames,
-  overriddenCorners,
-  onCornerRadius,
+  override,
+  onCorner,
+  onLeg,
   onReset,
 }: Props) {
   const [activeCorner, setActiveCorner] = useState(0);
+  const [activeLeg, setActiveLeg] = useState(0);
   const corners = junction.corners;
   const legs = junction.legs;
   const corner = corners[activeCorner];
+  const leg = legs[activeLeg];
+  const legOverride = override?.legs?.[activeLeg] ?? null;
 
   // Bearings are not on the summary, so recover each leg's direction from its stop line:
-  // the line is perpendicular to the leg, so its normal is the leg's bearing.
-  const bearings = legs.map((leg) => {
-    const [a, b] = leg.stopLine;
+  // the line runs right-to-left across the leg, so its clockwise normal points outward.
+  const bearings = legs.map((entry) => {
+    const [a, b] = entry.stopLine;
     const angle = Math.atan2(b[1] - a[1], b[0] - a[0]);
-    // The stop line runs right-to-left across the leg, so the outward direction is its
-    // clockwise normal.
     return (angle - Math.PI / 2 + Math.PI * 2) % (Math.PI * 2);
   });
 
-  const widest = Math.max(...legs.map((l) => l.crossingDistanceMeters), 1);
+  const widest = Math.max(...legs.map((l) => l.crossingDistanceWithoutBulbsMeters), 1);
+  const totalSaved = legs.reduce(
+    (sum, l) => sum + (l.crossingDistanceWithoutBulbsMeters - l.crossingDistanceMeters),
+    0,
+  );
+
+  const everyLegMarked = legs.every((l) => l.hasCrosswalk);
+  const everyCornerBulbed = corners.every(
+    (c) => c.angleDegrees > 179 || c.treatment === 'bulbOut',
+  );
 
   return (
     <>
@@ -79,8 +112,7 @@ export default function JunctionInspector({
 
         <div className="junction-wheel">
           <svg viewBox={`0 0 ${SIZE} ${SIZE}`} role="img" aria-label="Intersection legs and corners">
-            {/* Legs, drawn at a thickness proportional to how far you have to walk. */}
-            {legs.map((leg, i) => {
+            {legs.map((entry, i) => {
               const bearing = bearings[i]!;
               const [x1, y1] = pointAt(bearing, R_INNER);
               const [x2, y2] = pointAt(bearing, R_OUTER);
@@ -91,24 +123,28 @@ export default function JunctionInspector({
                   y1={y1}
                   x2={x2}
                   y2={y2}
-                  className="wheel-leg"
-                  strokeWidth={4 + 10 * (leg.crossingDistanceMeters / widest)}
+                  className={`wheel-leg${i === activeLeg ? ' is-active' : ''}`}
+                  strokeWidth={4 + 10 * (entry.crossingDistanceMeters / widest)}
+                  onClick={() => setActiveLeg(i)}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Leg ${compass(bearing)}`}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') setActiveLeg(i);
+                  }}
                 />
               );
             })}
 
-            {/* Corners, between consecutive legs. These are the click targets. */}
             {corners.map((c, i) => {
-              const from = bearings[i]!;
-              const to = bearings[(i + 1) % legs.length]!;
               const straight = c.angleDegrees > 179;
               return (
                 <path
                   key={`corner-${i}`}
-                  d={arcPath(from, to, (R_INNER + R_OUTER) / 2)}
+                  d={arcPath(bearings[i]!, bearings[(i + 1) % legs.length]!, (R_INNER + R_OUTER) / 2)}
                   className={`wheel-corner${i === activeCorner ? ' is-active' : ''}${
                     straight ? ' is-straight' : ''
-                  }`}
+                  }${c.treatment === 'bulbOut' ? ' is-bulbed' : ''}`}
                   onClick={() => setActiveCorner(i)}
                   role="button"
                   tabIndex={0}
@@ -125,25 +161,198 @@ export default function JunctionInspector({
         </div>
 
         <ul className="leg-list">
-          {legs.map((leg, i) => (
-            <li key={`${leg.streetId}-${leg.sense}`}>
-              <span className="leg-name">{streetNames[leg.streetId] ?? 'Street'}</span>
-              <span className="leg-dir mono">{compass(bearings[i]!)}</span>
-              <span
-                className="leg-cross mono"
-                title="Kerb-to-kerb crossing distance for this leg"
-              >
-                {formatWidth(leg.crossingDistanceMeters, units, { withUnit: true })}
-              </span>
-            </li>
-          ))}
+          {legs.map((entry, i) => {
+            const saved = entry.crossingDistanceWithoutBulbsMeters - entry.crossingDistanceMeters;
+            return (
+              <li key={`${entry.streetId}-${entry.sense}`}>
+                <button
+                  type="button"
+                  className={`leg-row${i === activeLeg ? ' is-active' : ''}`}
+                  onClick={() => setActiveLeg(i)}
+                >
+                  <span className="leg-name">{streetNames[entry.streetId] ?? 'Street'}</span>
+                  <span className="leg-dir mono">{compass(bearings[i]!)}</span>
+                  <span className="leg-cross mono" title="Kerb-to-kerb crossing distance">
+                    {formatWidth(entry.crossingDistanceMeters, units, { withUnit: true })}
+                    {saved > 0.01 && (
+                      <em className="leg-was">
+                        was {formatWidth(entry.crossingDistanceWithoutBulbsMeters, units)}
+                      </em>
+                    )}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
         </ul>
-        <p className="hint">
-          Crossing distance is how far a person on foot is exposed. It follows the
-          cross-section, not the corner — narrow the lanes to shorten it.
-        </p>
+
+        {totalSaved > 0.01 ? (
+          <p className="hint">
+            Curb extensions have taken{' '}
+            <b>{formatWidth(totalSaved, units, { withUnit: true })}</b> off the crossings here,
+            summed across every leg.
+          </p>
+        ) : (
+          <p className="hint">
+            Crossing distance is how far a person on foot is exposed. Narrow the lanes to
+            shorten it, or extend a curb at the corners.
+          </p>
+        )}
+
+        <div className="btn-row">
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() =>
+              legs.forEach((_, i) =>
+                onLeg(i, {
+                  crosswalk: everyLegMarked
+                    ? null
+                    : {
+                        style: 'continental',
+                        widthMeters: DEFAULT_CROSSWALK_WIDTH_METRES,
+                        setbackMeters: 0,
+                      },
+                }),
+              )
+            }
+          >
+            {everyLegMarked ? 'Clear crossings' : 'Mark all crossings'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() =>
+              corners.forEach((c, i) => {
+                if (c.angleDegrees > 179) return;
+                onCorner(i, {
+                  treatment: everyCornerBulbed ? 'plain' : 'bulbOut',
+                  bulbOutMeters: DEFAULT_BULB_OUT_METRES,
+                });
+              })
+            }
+          >
+            {everyCornerBulbed ? 'Remove curb extensions' : 'Extend every curb'}
+          </button>
+        </div>
       </section>
 
+      {/* ------------------------------------------------------------------ crossings */}
+      {leg && (
+        <section className="panel">
+          <header className="panel-head">
+            <span className="label">Crossing · {compass(bearings[activeLeg]!)} leg</span>
+            <span className="label mono">
+              {formatWidth(leg.crossingDistanceMeters, units, { withUnit: true })}
+            </span>
+          </header>
+
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={leg.hasCrosswalk}
+              onChange={(e) =>
+                onLeg(activeLeg, {
+                  crosswalk: e.target.checked
+                    ? {
+                        style: 'continental',
+                        widthMeters: DEFAULT_CROSSWALK_WIDTH_METRES,
+                        setbackMeters: 0,
+                      }
+                    : null,
+                })
+              }
+            />
+            <span>Marked crosswalk</span>
+          </label>
+
+          {leg.hasCrosswalk && legOverride?.crosswalk && (
+            <>
+              <label className="field" style={{ marginTop: 9 }}>
+                <span className="label">Marking</span>
+                <select
+                  className="text-input"
+                  value={legOverride.crosswalk.style}
+                  onChange={(e) =>
+                    onLeg(activeLeg, {
+                      crosswalk: {
+                        ...legOverride.crosswalk!,
+                        style: e.target.value as CrosswalkStyle,
+                      },
+                    })
+                  }
+                >
+                  {CROSSWALK_STYLES.map((style) => (
+                    <option key={style.id} value={style.id}>
+                      {style.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="field" style={{ marginTop: 9 }}>
+                <span className="label">Width ({units})</span>
+                <input
+                  className="text-input mono"
+                  type="number"
+                  min={0.5}
+                  step={stepFor(units)}
+                  value={formatWidth(legOverride.crosswalk.widthMeters, units)}
+                  onChange={(e) => {
+                    const value = Number(e.target.value);
+                    if (!Number.isFinite(value) || value <= 0) return;
+                    onLeg(activeLeg, {
+                      crosswalk: {
+                        ...legOverride.crosswalk!,
+                        widthMeters: displayToMetres(value, units),
+                      },
+                    });
+                  }}
+                />
+                <span className="hint">
+                  Measured along the direction of traffic. 10 ft is the usual marked width.
+                </span>
+              </label>
+
+              <label className="field" style={{ marginTop: 9 }}>
+                <span className="label">Setback from the corner ({units})</span>
+                <input
+                  className="text-input mono"
+                  type="number"
+                  min={0}
+                  step={stepFor(units)}
+                  value={formatWidth(legOverride.crosswalk.setbackMeters, units)}
+                  onChange={(e) => {
+                    const value = Number(e.target.value);
+                    if (!Number.isFinite(value) || value < 0) return;
+                    onLeg(activeLeg, {
+                      crosswalk: {
+                        ...legOverride.crosswalk!,
+                        setbackMeters: displayToMetres(value, units),
+                      },
+                    });
+                  }}
+                />
+                <span className="hint">
+                  Pulling the crossing back gives a turning driver room to stop after
+                  leaving the junction rather than inside it.
+                </span>
+              </label>
+            </>
+          )}
+
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={legOverride?.stopBar ?? false}
+              onChange={(e) => onLeg(activeLeg, { stopBar: e.target.checked })}
+            />
+            <span>Stop bar</span>
+          </label>
+        </section>
+      )}
+
+      {/* -------------------------------------------------------------------- corner */}
       {corner && (
         <section className="panel">
           <header className="panel-head">
@@ -169,38 +378,111 @@ export default function JunctionInspector({
                   onChange={(e) => {
                     const value = Number(e.target.value);
                     if (!Number.isFinite(value) || value < 0) return;
-                    onCornerRadius(activeCorner, displayToMetres(value, units));
+                    onCorner(activeCorner, { radiusMeters: displayToMetres(value, units) });
                   }}
                 />
                 <span className="hint">
-                  The number most worth arguing down. A tighter corner forces a slower turn
-                  and shortens the crossing a person has to walk around.
+                  The number most worth arguing down. A tighter corner forces a slower turn.
                 </span>
               </label>
 
+              <div className="btn-row">
+                {[3, 4.5, 7.5].map((metres) => (
+                  <button
+                    key={metres}
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => onCorner(activeCorner, { radiusMeters: metres })}
+                  >
+                    {formatWidth(metres, units, { decimals: 0, withUnit: true })}
+                  </button>
+                ))}
+              </div>
+
               {corner.clamped && (
                 <div className="pill pill-warn" style={{ marginTop: 9 }}>
-                  <strong>Tightened to {formatWidth(corner.appliedRadiusMeters, units, { withUnit: true })}</strong>
+                  <strong>
+                    Tightened to {formatWidth(corner.appliedRadiusMeters, units, { withUnit: true })}
+                  </strong>
                   <span>The legs meeting here are too short or too sharp for the radius asked for.</span>
                 </div>
+              )}
+
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={corner.treatment === 'bulbOut'}
+                  onChange={(e) =>
+                    onCorner(activeCorner, {
+                      treatment: e.target.checked ? 'bulbOut' : 'plain',
+                      bulbOutMeters: DEFAULT_BULB_OUT_METRES,
+                    })
+                  }
+                />
+                <span>Curb extension</span>
+              </label>
+
+              {corner.treatment === 'bulbOut' && (
+                <label className="field" style={{ marginTop: 9 }}>
+                  <span className="label">Extension ({units})</span>
+                  <input
+                    className="text-input mono"
+                    type="number"
+                    min={0}
+                    step={stepFor(units)}
+                    value={formatWidth(
+                      override?.corners?.[activeCorner]?.bulbOutMeters ?? DEFAULT_BULB_OUT_METRES,
+                      units,
+                    )}
+                    onChange={(e) => {
+                      const value = Number(e.target.value);
+                      if (!Number.isFinite(value) || value < 0) return;
+                      onCorner(activeCorner, { bulbOutMeters: displayToMetres(value, units) });
+                    }}
+                  />
+                  <span className="hint">
+                    Usually the width of the parking lane it replaces — the roadway does not
+                    need that space, so the crossing gets shorter for free.
+                    {corner.appliedBulbOutMeters > 0 &&
+                      ` Applied: ${formatWidth(corner.appliedBulbOutMeters, units, { withUnit: true })}.`}
+                  </span>
+                </label>
+              )}
+
+              <label className="field" style={{ marginTop: 9 }}>
+                <span className="label">Daylighting ({units})</span>
+                <input
+                  className="text-input mono"
+                  type="number"
+                  min={0}
+                  step={stepFor(units)}
+                  value={formatWidth(corner.daylightMeters, units)}
+                  onChange={(e) => {
+                    const value = Number(e.target.value);
+                    if (!Number.isFinite(value) || value < 0) return;
+                    onCorner(activeCorner, { daylightMeters: displayToMetres(value, units) });
+                  }}
+                />
+                <span className="hint">
+                  Parking removed either side of the corner so drivers and people crossing
+                  can see each other. 20 ft is a common minimum.
+                </span>
+              </label>
+
+              {corner.daylightMeters === 0 && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-block"
+                  style={{ marginTop: 8 }}
+                  onClick={() => onCorner(activeCorner, { daylightMeters: DEFAULT_DAYLIGHT_METRES })}
+                >
+                  Daylight this corner
+                </button>
               )}
             </>
           )}
 
-          <div className="btn-row">
-            {[3, 4.5, 7.5].map((metres) => (
-              <button
-                key={metres}
-                type="button"
-                className="btn btn-ghost"
-                onClick={() => onCornerRadius(activeCorner, metres)}
-              >
-                {formatWidth(metres, units, { decimals: 0, withUnit: true })}
-              </button>
-            ))}
-          </div>
-
-          {overriddenCorners && overriddenCorners.some((c) => c !== null && c !== undefined) && (
+          {override && (
             <button
               type="button"
               className="btn btn-ghost btn-block"
@@ -227,11 +509,4 @@ export default function JunctionInspector({
       )}
     </>
   );
-}
-
-/** Eight-point compass label from a maths-convention bearing. */
-function compass(bearing: number): string {
-  const points = ['E', 'NE', 'N', 'NW', 'W', 'SW', 'S', 'SE'];
-  const index = Math.round((bearing / (Math.PI * 2)) * 8) % 8;
-  return points[index]!;
 }

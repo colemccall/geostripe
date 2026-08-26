@@ -1368,3 +1368,56 @@ button {
   color: var(--ink-2);
   cursor: pointer;
 }
+
+/* Leg rows double as selection targets, so they need a pressed state. */
+.leg-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: var(--panel-2);
+  text-align: left;
+  font-size: 11.5px;
+  transition: 0.13s;
+}
+
+.leg-row:hover {
+  border-color: var(--line);
+}
+
+.leg-row.is-active {
+  border-color: var(--accent-fill);
+  box-shadow: inset 2px 0 0 var(--accent-fill);
+}
+
+/* The before figure for a crossing a curb extension has shortened. */
+.leg-was {
+  display: block;
+  font-size: 9.5px;
+  font-style: normal;
+  color: var(--ink-dim);
+  text-decoration: line-through;
+}
+
+.wheel-leg {
+  cursor: pointer;
+}
+
+.wheel-leg.is-active {
+  stroke: var(--accent-fill);
+  opacity: 0.85;
+}
+
+/* A corner carrying a curb extension reads as thicker: more footway, less roadway. */
+.wheel-corner.is-bulbed {
+  stroke-width: 11;
+  stroke: color-mix(in srgb, var(--accent-fill) 55%, var(--panel-2));
+}
+
+.wheel-corner.is-bulbed.is-active {
+  stroke: var(--accent-fill);
+}

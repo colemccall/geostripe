@@ -5,7 +5,13 @@ import type { BandFeature } from './banding';
 import { detectJunctions } from './junctions';
 import type { Junction } from './junctions';
 import { DEFAULT_CORNER_RADIUS_METRES, junctionGeometry } from './intersection';
-import type { JunctionGeometry } from './intersection';
+import type {
+  CornerTreatment,
+  CrosswalkSpec,
+  JunctionGeometry,
+  LegInput,
+  CornerInput,
+} from './intersection';
 import type { CurvatureWarning } from './curvature';
 import type { LocalPlane } from './projection';
 import { PRIMITIVES } from '../library/primitives';
@@ -34,19 +40,47 @@ export interface StreetGeometry {
   warnings: CurvatureWarning[];
 }
 
+/** Paint. Crossings and stop bars are marked, not paved, so they read as one material. */
+const PAINT_COLOR = '#F0EDE3';
+/** A raised table is a change in surface, not in paint. */
+const TABLE_COLOR = '#6E6355';
+
 export interface DerivedProject {
   byStreet: Map<string, StreetGeometry>;
   junctions: Junction[];
   junctionGeometry: JunctionGeometry[];
+  /** Crosswalk stripes, edge lines, raised tables and stop bars, ready to draw. */
+  crossings: Feature[];
   plane: LocalPlane;
   warnings: { streetId: string; streetName: string; warnings: CurvatureWarning[] }[];
   junctionWarnings: string[];
 }
 
-/** Persisted per-junction customisation, keyed by the junction's stable key. */
+/** Persisted per-corner customisation. A null entry means "leave this one alone". */
+export interface CornerOverride {
+  radiusMeters?: number | null;
+  treatment?: CornerTreatment;
+  bulbOutMeters?: number;
+  daylightMeters?: number;
+}
+
+/** Persisted per-leg customisation. */
+export interface LegOverride {
+  crosswalk?: CrosswalkSpec | null;
+  stopBar?: boolean;
+  stopOffsetMeters?: number | null;
+}
+
+/**
+ * Persisted per-junction customisation, keyed by the junction's stable key.
+ *
+ * Sparse by design: junctions themselves are derived, so the only thing worth storing is
+ * what somebody deliberately changed. Both arrays are indexed to match the junction's
+ * legs, and corner `i` is the corner counter-clockwise from leg `i`.
+ */
 export interface JunctionOverride {
-  corners?: (number | null)[];
-  stopOffsets?: (number | null)[];
+  corners?: (CornerOverride | null)[];
+  legs?: (LegOverride | null)[];
 }
 
 export interface DeriveOptions {
@@ -131,10 +165,21 @@ function geometryFor(
 
   const geometry = junctionGeometry(junction, plane, {
     defaultRadiusMeters: defaultRadius,
-    corners: override?.corners?.map((radiusMeters) =>
-      radiusMeters === null || radiusMeters === undefined ? {} : { radiusMeters },
-    ),
-    stopOffsets: override?.stopOffsets,
+    corners: override?.corners?.map<CornerInput>((corner) => ({
+      ...(corner?.radiusMeters !== null && corner?.radiusMeters !== undefined
+        ? { radiusMeters: corner.radiusMeters }
+        : {}),
+      ...(corner?.treatment ? { treatment: corner.treatment } : {}),
+      ...(corner?.bulbOutMeters !== undefined ? { bulbOutMeters: corner.bulbOutMeters } : {}),
+      ...(corner?.daylightMeters !== undefined ? { daylightMeters: corner.daylightMeters } : {}),
+    })),
+    legs: override?.legs?.map<LegInput>((leg) => ({
+      crosswalk: leg?.crosswalk ?? null,
+      ...(leg?.stopBar !== undefined ? { stopBar: leg.stopBar } : {}),
+      ...(leg?.stopOffsetMeters !== undefined
+        ? { stopOffsetMeters: leg.stopOffsetMeters }
+        : {}),
+    })),
   });
   const entry: GeometryEntry = { signature, geometry };
   geometryCache.set(junction.key, entry);
@@ -180,6 +225,37 @@ function subtractRings(feature: Feature, holes: readonly Ring[]): Feature | null
     // A degenerate ring should cost one band's trim, not the whole design.
     return feature;
   }
+}
+
+/** Keep only the part of a band that falls inside the given ring. */
+function intersectRings(feature: Feature, ring: Ring): Feature | null {
+  const geometry = feature.geometry;
+  if (geometry.type !== 'Polygon' && geometry.type !== 'MultiPolygon') return null;
+
+  try {
+    const subject =
+      geometry.type === 'Polygon'
+        ? (geometry.coordinates as Ring[])
+        : (geometry.coordinates as Ring[][]);
+
+    const result = polyclip.intersection(subject as never, [ring] as never);
+    if (result.length === 0) return null;
+
+    return {
+      ...feature,
+      geometry:
+        result.length === 1
+          ? ({ type: 'Polygon', coordinates: result[0]! } as Polygon)
+          : ({ type: 'MultiPolygon', coordinates: result } as MultiPolygon),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Parking is the one component daylighting removes; everything else stays put. */
+function isParking(type: string): boolean {
+  return type === 'parkingLaneParallel' || type === 'parkingLaneAngled';
 }
 
 /**
@@ -315,10 +391,16 @@ export function deriveProject(
   // cut only at the kerb-to-kerb box, while footway and verge stop at the wider footprint
   // so the corner sidewalk drawn underneath shows through and turns the corner.
   const pavedHoles: Ring[] = [];
+  const roadwayHoles: Ring[] = [];
   const footprintHoles: Ring[] = [];
+  const daylightHoles: Ring[] = [];
   for (const entry of geometry) {
     if (entry.paved.length > 3) pavedHoles.push(entry.paved as Ring);
+    if (entry.roadwayCut.length > 3) roadwayHoles.push(entry.roadwayCut as Ring);
     if (entry.footprint.length > 3) footprintHoles.push(entry.footprint as Ring);
+    for (const zone of entry.daylightZones) {
+      if (zone.ring.length > 3) daylightHoles.push(zone.ring as Ring);
+    }
   }
 
   // The signature already encodes leg geometry, corner overrides and the default radius,
@@ -343,10 +425,38 @@ export function deriveProject(
 
     const bands: Feature[] = [];
     for (const band of raw.bands) {
-      const roadway = PRIMITIVES[band.properties.componentType].isRoadway;
-      const holes = roadway ? pavedHoles : footprintHoles;
-      const trimmed = subtractRings(band, holes);
-      if (trimmed) bands.push(trimmed);
+      const type = band.properties.componentType;
+      const roadway = PRIMITIVES[type].isRoadway;
+
+      // Roadway is cut against the UN-bulbed box, not the paved fill. The difference
+      // between those two rings is exactly the ground a curb extension reclaims: no lane
+      // band is drawn there, and the footway ring underneath shows through instead.
+      const trimmed = subtractRings(band, roadway ? roadwayHoles : footprintHoles);
+      if (!trimmed) continue;
+
+      if (!roadway || !isParking(type) || daylightHoles.length === 0) {
+        bands.push(trimmed);
+        continue;
+      }
+
+      // Daylighting removes the parking, not the pavement. The cleared stretch is still
+      // roadway, so it is recoloured rather than cut out — a hole here would show footway
+      // through the middle of the carriageway.
+      for (const zone of daylightHoles) {
+        const cleared = intersectRings(trimmed, zone);
+        if (!cleared) continue;
+        bands.push({
+          ...cleared,
+          properties: {
+            ...cleared.properties,
+            color: PRIMITIVES.travelLane.color,
+            daylighted: true,
+          },
+        });
+      }
+
+      const kept = subtractRings(trimmed, daylightHoles);
+      if (kept) bands.push(kept);
     }
 
     // Lane markings belong to the street, not the intersection; inside the box the
@@ -368,10 +478,28 @@ export function deriveProject(
     if (!liveJunctions.has(key)) geometryCache.delete(key);
   }
 
+  const crossings: Feature[] = [];
+  for (const entry of geometry) {
+    entry.crossings.forEach((part, index) => {
+      crossings.push({
+        type: 'Feature',
+        id: `${entry.key}:x${index}`,
+        properties: {
+          junctionKey: entry.key,
+          legIndex: part.legIndex,
+          kind: part.kind,
+          color: part.kind === 'table' ? TABLE_COLOR : PAINT_COLOR,
+        },
+        geometry: { type: 'Polygon', coordinates: [part.ring] },
+      });
+    });
+  }
+
   return {
     byStreet,
     junctions,
     junctionGeometry: geometry,
+    crossings,
     plane,
     warnings,
     junctionWarnings: [...new Set(geometry.flatMap((g) => g.warnings))],

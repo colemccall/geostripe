@@ -46,6 +46,8 @@ export interface DesignData {
   junctionFootprint: FeatureCollection;
   /** One point per junction, for selection. */
   junctionPoints: FeatureCollection;
+  /** Crosswalk stripes, edge lines, raised tables and stop bars. */
+  crossings: FeatureCollection;
   /** Stop lines across each leg of the selected junction. */
   stopLines: FeatureCollection;
   warnings: { streetId: string; streetName: string; warnings: CurvatureWarning[] }[];
@@ -76,6 +78,7 @@ export function buildDesignData(
   const junctionFootprint = empty();
   const junctionPoints = empty();
   const stopLines = empty();
+  const crossings = empty();
 
   const derived = deriveProject(streets, {
     overrides: options.overrides,
@@ -123,6 +126,8 @@ export function buildDesignData(
       });
     }
   }
+
+  crossings.features.push(...derived.crossings);
 
   const junctions: JunctionSummary[] = [];
 
@@ -190,6 +195,7 @@ export function buildDesignData(
     junctionPaved,
     junctionFootprint,
     junctionPoints,
+    crossings,
     stopLines,
     warnings: derived.warnings,
     junctions,
