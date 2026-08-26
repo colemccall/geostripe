@@ -2,7 +2,7 @@ import { dedupe, localPlane, originFor } from './projection';
 import { resolveCenterline } from './curve';
 import type { LngLat, LocalPlane, PlanePoint } from './projection';
 import { sectionExtent, travelwayWidth } from '../model/section';
-import type { Street } from '../model/types';
+import type { JunctionNode, Street } from '../model/types';
 
 /**
  * Where streets meet.
@@ -67,10 +67,16 @@ export type JunctionKind = 'crossing' | 'tee' | 'corner';
 
 export interface Junction {
   /**
-   * Stable identity: the participating street ids, sorted, plus an ordinal distinguishing
-   * multiple crossings of the same pair. Survives vertex edits and geometry changes.
+   * Stable identity.
+   *
+   * For a placed node, the node's own id — which is the most stable key there is, because
+   * it survives the streets being redrawn from scratch. For a detected crossing, the
+   * participating street ids, sorted, plus an ordinal distinguishing multiple crossings of
+   * the same pair, which survives vertex edits and geometry changes but not much else.
    */
   key: string;
+  /** Set when this junction is a node somebody placed, rather than a crossing found. */
+  nodeId?: string;
   streetIds: string[];
   position: LngLat;
   /** Legs sorted by bearing, counter-clockwise from east. Corners sit between them. */
@@ -389,6 +395,34 @@ export interface DetectionResult {
  * Hidden streets are excluded: hiding a street should remove its junctions too, or the
  * corners it created would stay carved out of streets that no longer meet anything.
  */
+/**
+ * How much ground a node claims.
+ *
+ * Wide enough to catch every street that visibly meets there — a node dropped on a
+ * boulevard crossing has to reach past the boulevard's own half-width to find the street
+ * on the far side — and no wider, or a node would start absorbing streets a block away.
+ */
+export function nodeReachFor(node: JunctionNode, tracks: Iterable<Track>): number {
+  if (node.reachMeters !== undefined) return node.reachMeters;
+  let widest = MIN_CLUSTER_METRES;
+  for (const track of tracks) {
+    widest = Math.max(widest, track.extent.left, track.extent.right);
+  }
+  return widest;
+}
+
+/** Station on a track nearest a point, and how far off it the point sits. */
+function nearestStation(track: Track, point: PlanePoint): { station: number; distance: number } {
+  let best = { station: 0, distance: Infinity };
+  for (let i = 0; i < track.pts.length - 1; i++) {
+    const near = closestOnSegment(point, track.pts[i]!, track.pts[i + 1]!);
+    if (near.distance < best.distance) {
+      best = { station: stationOf(track, i, near.t), distance: near.distance };
+    }
+  }
+  return best;
+}
+
 export interface DetectionOptions {
   /**
    * Added to the radius at which two nearby crossings are merged into one junction.
@@ -400,6 +434,21 @@ export interface DetectionOptions {
    * eight — hence a knob that goes both ways.
    */
   mergeSlackMeters?: number;
+  /**
+   * Intersections somebody placed. Authoritative wherever they sit.
+   *
+   * A node replaces automatic detection in its own neighbourhood rather than adding to it:
+   * any crossing found inside a node's reach is dropped, because the node already
+   * represents it and two junctions at one place would fight over the same asphalt. That
+   * holds for a disabled node too — which is exactly how "these roads cross without
+   * meeting" is expressed.
+   */
+  nodes?: readonly JunctionNode[];
+  /**
+   * 'auto' finds crossings as well as honouring nodes. 'nodes' finds nothing on its own,
+   * so an intersection exists only where one was placed.
+   */
+  mode?: 'auto' | 'nodes';
 }
 
 export function detectJunctions(
@@ -418,18 +467,67 @@ export function detectJunctions(
   }
 
   const list = [...tracks.values()];
+
+  // ---- placed nodes first. They own their neighbourhood, so what they claim is settled
+  // before anything is detected rather than reconciled afterwards.
+  const nodes = options.nodes ?? [];
+  const claimed: { point: PlanePoint; reach: number }[] = [];
+  const placed: Junction[] = [];
+
+  for (const node of nodes) {
+    const point = plane.toPlane(node.position);
+    const reach = nodeReachFor(node, list);
+    claimed.push({ point, reach });
+    if (node.disabled) continue;
+
+    const stations = new Map<string, number>();
+    for (const track of list) {
+      const near = nearestStation(track, point);
+      if (near.distance <= reach) stations.set(track.streetId, near.station);
+    }
+    // One street through a node is not a junction, it is a point on a street. Kept in
+    // `claimed` regardless, so a node parked on a single road still suppresses detection
+    // there — that is what makes it usable as "no junction here".
+    if (stations.size < 2) continue;
+
+    const legs = buildLegs([{ point, stations, radius: reach }], tracks);
+    if (legs.length < 2) continue;
+    const streetIds = [...new Set(legs.map((l) => l.streetId))].sort();
+
+    placed.push({
+      key: `node:${node.id}`,
+      nodeId: node.id,
+      streetIds,
+      position: node.position,
+      legs,
+      kind: classify(legs, streetIds.length),
+      hasStub: legs.some((l) => l.lengthMeters < STUB_METRES),
+    });
+  }
+
   const crossings: Crossing[] = [];
-  for (let i = 0; i < list.length; i++) {
-    for (let j = i + 1; j < list.length; j++) {
-      // Different levels never meet. An overpass crossing the street below it is not an
-      // intersection, and detecting one would carve a hole through both.
-      if (list[i]!.level !== list[j]!.level) continue;
-      // Self-intersection is a curvature problem, not a junction, so pairs only.
-      crossings.push(...crossingsBetween(list[i]!, list[j]!, slack));
+  if ((options.mode ?? 'auto') === 'auto') {
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        // Different levels never meet. An overpass crossing the street below it is not an
+        // intersection, and detecting one would carve a hole through both.
+        if (list[i]!.level !== list[j]!.level) continue;
+        // Self-intersection is a curvature problem, not a junction, so pairs only.
+        crossings.push(...crossingsBetween(list[i]!, list[j]!, slack));
+      }
     }
   }
 
-  const groups = cluster(crossings);
+  const groups = cluster(
+    crossings.filter(
+      (crossing) =>
+        !claimed.some(
+          (node) =>
+            Math.hypot(node.point.x - crossing.point.x, node.point.y - crossing.point.y) <=
+            node.reach,
+        ),
+    ),
+  );
   const draft = groups.map((group) => {
     const legs = buildLegs(group, tracks);
     const streetIds = [...new Set(legs.map((l) => l.streetId))].sort();
@@ -474,6 +572,7 @@ export function detectJunctions(
     });
   }
 
+  junctions.push(...placed);
   junctions.sort((a, b) => a.key.localeCompare(b.key));
   return { junctions, plane };
 }

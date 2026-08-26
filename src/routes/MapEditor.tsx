@@ -84,6 +84,13 @@ const TOOLS: { id: Tool; label: string; key: string; hint: string; icon: string 
     hint: 'Click around a patch of ground to cover it; points snap to what is already drawn, and Alt turns that off. Enter or double-click closes the shape, Esc cancels.',
   },
   {
+    id: 'node',
+    label: 'Intersection',
+    key: 'N',
+    icon: '⊕',
+    hint: 'Click where roads meet to place an intersection you own — one you can select, drag, disable or delete. Click an existing one to select it.',
+  },
+  {
     id: 'measure',
     label: 'Measure',
     key: 'M',
@@ -118,6 +125,9 @@ export default function MapEditor() {
   const layerVisibility = useEditorStore((s) => s.layerVisibility);
   const imageryOpacity = useEditorStore((s) => s.imageryOpacity);
   const railOpen = useEditorStore((s) => s.railOpen);
+  const nodes = useEditorStore((s) => s.nodes);
+  const selectedNodeId = useEditorStore((s) => s.selectedNodeId);
+  const junctionMode = useEditorStore((s) => s.junctionMode);
   // Subscribed rather than read once: the dock's undo button has to grey out the moment
   // there is nothing left to undo, which is a re-render, not a snapshot.
   const canUndo = useEditorStore((s) => s.past.length > 0);
@@ -168,6 +178,15 @@ export default function MapEditor() {
     setRailOpen,
     undo,
     redo,
+    addNode,
+    removeNode,
+    renameNode,
+    toggleNodeDisabled,
+    selectNode,
+    moveNodeLive,
+    materialiseNodes,
+    setJunctionMode,
+    clearSelection,
     beginGesture,
     endGesture,
     moveVertexLive,
@@ -307,6 +326,7 @@ export default function MapEditor() {
         { name: projectName, editorVersion: EDITOR_VERSION },
         junctionOverrides,
         areas,
+        nodes,
       ),
       'application/geo+json',
     );
@@ -339,7 +359,7 @@ export default function MapEditor() {
       return;
     }
 
-    loadStreets(result.streets, result.junctionOverrides, result.areas);
+    loadStreets(result.streets, result.junctionOverrides, result.areas, result.nodes);
     mapRef.current?.zoomTo(result.streets[0]?.centerline ?? []);
     setNotice({
       kind: result.warnings.length ? 'warning' : 'success',
@@ -351,6 +371,15 @@ export default function MapEditor() {
       details: result.warnings,
     });
   }
+
+  /** One place for "get rid of what is selected", shared by the key, the dock and the strip. */
+  const deleteSelection = () => {
+    if (selectedNodeId) removeNode(selectedNodeId);
+    else if (street) removeStreet(street.id);
+    else if (area) removeArea(area.id);
+  };
+
+  const selectedNode = nodes.find((n) => n.id === selectedNodeId) ?? null;
 
   // ------------------------------------------------------------------------ rendering
 
@@ -584,9 +613,135 @@ export default function MapEditor() {
             <span className="label">Intersections</span>
             <span className="label mono">{junctions.length}</span>
           </header>
-          {junctions.length === 0 ? (
+
+          {/* Which model is in charge. Placed nodes always win where they sit; this
+              decides whether anything happens where they do not. */}
+          <div className="form-row" role="group" aria-label="How intersections are decided">
+            {(
+              [
+                ['auto', 'Found automatically'],
+                ['nodes', 'Only where I place one'],
+              ] as const
+            ).map(([mode, label]) => (
+              <button
+                key={mode}
+                type="button"
+                className="btn btn-ghost"
+                aria-pressed={junctionMode === mode}
+                onClick={() => setJunctionMode(mode)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div className="btn-row">
+            <button
+              type="button"
+              className="btn btn-ghost"
+              title="Put a node at every crossing there is now, so the graph is yours"
+              onClick={() => {
+                const placed = materialiseNodes();
+                setNotice(
+                  placed === 0
+                    ? {
+                        kind: 'success',
+                        title: 'Nothing to place',
+                        details: ['Every crossing already has an intersection of its own.'],
+                      }
+                    : {
+                        kind: 'success',
+                        title: `Placed ${placed} intersection${placed === 1 ? '' : 's'}`,
+                        details: [
+                          'They are yours now — select, drag, disable or delete any of them.',
+                        ],
+                      },
+                );
+              }}
+            >
+              Place one at every crossing
+            </button>
+          </div>
+          <p className="hint">
+            {junctionMode === 'nodes'
+              ? 'Nothing is an intersection unless you put one there. Two roads that cross without a node simply overlap.'
+              : 'Crossings become intersections on their own. Anywhere you place a node, the node is in charge instead — including a node set to no junction, which is how two roads cross without meeting.'}
+          </p>
+          {nodes.length > 0 && (
+            <ul className="cards" style={{ marginTop: 9 }}>
+              {nodes.map((node, index) => (
+                <li key={node.id}>
+                  <div className={`street-card${node.id === selectedNodeId ? ' is-active' : ''}`}>
+                    <button
+                      type="button"
+                      className="card street-card-main"
+                      onClick={() => selectNode(node.id)}
+                      onDoubleClick={() => mapRef.current?.zoomTo([node.position])}
+                    >
+                      <span className="card-title">
+                        {node.name || `Intersection ${index + 1}`}
+                      </span>
+                      <span className="card-meta">
+                        <span>
+                          {node.disabled
+                            ? 'no junction — the roads just cross'
+                            : (junctions.find((j) => j.nodeId === node.id)?.legCount ?? 0) +
+                              ' legs'}
+                        </span>
+                        <span className="mono">placed</span>
+                      </span>
+                    </button>
+                    <div className="street-card-tools">
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        title={node.disabled ? 'Make it a junction again' : 'No junction here'}
+                        aria-label={node.disabled ? 'Enable' : 'Disable'}
+                        onClick={() => toggleNodeDisabled(node.id)}
+                      >
+                        {node.disabled ? '○' : '◉'}
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        title="Zoom to"
+                        aria-label="Zoom to"
+                        onClick={() => mapRef.current?.zoomTo([node.position])}
+                      >
+                        ⤢
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        title="Delete"
+                        aria-label="Delete"
+                        onClick={() => removeNode(node.id)}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {selectedNode && (
+            <label className="field" style={{ marginTop: 9 }}>
+              <span className="label">Name this intersection</span>
+              <input
+                className="text-input"
+                value={selectedNode.name ?? ''}
+                placeholder="Fifth and Race"
+                onChange={(e) => renameNode(selectedNode.id, e.target.value)}
+              />
+            </label>
+          )}
+
+          {junctions.length === 0 && nodes.length === 0 ? (
             <p className="empty-note">
-              None yet. Draw two streets that cross and the intersection appears on its own.
+              None yet. Draw two streets that cross, or use the <b>Intersection</b> tool to
+              place one exactly where you want it.
             </p>
           ) : (
             <ul className="cards">
@@ -792,13 +947,22 @@ export default function MapEditor() {
             onRail={setRailOpen}
             actions={[
               {
+                id: 'deselect',
+                label: 'Deselect',
+                icon: '⊘',
+                hint: 'Put down whatever is selected (Esc)',
+                disabled: !street && !area && !selectedJunction && !selectedNodeId,
+                onClick: clearSelection,
+              },
+              {
                 id: 'frame',
                 label: 'Frame the selection',
                 icon: '⌖',
                 hint: 'Zoom to whatever is selected',
-                disabled: !street && !area && !selectedJunction,
+                disabled: !street && !area && !selectedJunction && !selectedNode,
                 onClick: () => {
-                  if (street) mapRef.current?.zoomTo(street.centerline);
+                  if (selectedNode) mapRef.current?.zoomTo([selectedNode.position]);
+                  else if (street) mapRef.current?.zoomTo(street.centerline);
                   else if (area) mapRef.current?.zoomTo(area.ring);
                   else if (selectedJunction) mapRef.current?.zoomTo([selectedJunction.position]);
                 },
@@ -837,13 +1001,10 @@ export default function MapEditor() {
                 id: 'delete',
                 label: 'Delete',
                 icon: '×',
-                hint: 'Remove the selection. Ctrl+Z brings it back.',
+                hint: 'Remove the selection (Del). Ctrl+Z brings it back.',
                 danger: true,
-                disabled: !street && !area,
-                onClick: () => {
-                  if (street) removeStreet(street.id);
-                  else if (area) removeArea(area.id);
-                },
+                disabled: !street && !area && !selectedNodeId,
+                onClick: deleteSelection,
               },
             ]}
             history={[
@@ -901,6 +1062,14 @@ export default function MapEditor() {
             trimAtJunctions={trimAtJunctions}
             junctionMergeSlackMeters={junctionMergeSlackMeters}
             showAllCenterlines={showAllCenterlines}
+            nodes={nodes}
+            junctionMode={junctionMode}
+            selectedNodeId={selectedNodeId}
+            onSelectNode={selectNode}
+            onPlaceNode={(position) => addNode(position)}
+            onMoveNode={moveNodeLive}
+            onClearSelection={clearSelection}
+            onDeleteSelection={deleteSelection}
             layerVisibility={layerVisibility}
             imageryOpacity={imageryOpacity}
             selectedJunctionKey={selectedJunctionKey}
@@ -958,13 +1127,18 @@ export default function MapEditor() {
 
           {/* What is selected, and the number the design has to answer to, under the
               thing it describes rather than in a panel a glance away. */}
-          {tool === 'select' && (street || area || selectedJunction) && (
+          {(tool === 'select' || tool === 'node') &&
+            (street || area || selectedJunction || selectedNode) && (
             <SelectionStrip
               units={units}
-              kind={street ? 'street' : area ? 'land' : 'junction'}
+              kind={
+                selectedNode ? 'node' : street ? 'street' : area ? 'land' : 'junction'
+              }
               name={
-                street?.name ??
-                area?.name ??
+                selectedNode?.name ||
+                (selectedNode ? 'Intersection' : undefined) ||
+                street?.name ||
+                area?.name ||
                 (selectedJunction
                   ? selectedJunction.legs
                       .map((leg) => streetNames[leg.streetId] ?? 'Street')
@@ -980,13 +1154,30 @@ export default function MapEditor() {
                   : null
               }
               onRename={
-                street
-                  ? (value) => renameStreet(street.id, value)
-                  : area
-                    ? (value) => renameArea(area.id, value)
-                    : undefined
+                selectedNode
+                  ? (value) => renameNode(selectedNode.id, value)
+                  : street
+                    ? (value) => renameStreet(street.id, value)
+                    : area
+                      ? (value) => renameArea(area.id, value)
+                      : undefined
               }
               onOpenPanel={() => setRailOpen(true)}
+              onClear={clearSelection}
+              onDelete={selectedNode || street || area ? deleteSelection : undefined}
+              extra={
+                selectedNode ? (
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    aria-pressed={selectedNode.disabled === true}
+                    title="Two roads that cross without meeting"
+                    onClick={() => toggleNodeDisabled(selectedNode.id)}
+                  >
+                    {selectedNode.disabled ? 'No junction' : 'Junction'}
+                  </button>
+                ) : null
+              }
             />
           )}
 

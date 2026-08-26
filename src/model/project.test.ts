@@ -250,6 +250,55 @@ describe('lane assignment and turn pockets, through the file', () => {
   });
 });
 
+describe('placed intersections, through the file', () => {
+  const original = createDemoStreets();
+  const nodes = [
+    { id: 'node-a', position: original[0]!.centerline[1]!, name: 'Fifth and Race' },
+    { id: 'node-b', position: original[0]!.centerline[0]!, disabled: true as const },
+  ];
+
+  it('round-trips position, name and the no-junction flag', () => {
+    const result = parseProject(
+      serializeProject(original, META, {}, [], nodes),
+      DEFAULTS,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.nodes).toHaveLength(2);
+    expect(result.nodes[0]!.position).toEqual(nodes[0]!.position);
+    expect(result.nodes[0]!.name).toBe('Fifth and Race');
+    expect(result.nodes[1]!.disabled).toBe(true);
+  });
+
+  it('keeps their ids, because the junction settings are keyed by them', () => {
+    // A node's id IS its junction key, so an id reassigned on load would silently orphan
+    // every corner radius and crossing set on it.
+    const result = parseProject(serializeProject(original, META, {}, [], nodes), DEFAULTS);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.nodes.map((n) => n.id)).toEqual(['node-a', 'node-b']);
+  });
+
+  it('carries the settings placed on one', () => {
+    const overrides = { 'node:node-a': { corners: [{ radiusMeters: 3 }] } };
+    const result = parseProject(
+      serializeProject(original, META, overrides, [], nodes),
+      DEFAULTS,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The key names no street, so the "streets not in this file" filter must not eat it.
+    expect(result.junctionOverrides['node:node-a']).toEqual(overrides['node:node-a']);
+  });
+
+  it('writes nothing when none has been placed', () => {
+    const file = JSON.parse(serializeProject(original, META)) as {
+      features: { properties: Record<string, unknown> }[];
+    };
+    expect(file.features.some((f) => f.properties['geostripe'] === 'node')).toBe(false);
+  });
+});
+
 describe('curved alignments', () => {
   const curved: Street[] = createDemoStreets().map((street, i) =>
     i === 0

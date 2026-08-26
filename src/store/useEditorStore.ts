@@ -2,9 +2,10 @@ import { create } from 'zustand';
 import type { ComponentType, Direction } from '../library/primitives';
 import { PRIMITIVES } from '../library/primitives';
 import { TEMPLATES, instantiateTemplate } from '../library/templates';
-import type { Area, CrossSection, SectionComponent, Street } from '../model/types';
+import type { Area, CrossSection, JunctionNode, SectionComponent, Street } from '../model/types';
 import { newId } from '../model/types';
 import { autoAnchorOffset, geometricCentreOffset } from '../model/section';
+import { detectJunctions } from '../geo/junctions';
 import type { DisplayUnits } from '../lib/units';
 import type { BasemapId } from '../map/basemaps';
 import { DEFAULT_VINTAGE } from '../map/basemaps';
@@ -44,7 +45,7 @@ export type AnchorMode = 'travelway' | 'geometric' | 'leftEdge' | 'custom';
  * centerline and dragging an existing vertex both start with a mousedown on the map, and
  * guessing between them gets it wrong exactly when the user is being precise.
  */
-export type Tool = 'select' | 'draw' | 'area' | 'measure';
+export type Tool = 'select' | 'draw' | 'area' | 'node' | 'measure';
 
 /**
  * Which cross-section a newly drawn street gets. A template id, or DRAFT_SECTION to use
@@ -72,9 +73,26 @@ interface Snapshot {
    * than a list of junction records.
    */
   junctionOverrides: Record<string, JunctionOverride>;
+  /**
+   * Intersections placed by hand. Authoritative wherever they sit.
+   *
+   * Part of the snapshot, unlike which one is selected: placing and dragging a node is an
+   * edit and has to be undoable, while selecting one is looking and must not be — or every
+   * Ctrl+Z would spend itself putting a selection back.
+   */
+  nodes: JunctionNode[];
 }
 
 interface EditorState extends Snapshot {
+  selectedNodeId: string | null;
+  /**
+   * Whether crossings are found automatically as well as placed.
+   *
+   * 'auto' is the default because a design has to work before anyone has thought about
+   * intersections. 'nodes' is for when you want the graph to be yours: nothing is a
+   * junction unless you put one there.
+   */
+  junctionMode: 'auto' | 'nodes';
   // ---- chrome
   /** Names the downloaded file and is written into its metadata. Not undoable. */
   projectName: string;
@@ -165,6 +183,25 @@ interface EditorState extends Snapshot {
   updateLeg: (key: string, legIndex: number, patch: Partial<LegOverride>) => void;
   /** How a junction is read: an intersection, a merge, or left to the geometry. */
   setJunctionForm: (key: string, patch: Pick<JunctionOverride, 'form' | 'yieldLine'>) => void;
+
+  // ---- placed intersections
+  addNode: (position: [number, number]) => string;
+  removeNode: (id: string) => void;
+  renameNode: (id: string, name: string) => void;
+  toggleNodeDisabled: (id: string) => void;
+  selectNode: (id: string | null) => void;
+  /** Live drag. Streets that END at the node come with it; ones passing through do not. */
+  moveNodeLive: (id: string, position: [number, number]) => void;
+  /**
+   * Place a node at every crossing the detector currently finds.
+   *
+   * The bridge between the two models: one click and the graph is yours, with every
+   * junction already where it was and nothing to redraw.
+   */
+  materialiseNodes: () => number;
+  setJunctionMode: (mode: 'auto' | 'nodes') => void;
+  /** Drop every selection. What Escape does, and what clicking bare ground does. */
+  clearSelection: () => void;
   resetJunction: (key: string) => void;
 
   // ---- selection actions
@@ -232,6 +269,7 @@ interface EditorState extends Snapshot {
     streets: Street[],
     junctionOverrides?: Record<string, JunctionOverride>,
     areas?: Area[],
+    nodes?: JunctionNode[],
   ) => void;
 
   // ---- areas
@@ -298,8 +336,8 @@ export function cloneSection(section: CrossSection, name?: string): CrossSection
 
 export const useEditorStore = create<EditorState>((set, get) => {
   const snapshot = (): Snapshot => {
-    const { streets, areas, draftSection, junctionOverrides } = get();
-    return { streets, areas, draftSection, junctionOverrides };
+    const { streets, areas, draftSection, junctionOverrides, nodes } = get();
+    return { streets, areas, draftSection, junctionOverrides, nodes };
   };
 
   /** Captured at gesture start; null when no gesture is in flight. */
@@ -351,6 +389,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
     areas: [],
     draftSection: instantiateTemplate(TEMPLATES[1]!),
     junctionOverrides: {},
+    nodes: [],
+    selectedNodeId: null,
+    junctionMode: 'auto',
 
     tool: 'select',
     drawSectionId: TEMPLATES[1]!.id,
@@ -408,6 +449,95 @@ export const useEditorStore = create<EditorState>((set, get) => {
         junctionOverrides: { ...get().junctionOverrides, [key]: { ...existing, corners } },
       });
     },
+
+    addNode: (position) => {
+      const node: JunctionNode = { id: newId('node'), position };
+      commit({ nodes: [...get().nodes, node] });
+      set({ selectedNodeId: node.id, selectedStreetId: null, selectedAreaId: null });
+      return node.id;
+    },
+
+    removeNode: (id) => {
+      commit({ nodes: get().nodes.filter((node) => node.id !== id) });
+      if (get().selectedNodeId === id) set({ selectedNodeId: null });
+      // Its customisation goes with it: the key is the node id, so nothing else can
+      // ever claim those settings, and leaving them would be a slow leak.
+      const overrides = { ...get().junctionOverrides };
+      delete overrides[`node:${id}`];
+      set({ junctionOverrides: overrides });
+    },
+
+    renameNode: (id, name) =>
+      commit({ nodes: get().nodes.map((node) => (node.id === id ? { ...node, name } : node)) }),
+
+    toggleNodeDisabled: (id) =>
+      commit({
+        nodes: get().nodes.map((node) =>
+          node.id === id ? { ...node, disabled: !node.disabled } : node,
+        ),
+      }),
+
+    selectNode: (selectedNodeId) =>
+      set({ selectedNodeId, selectedStreetId: null, selectedAreaId: null, selectedJunctionKey: null }),
+
+    moveNodeLive: (id, position) => {
+      const node = get().nodes.find((entry) => entry.id === id);
+      if (!node) return;
+      const [fromLng, fromLat] = node.position;
+      const dLng = position[0] - fromLng;
+      const dLat = position[1] - fromLat;
+
+      // Roughly how far the node reaches, in degrees. Only used to decide which control
+      // points are "at" the node, so a coarse conversion is honest here.
+      const metresPerDegree = 111132;
+      const reach = 12 / metresPerDegree;
+
+      set({
+        nodes: get().nodes.map((entry) => (entry.id === id ? { ...entry, position } : entry)),
+        // A street that ENDS at the node has that endpoint carried along, because the
+        // endpoint and the node are the same place. One that merely passes through is
+        // left alone: the node is a point on it, and moving the node should not bend it.
+        streets: get().streets.map((street) => {
+          const moved = street.centerline.map((point, index) => {
+            const isEnd = index === 0 || index === street.centerline.length - 1;
+            if (!isEnd) return point;
+            const away = Math.hypot(point[0] - fromLng, (point[1] - fromLat) * 1.3);
+            return away <= reach
+              ? ([point[0] + dLng, point[1] + dLat] as [number, number])
+              : point;
+          });
+          return moved.some((point, i) => point !== street.centerline[i])
+            ? { ...street, centerline: moved }
+            : street;
+        }),
+      });
+    },
+
+    materialiseNodes: () => {
+      const { streets, nodes, junctionMergeSlackMeters } = get();
+      const { junctions } = detectJunctions(streets, {
+        mergeSlackMeters: junctionMergeSlackMeters,
+        nodes,
+      });
+      // Only the ones that are not already a node: running this twice must not double up.
+      const fresh = junctions
+        .filter((junction) => !junction.nodeId)
+        .map<JunctionNode>((junction) => ({ id: newId('node'), position: junction.position }));
+      if (fresh.length === 0) return 0;
+      commit({ nodes: [...nodes, ...fresh] });
+      return fresh.length;
+    },
+
+    setJunctionMode: (junctionMode) => set({ junctionMode }),
+
+    clearSelection: () =>
+      set({
+        selectedStreetId: null,
+        selectedAreaId: null,
+        selectedNodeId: null,
+        selectedJunctionKey: null,
+        selectedComponentId: null,
+      }),
 
     setJunctionForm: (key, patch) => {
       const existing = get().junctionOverrides[key] ?? {};
@@ -662,8 +792,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
       set({ selectedStreetId: copy.id, selectedComponentId: null });
     },
 
-    loadStreets: (streets, junctionOverrides = {}, areas = []) => {
-      commit({ streets, junctionOverrides, areas });
+    loadStreets: (streets, junctionOverrides = {}, areas = [], nodes = []) => {
+      commit({ streets, junctionOverrides, areas, nodes });
       set({
         selectedStreetId: streets[0]?.id ?? null,
         selectedComponentId: null,

@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process';
 import { defineConfig } from 'vitest/config';
 import { loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
@@ -21,9 +22,32 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const base = env.VITE_BASE || '/geostripe/';
 
+  // Stamped into the bundle so the running app can say which build it is.
+  //
+  // This exists because "I don't see my changes" is indistinguishable from a failed
+  // deploy, a stale index.html in the browser cache, and a build that never ran — and
+  // GitHub Pages serves index.html with a ten-minute cache, so the middle one is common.
+  // A build id on screen turns that question into a glance.
+  const buildId = (() => {
+    try {
+      return execSync('git rev-parse --short HEAD', {
+        stdio: ['ignore', 'pipe', 'ignore'],
+      })
+        .toString()
+        .trim();
+    } catch {
+      // No git in the build environment is fine; the timestamp still identifies the build.
+      return 'local';
+    }
+  })();
+
   return {
     base,
     plugins: [react()],
+    define: {
+      __BUILD_ID__: JSON.stringify(buildId),
+      __BUILT_AT__: JSON.stringify(new Date().toISOString().slice(0, 16).replace('T', ' ')),
+    },
     // MapLibre instantiates its worker with `{ type: 'module' }`, so the bundle it loads
     // has to actually be an ES module. Vite's default worker format is 'iife', which
     // loads without complaint but leaves the worker inert: GeoJSON sources are parsed in

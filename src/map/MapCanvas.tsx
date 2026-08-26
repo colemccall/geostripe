@@ -20,7 +20,7 @@ import type { JunctionOverride } from '../geo/derived';
 import { distanceMeters, lineLengthMeters } from '../geo/measure';
 import { snapPoint } from '../geo/snap';
 import type { SnapResult } from '../geo/snap';
-import type { Area, Street } from '../model/types';
+import type { Area, JunctionNode, Street } from '../model/types';
 import type { Tool } from '../store/useEditorStore';
 import type { DisplayUnits } from '../lib/units';
 /**
@@ -124,6 +124,16 @@ interface Props {
   trimAtJunctions?: boolean;
   junctionMergeSlackMeters?: number;
   mergeBelowDegrees?: number;
+  nodes?: readonly JunctionNode[];
+  junctionMode?: 'auto' | 'nodes';
+  selectedNodeId?: string | null;
+  onSelectNode?: (id: string | null) => void;
+  onPlaceNode?: (position: LngLat) => void;
+  onMoveNode?: (id: string, position: LngLat) => void;
+  /** Clicking bare ground, and Escape. Deselecting has to be as easy as selecting. */
+  onClearSelection?: () => void;
+  /** Delete or Backspace with something selected. */
+  onDeleteSelection?: () => void;
   selectedJunctionKey?: string | null;
   showAllCenterlines?: boolean;
   /** Which groups of layers are drawn. Missing or true means visible. */
@@ -213,6 +223,7 @@ const DESIGN_SOURCES = [
   'draft-points',
   'measure',
   'measure-points',
+  'nodes',
   'snap',
 ] as const;
 
@@ -403,6 +414,28 @@ function addDesignLayers(map: MapLibreMap) {
     paint: { 'line-color': '#F5F2E8', 'line-width': 2.4, 'line-opacity': 0.9 },
   });
 
+  // Placed intersections. Bigger than a vertex and drawn above the design, because they
+  // are the one handle you have to be able to hit without hunting for it.
+  addLayerSafely(map, {
+    id: 'node-point',
+    type: 'circle',
+    source: 'nodes',
+    paint: {
+      'circle-radius': ['case', ['get', 'selected'], 9, 7],
+      // A disabled node is hollow: it is still yours, it just makes no junction.
+      'circle-color': [
+        'case',
+        ['get', 'disabled'],
+        'rgba(0,0,0,0.25)',
+        ['get', 'selected'],
+        '#F2C14E',
+        '#7FB2E5',
+      ],
+      'circle-stroke-width': 2.2,
+      'circle-stroke-color': ['case', ['get', 'selected'], '#FFFFFF', 'rgba(10,14,16,0.85)'],
+    },
+  });
+
   addLayerSafely(map, {
     id: 'junction-point',
     type: 'circle',
@@ -526,6 +559,14 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     trimAtJunctions,
     junctionMergeSlackMeters,
     mergeBelowDegrees,
+    nodes,
+    junctionMode,
+    selectedNodeId,
+    onSelectNode,
+    onPlaceNode,
+    onMoveNode,
+    onClearSelection,
+    onDeleteSelection,
     selectedJunctionKey,
     showAllCenterlines,
     layerVisibility,
@@ -568,6 +609,14 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     trimAtJunctions,
     junctionMergeSlackMeters,
     mergeBelowDegrees,
+    nodes,
+    junctionMode,
+    selectedNodeId,
+    onSelectNode,
+    onPlaceNode,
+    onMoveNode,
+    onClearSelection,
+    onDeleteSelection,
     selectedJunctionKey,
     showAllCenterlines,
     layerVisibility,
@@ -591,6 +640,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
   const hoverRef = useRef<LngLat | null>(null);
   const measureRef = useRef<LngLat[]>([]);
   const dragRef = useRef<{ kind: EntityKind; streetId: string; index: number } | null>(null);
+  const nodeDragRef = useRef<string | null>(null);
   const statsTimer = useRef<number | null>(null);
   const frameRef = useRef<number | null>(null);
   const measureReportedAt = useRef(0);
@@ -795,6 +845,9 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
       trimAtJunctions: latest.current.trimAtJunctions,
       junctionMergeSlackMeters: latest.current.junctionMergeSlackMeters,
       mergeBelowDegrees: latest.current.mergeBelowDegrees,
+      nodes: latest.current.nodes,
+      junctionMode: latest.current.junctionMode,
+      selectedNodeId: latest.current.selectedNodeId,
       selectedJunctionKey: latest.current.selectedJunctionKey,
       showAllCenterlines: latest.current.showAllCenterlines,
     });
@@ -828,6 +881,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     setData(map, 'vertices', data.vertices);
     setData(map, 'midpoints', data.midpoints);
     setData(map, 'junction-points', data.junctionPoints);
+    setData(map, 'nodes', data.nodes);
     setData(map, 'stop-lines', data.stopLines);
 
     // queryRenderedFeatures only reports once tiles are built, so sample shortly after —
@@ -986,6 +1040,41 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     map.on('click', (event) => {
       const active = latest.current.tool;
 
+      // A node under the cursor wins in every tool: it is the smallest target on the map
+      // and the only way to reach the intersection you placed.
+      const nodeUnder = (): string | null => {
+        try {
+          const hits = map.queryRenderedFeatures(
+            [
+              [event.point.x - SNAP_PX, event.point.y - SNAP_PX],
+              [event.point.x + SNAP_PX, event.point.y + SNAP_PX],
+            ],
+            { layers: ['node-point'] },
+          );
+          const id = hits[0]?.properties?.['nodeId'];
+          return typeof id === 'string' ? id : null;
+        } catch {
+          return null;
+        }
+      };
+
+      if (active === 'node') {
+        const existing = nodeUnder();
+        if (existing) latest.current.onSelectNode?.(existing);
+        // Snapped, so a node placed on a crossing lands ON both centerlines rather than
+        // a metre off one of them — which is the difference between a junction and none.
+        else latest.current.onPlaceNode?.(snapFor(event, null).point);
+        return;
+      }
+
+      if (active === 'select') {
+        const existing = nodeUnder();
+        if (existing) {
+          latest.current.onSelectNode?.(existing);
+          return;
+        }
+      }
+
       if (active === 'draw' || active === 'area') {
         const draft = draftRef.current;
         // Clicking the last point again — which is also what the second half of a
@@ -1046,7 +1135,16 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
         // Land cover sits under the streets, so it is only reachable where none is drawn.
         const ground = map.queryRenderedFeatures(event.point, { layers: ['area-fill'] });
         const areaId = ground[0]?.properties?.['areaId'];
-        if (typeof areaId === 'string') latest.current.onSelectArea?.(areaId);
+        if (typeof areaId === 'string') {
+          latest.current.onSelectArea?.(areaId);
+          return;
+        }
+
+        // Nothing under the cursor. This used to hold the selection, on the grounds that
+        // losing the inspector by missing a band by two pixels is maddening — but the
+        // reverse turned out worse: with no other way to deselect, the panel could not be
+        // put down at all. Escape does the same thing without moving the mouse.
+        latest.current.onClearSelection?.();
       } catch {
         // No design layers yet; nothing to select.
       }
@@ -1092,6 +1190,37 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     // preventDefault on the mousedown is what stops MapLibre panning the map out from
     // under the handle. The move/up listeners go on the map rather than the window
     // because MapLibre already normalises its own event coordinates.
+    const onNodeDragMove = (event: MapMouseEvent) => {
+      const id = nodeDragRef.current;
+      if (!id) return;
+      latest.current.onMoveNode?.(id, [event.lngLat.lng, event.lngLat.lat]);
+    };
+
+    const onNodeDragEnd = () => {
+      if (!nodeDragRef.current) return;
+      nodeDragRef.current = null;
+      map.off('mousemove', onNodeDragMove);
+      map.off('mouseup', onNodeDragEnd);
+      map.dragPan.enable();
+      latest.current.onGestureEnd?.();
+    };
+
+    map.on('mousedown', 'node-point', (event) => {
+      const active = latest.current.tool;
+      if (active !== 'select' && active !== 'node') return;
+      const id = event.features?.[0]?.properties?.['nodeId'];
+      if (typeof id !== 'string') return;
+
+      event.preventDefault();
+      nodeDragRef.current = id;
+      latest.current.onSelectNode?.(id);
+      // One undo step for the whole drag, like every other gesture here.
+      latest.current.onGestureStart?.();
+      map.dragPan.disable();
+      map.on('mousemove', onNodeDragMove);
+      map.on('mouseup', onNodeDragEnd);
+    });
+
     const onDragMove = (event: MapMouseEvent) => {
       const drag = dragRef.current;
       if (!drag) return;
@@ -1193,11 +1322,22 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
 
   // ---- keyboard, while drawing or measuring
   useEffect(() => {
-    if (tool === 'select') return;
-
     function onKey(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
       if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+
+      // Escape and Delete work in every tool, because "put this down" and "get rid of
+      // this" are the two things you need most and should never have to hunt for.
+      if (tool === 'select' || tool === 'node') {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          latest.current.onClearSelection?.();
+        } else if (event.key === 'Delete' || event.key === 'Backspace') {
+          event.preventDefault();
+          latest.current.onDeleteSelection?.();
+        }
+        return;
+      }
 
       if (event.key === 'Escape') {
         event.preventDefault();
@@ -1271,6 +1411,14 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     trimAtJunctions,
     junctionMergeSlackMeters,
     mergeBelowDegrees,
+    nodes,
+    junctionMode,
+    selectedNodeId,
+    onSelectNode,
+    onPlaceNode,
+    onMoveNode,
+    onClearSelection,
+    onDeleteSelection,
     selectedJunctionKey,
     showAllCenterlines,
     layerVisibility,

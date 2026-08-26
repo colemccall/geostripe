@@ -1,6 +1,6 @@
 import * as polyclip from 'polyclip-ts';
 import type { Feature, FeatureCollection, MultiPolygon, Polygon } from 'geojson';
-import type { Area, Street } from '../model/types';
+import type { Area, JunctionNode, Street } from '../model/types';
 import { deriveProject } from '../geo/derived';
 import type { DerivedProject, JunctionOverride } from '../geo/derived';
 import type { JunctionGeometry } from '../geo/intersection';
@@ -31,6 +31,8 @@ export interface JunctionSummary {
   position: [number, number];
   legCount: number;
   kind: string;
+  /** Set when this junction is a node somebody placed. */
+  nodeId?: string;
   /** How it was read: an intersection, a merge, or two streets simply continuing. */
   form: DerivedProject['junctionForms'][number];
   /** Angle at which the joining road comes in, when there is one. Degrees. */
@@ -64,6 +66,8 @@ export interface DesignData {
   junctionFootprint: FeatureCollection;
   /** One point per junction, for selection. */
   junctionPoints: FeatureCollection;
+  /** Placed intersection nodes, drawn as their own handles. */
+  nodes: FeatureCollection;
   /** Crosswalk stripes, edge lines, raised tables and stop bars. */
   crossings: FeatureCollection;
   /** Stop lines across each leg of the selected junction. */
@@ -85,6 +89,9 @@ export interface BuildOptions {
   trimAtJunctions?: boolean;
   junctionMergeSlackMeters?: number;
   mergeBelowDegrees?: number;
+  nodes?: readonly JunctionNode[];
+  junctionMode?: 'auto' | 'nodes';
+  selectedNodeId?: string | null;
   selectedJunctionKey?: string | null;
   /**
    * Draw every centerline, not just the selected one.
@@ -112,6 +119,7 @@ export function buildDesignData(
   const junctionPaved = empty();
   const junctionFootprint = empty();
   const junctionPoints = empty();
+  const nodes = empty();
   const stopLines = empty();
   const crossings = empty();
 
@@ -173,6 +181,8 @@ export function buildDesignData(
     trimAtJunctions: options.trimAtJunctions,
     junctionMergeSlackMeters: options.junctionMergeSlackMeters,
     mergeBelowDegrees: options.mergeBelowDegrees,
+    nodes: options.nodes,
+    junctionMode: options.junctionMode,
   });
 
   for (const street of streets) {
@@ -227,6 +237,23 @@ export function buildDesignData(
         });
       });
     }
+  }
+
+  // Nodes are drawn from the document rather than from the derived junctions: a node
+  // parked on one street, or disabled, makes no junction at all and still has to be
+  // visible and selectable, or it would be impossible to get rid of.
+  for (const node of options.nodes ?? []) {
+    nodes.features.push({
+      type: 'Feature',
+      id: node.id,
+      properties: {
+        nodeId: node.id,
+        name: node.name ?? '',
+        disabled: node.disabled === true,
+        selected: node.id === options.selectedNodeId,
+      },
+      geometry: { type: 'Point', coordinates: node.position },
+    });
   }
 
   crossings.features.push(...derived.crossings);
@@ -286,6 +313,7 @@ export function buildDesignData(
       position: geometry.centre,
       legCount: geometry.legs.length,
       kind: junction.kind,
+      ...(junction.nodeId ? { nodeId: junction.nodeId } : {}),
       form: derived.junctionForms[index] ?? 'intersection',
       mergeAngleDegrees: mergeParts(junction)?.angleDegrees ?? null,
       corners: geometry.corners,
@@ -305,6 +333,7 @@ export function buildDesignData(
     junctionPaved,
     junctionFootprint,
     junctionPoints,
+    nodes,
     crossings,
     stopLines,
     warnings: derived.warnings,

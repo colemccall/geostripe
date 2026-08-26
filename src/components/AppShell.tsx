@@ -4,6 +4,7 @@ import { BASEMAPS, WAYBACK_VINTAGES, basemapById } from '../map/basemaps';
 import type { BasemapId } from '../map/basemaps';
 import { useEditorStore } from '../store/useEditorStore';
 import type { DisplayUnits } from '../lib/units';
+import { BUILD_ID, BUILT_AT } from '../lib/version';
 
 /**
  * Persistent chrome shared by both routes.
@@ -53,7 +54,11 @@ export default function AppShell() {
         <div className="brand">
           <span className="brand-mark" aria-hidden="true" />
           <b>GeoStripe</b>
-          <span className="brand-ver">v0.1</span>
+          {/* The build, not the version. Answers "am I looking at my changes?" without
+              guessing between a failed deploy, a stale cache and a build that never ran. */}
+          <span className="brand-ver" title={BUILT_AT ? `Built ${BUILT_AT} UTC` : undefined}>
+            v0.1 · {BUILD_ID}
+          </span>
         </div>
 
         <nav className="tabs" aria-label="Workspace">

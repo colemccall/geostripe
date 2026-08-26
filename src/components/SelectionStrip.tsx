@@ -20,13 +20,18 @@ import type { FitResult } from '../model/section';
 interface Props {
   units: DisplayUnits;
   name: string;
-  kind: 'street' | 'land' | 'junction';
+  kind: 'street' | 'land' | 'junction' | 'node';
   section?: CrossSection | null;
   fit?: FitResult | null;
   /** Kerb-to-kerb crossing on the worst leg, for a junction. */
   crossingMeters?: number | null;
   onRename?: (name: string) => void;
   onOpenPanel: () => void;
+  /** Put it down. The counterpart to selecting, and it has to be as easy. */
+  onClear: () => void;
+  onDelete?: () => void;
+  /** Extra buttons for whatever is selected — a node's "no junction here", say. */
+  extra?: React.ReactNode;
 }
 
 export default function SelectionStrip({
@@ -38,6 +43,9 @@ export default function SelectionStrip({
   crossingMeters,
   onRename,
   onOpenPanel,
+  onClear,
+  onDelete,
+  extra,
 }: Props) {
   return (
     <div className="selstrip">
@@ -97,8 +105,32 @@ export default function SelectionStrip({
         </span>
       )}
 
+      {extra}
+
       <button type="button" className="btn btn-ghost" onClick={onOpenPanel}>
         Edit
+      </button>
+
+      {onDelete && (
+        <button
+          type="button"
+          className="icon-btn is-danger"
+          title="Delete (Del)"
+          aria-label="Delete"
+          onClick={onDelete}
+        >
+          🗑
+        </button>
+      )}
+
+      <button
+        type="button"
+        className="icon-btn"
+        title="Deselect (Esc)"
+        aria-label="Deselect"
+        onClick={onClear}
+      >
+        ×
       </button>
     </div>
   );
