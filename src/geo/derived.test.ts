@@ -175,7 +175,9 @@ describe('memoisation', () => {
     const streets = crossing();
     const first = deriveProject(streets);
     const key = first.junctions[0]!.key;
-    const second = deriveProject(streets, { overrides: { [key]: { corners: [1, null, null, null] } } });
+    const second = deriveProject(streets, {
+      overrides: { [key]: { corners: [{ radiusMeters: 1 }, null, null, null] } },
+    });
 
     expect(second.junctionGeometry[0]!.corners[0]!.appliedRadiusMeters).toBeCloseTo(1, 6);
     expect(second.byStreet.get('ns')).not.toBe(first.byStreet.get('ns'));
@@ -212,5 +214,114 @@ describe('what the junction reports', () => {
     expect(PRIMITIVES.travelLane.isRoadway).toBe(true);
     expect(PRIMITIVES.median.isRoadway).toBe(true);
     expect(PRIMITIVES.sidewalk.isRoadway).toBe(false);
+  });
+});
+
+describe('corner treatments reaching the streets', () => {
+  const WIDE: readonly Spec[] = [
+    ['sidewalk', 'none', 3],
+    ['parkingLaneParallel', 'none', 2.4],
+    ['travelLane', 'backward', 3],
+    ['travelLane', 'forward', 3],
+    ['parkingLaneParallel', 'none', 2.4],
+    ['sidewalk', 'none', 3],
+  ];
+
+  function wideStreet(id: string, centerline: [number, number][]): Street {
+    return {
+      id,
+      name: id,
+      centerline,
+      visible: true,
+      section: {
+        id: `sec-${id}`,
+        name: id,
+        anchorOffsetMeters: null,
+        components: componentsFromSpecs(WIDE),
+      },
+    };
+  }
+
+  const wideCrossing = (): Street[] => [
+    wideStreet('ns', [at(0, -120), at(0, 120)]),
+    wideStreet('ew', [at(-120, 0), at(120, 0)]),
+  ];
+
+  function keyOf(streets: Street[]): string {
+    return deriveProject(streets).junctions[0]!.key;
+  }
+
+  it('recolours daylighted parking instead of cutting a hole in the road', () => {
+    // A hole here would show footway through the middle of the carriageway. Daylighting
+    // removes the parking, not the pavement, so the stretch stays roadway and only its
+    // material changes.
+    const streets = wideCrossing();
+    const key = keyOf(streets);
+
+    const plain = deriveProject(streets);
+    const lit = deriveProject(streets, {
+      overrides: { [key]: { corners: [{ daylightMeters: 6 }, null, null, null] } },
+    });
+
+    const areaBefore = [...plain.byStreet.values()].reduce((n, g) => n + areaOf(g.bands), 0);
+    const areaAfter = [...lit.byStreet.values()].reduce((n, g) => n + areaOf(g.bands), 0);
+    expect(areaAfter).toBeCloseTo(areaBefore, 0);
+
+    const daylighted = [...lit.byStreet.values()]
+      .flatMap((g) => g.bands)
+      .filter((b) => b.properties?.['daylighted'] === true);
+    expect(daylighted.length).toBeGreaterThan(0);
+    for (const band of daylighted) {
+      expect(band.properties?.['color']).toBe(PRIMITIVES.travelLane.color);
+      expect(band.properties?.['componentType']).toMatch(/^parking/);
+    }
+  });
+
+  it('takes the lane bands out from under a curb extension', () => {
+    // Roadway is cut against the un-bulbed box, so the reclaimed ground loses its bands
+    // and the footway ring underneath shows through as the extension.
+    const streets = wideCrossing();
+    const key = keyOf(streets);
+
+    const plain = deriveProject(streets);
+    const bulbed = deriveProject(streets, {
+      overrides: {
+        [key]: {
+          corners: Array.from({ length: 4 }, () => ({
+            treatment: 'bulbOut' as const,
+            bulbOutMeters: 2.4,
+          })),
+        },
+      },
+    });
+
+    const areaBefore = [...plain.byStreet.values()].reduce((n, g) => n + areaOf(g.bands), 0);
+    const areaAfter = [...bulbed.byStreet.values()].reduce((n, g) => n + areaOf(g.bands), 0);
+    expect(areaAfter).toBeLessThan(areaBefore);
+  });
+
+  it('emits crossing marks only for legs that asked for them', () => {
+    const streets = wideCrossing();
+    const key = keyOf(streets);
+
+    expect(deriveProject(streets).crossings).toHaveLength(0);
+
+    const marked = deriveProject(streets, {
+      overrides: {
+        [key]: {
+          legs: [
+            { crosswalk: { style: 'continental', widthMeters: 3, setbackMeters: 0 } },
+            null,
+            null,
+            null,
+          ],
+        },
+      },
+    });
+    expect(marked.crossings.length).toBeGreaterThan(0);
+    for (const mark of marked.crossings) {
+      expect(mark.properties?.['legIndex']).toBe(0);
+      expect(mark.properties?.['junctionKey']).toBe(key);
+    }
   });
 });

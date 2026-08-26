@@ -106,7 +106,8 @@ export default function MapEditor() {
     clearStreets,
     loadDemo,
     selectJunction,
-    setCornerRadius,
+    updateCorner,
+    updateLeg,
     resetJunction,
     setTrimAtJunctions,
     beginGesture,
@@ -708,10 +709,9 @@ export default function MapEditor() {
               junction={selectedJunction}
               units={units}
               streetNames={streetNames}
-              overriddenCorners={junctionOverrides[selectedJunction.key]?.corners}
-              onCornerRadius={(index, metres) =>
-                setCornerRadius(selectedJunction.key, index, metres)
-              }
+              override={junctionOverrides[selectedJunction.key]}
+              onCorner={(index, patch) => updateCorner(selectedJunction.key, index, patch)}
+              onLeg={(index, patch) => updateLeg(selectedJunction.key, index, patch)}
               onReset={() => resetJunction(selectedJunction.key)}
             />
           </>

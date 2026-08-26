@@ -137,14 +137,19 @@ describe('intersection settings', () => {
   const original = createDemoStreets();
   // Keyed the way the detector keys them: sorted street ids, then an ordinal.
   const key = `${[...original.map((s) => s.id)].sort().join('~')}#0`;
-  const overrides = { [key]: { corners: [3, null, 7.5, null] } };
+  const overrides = {
+    [key]: {
+      corners: [{ radiusMeters: 3 }, null, { radiusMeters: 7.5, treatment: 'bulbOut' as const }, null],
+      legs: [{ stopBar: true }, null, null, null],
+    },
+  };
 
   it('round-trips a customised corner radius', () => {
     const text = serializeProject(original, META, overrides);
     const result = parseProject(text, DEFAULTS);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.junctionOverrides[key]).toEqual({ corners: [3, null, 7.5, null] });
+    expect(result.junctionOverrides[key]).toEqual(overrides[key]);
   });
 
   it('writes nothing when no corner has been touched', () => {
@@ -156,7 +161,7 @@ describe('intersection settings', () => {
 
   it('drops settings whose streets are not in the file', () => {
     const text = serializeProject(original, META, {
-      'st-ghost~st-phantom#0': { corners: [2] },
+      'st-ghost~st-phantom#0': { corners: [{ radiusMeters: 2 }] },
     });
     const result = parseProject(text, DEFAULTS);
     expect(result.ok).toBe(true);

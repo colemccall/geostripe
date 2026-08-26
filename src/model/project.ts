@@ -60,8 +60,38 @@ const featureCollectionSchema = z.object({
         .record(
           z.string(),
           z.object({
-            corners: z.array(z.number().finite().min(0).max(60).nullable()).max(24).optional(),
-            stopOffsets: z.array(z.number().finite().min(0).max(300).nullable()).max(24).optional(),
+            corners: z
+              .array(
+                z
+                  .object({
+                    radiusMeters: z.number().finite().min(0).max(60).nullable().optional(),
+                    treatment: z.enum(['plain', 'bulbOut']).optional(),
+                    bulbOutMeters: z.number().finite().min(0).max(20).optional(),
+                    daylightMeters: z.number().finite().min(0).max(60).optional(),
+                  })
+                  .nullable(),
+              )
+              .max(24)
+              .optional(),
+            legs: z
+              .array(
+                z
+                  .object({
+                    crosswalk: z
+                      .object({
+                        style: z.enum(['transverse', 'continental', 'ladder', 'raised']),
+                        widthMeters: z.number().finite().min(0.5).max(20),
+                        setbackMeters: z.number().finite().min(0).max(30),
+                      })
+                      .nullable()
+                      .optional(),
+                    stopBar: z.boolean().optional(),
+                    stopOffsetMeters: z.number().finite().min(0).max(300).nullable().optional(),
+                  })
+                  .nullable(),
+              )
+              .max(24)
+              .optional(),
           }),
         )
         .optional(),

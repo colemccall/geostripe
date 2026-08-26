@@ -166,6 +166,7 @@ const DESIGN_SOURCES = [
   'junction-footprint',
   'junction-paved',
   'junction-points',
+  'crossings',
   'stop-lines',
   'bands',
   'markings',
@@ -267,6 +268,17 @@ function addDesignLayers(map: MapLibreMap) {
       'line-width': 1.2,
       'line-opacity': 0.8,
       'line-dasharray': [3, 2.5],
+    },
+  });
+
+  addLayerSafely(map, {
+    id: 'crossing-fill',
+    type: 'fill',
+    source: 'crossings',
+    paint: {
+      'fill-color': ['get', 'color'],
+      // A raised table is a surface, not paint, so it sits back a little.
+      'fill-opacity': ['case', ['==', ['get', 'kind'], 'table'], 0.7, 0.92],
     },
   });
 
@@ -607,6 +619,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
       setData(map, 'centerlines', data.centerlines);
       setData(map, 'junction-paved', data.junctionPaved);
       setData(map, 'junction-footprint', data.junctionFootprint);
+      setData(map, 'crossings', data.crossings);
     } else {
       // Screen x -> longitude. Exact while the map is north-up, which it always is here.
       const x = map.getContainer().clientWidth * sw;
@@ -616,6 +629,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
       setData(map, 'centerlines', clipLinesEastOf(data.centerlines, minLng));
       setData(map, 'junction-paved', clipEastOf(data.junctionPaved, minLng));
       setData(map, 'junction-footprint', clipEastOf(data.junctionFootprint, minLng));
+      setData(map, 'crossings', clipEastOf(data.crossings, minLng));
     }
 
     // Editing handles are never clipped: they are UI, not design, and a handle that

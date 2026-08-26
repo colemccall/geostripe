@@ -10,7 +10,7 @@ import type { BasemapId } from '../map/basemaps';
 import { DEFAULT_VINTAGE } from '../map/basemaps';
 import { createDemoStreets } from '../demo/washingtonPark';
 import { DEFAULT_CORNER_RADIUS_METRES } from '../geo/intersection';
-import type { JunctionOverride } from '../geo/derived';
+import type { CornerOverride, JunctionOverride, LegOverride } from '../geo/derived';
 
 /**
  * Editor state.
@@ -115,7 +115,10 @@ interface EditorState extends Snapshot {
   selectJunction: (key: string | null) => void;
   setDefaultCornerRadius: (metres: number) => void;
   setTrimAtJunctions: (value: boolean) => void;
-  setCornerRadius: (key: string, cornerIndex: number, metres: number | null) => void;
+  /** Merge a patch into one corner's settings. A field left out is left alone. */
+  updateCorner: (key: string, cornerIndex: number, patch: Partial<CornerOverride>) => void;
+  /** Merge a patch into one leg's settings. */
+  updateLeg: (key: string, legIndex: number, patch: Partial<LegOverride>) => void;
   resetJunction: (key: string) => void;
 
   // ---- selection actions
@@ -270,13 +273,23 @@ export const useEditorStore = create<EditorState>((set, get) => {
     setDefaultCornerRadius: (defaultCornerRadiusMeters) => set({ defaultCornerRadiusMeters }),
     setTrimAtJunctions: (trimAtJunctions) => set({ trimAtJunctions }),
 
-    setCornerRadius: (key, cornerIndex, metres) => {
+    updateCorner: (key, cornerIndex, patch) => {
       const existing = get().junctionOverrides[key];
       const corners = [...(existing?.corners ?? [])];
       while (corners.length <= cornerIndex) corners.push(null);
-      corners[cornerIndex] = metres;
+      corners[cornerIndex] = { ...(corners[cornerIndex] ?? {}), ...patch };
       commit({
         junctionOverrides: { ...get().junctionOverrides, [key]: { ...existing, corners } },
+      });
+    },
+
+    updateLeg: (key, legIndex, patch) => {
+      const existing = get().junctionOverrides[key];
+      const legs = [...(existing?.legs ?? [])];
+      while (legs.length <= legIndex) legs.push(null);
+      legs[legIndex] = { ...(legs[legIndex] ?? {}), ...patch };
+      commit({
+        junctionOverrides: { ...get().junctionOverrides, [key]: { ...existing, legs } },
       });
     },
 
