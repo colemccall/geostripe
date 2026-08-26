@@ -1696,3 +1696,303 @@ button {
   border-color: var(--accent-fill);
   color: var(--accent-ink);
 }
+
+/* ================================================================ on-map controls */
+
+/*
+ * The dock and the view controls float over the imagery rather than sitting beside it.
+ * A side rail costs a glance away from the thing being traced, once per action, and
+ * drawing one street is a hundred actions.
+ *
+ * They are siblings of the map canvas inside .map-wrap, which is already positioned, so
+ * pointer-events are the only thing to be careful about: the containers must not eat
+ * clicks meant for the map, only the buttons inside them.
+ */
+.dock,
+.viewctl {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.dock {
+  top: 12px;
+  left: 12px;
+}
+
+.viewctl {
+  right: 12px;
+  bottom: 34px;
+  align-items: flex-end;
+}
+
+.dock-group,
+.viewctl-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 3px;
+  border-radius: 9px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.28);
+  pointer-events: auto;
+}
+
+.dock-btn {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: 0.12s;
+  pointer-events: auto;
+}
+
+.dock-btn:hover:not(:disabled) {
+  background: var(--sunk);
+  color: var(--ink);
+}
+
+.dock-btn:disabled {
+  opacity: 0.32;
+  cursor: default;
+}
+
+.dock-btn[aria-pressed='true'] {
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
+  color: var(--accent-ink);
+}
+
+.dock-btn.is-danger:hover:not(:disabled) {
+  background: var(--warn-fill);
+  color: var(--accent-ink);
+}
+
+.dock-btn.is-warn {
+  color: var(--warn);
+}
+
+.dock-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+/* The shortcut sits in the corner of its own button: the dock is where they are learnt. */
+.dock-key {
+  position: absolute;
+  right: 3px;
+  bottom: 2px;
+  font-size: 8px;
+  opacity: 0.5;
+}
+
+.dock-rail {
+  align-self: flex-start;
+  border-radius: 9px;
+  background: var(--panel);
+  border-color: var(--line);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.28);
+}
+
+.viewctl-buttons {
+  flex-direction: column;
+}
+
+.viewctl-panel {
+  width: 226px;
+  max-height: 60vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 11px;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: 0 6px 22px rgb(0 0 0 / 0.34);
+  pointer-events: auto;
+}
+
+.layer-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.layer-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-dim);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: 0.12s;
+}
+
+.layer-row:hover {
+  border-color: var(--line-soft);
+}
+
+.layer-row.is-on {
+  color: var(--ink);
+}
+
+.layer-eye {
+  font-size: 11px;
+}
+
+/* Collapsing the rails hands the map the whole window. */
+.workspace-grid.is-collapsed {
+  grid-template-columns: 0 minmax(0, 1fr) 0;
+}
+
+.workspace-grid.is-collapsed > .rail {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .workspace-grid.is-collapsed > .rail {
+    display: block;
+  }
+
+  .dock,
+  .viewctl {
+    display: none;
+  }
+}
+
+/*
+ * The context bar floats at the top of the map, clear of the dock.
+ *
+ * It holds only what the ACTIVE TOOL needs — the section being drawn, the running length,
+ * Finish and Cancel. Tool selection itself lives in the dock; having it in both places
+ * would be two controls for one piece of state, which is how they end up disagreeing.
+ *
+ * It collapses to nothing when the select tool is active and there is nothing to say,
+ * rather than sitting there as an empty strip over the imagery.
+ */
+.toolbar.is-floating {
+  position: absolute;
+  z-index: 3;
+  top: 12px;
+  left: 66px;
+  right: 66px;
+  width: auto;
+  justify-content: center;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 4px 18px rgb(0 0 0 / 0.3);
+  pointer-events: auto;
+}
+
+.toolbar.is-floating:empty {
+  display: none;
+}
+
+.toolbar.is-floating .select {
+  max-width: 260px;
+}
+
+/* Warnings sit under the bar rather than behind it. */
+.map-overlay-tr {
+  top: 62px;
+}
+
+.map-overlay-tl {
+  top: 62px;
+  left: 66px;
+}
+
+/* The selection strip: bottom-centre, clear of the dock and the view controls. */
+.selstrip {
+  position: absolute;
+  z-index: 3;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(760px, calc(100% - 160px));
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 4px 18px rgb(0 0 0 / 0.32);
+  pointer-events: auto;
+}
+
+.selstrip-kind {
+  font-size: 9px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  padding: 3px 6px;
+  border-radius: 5px;
+  background: var(--sunk);
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+.selstrip-kind.is-street {
+  color: var(--accent);
+}
+
+.selstrip-name {
+  min-width: 90px;
+  max-width: 190px;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+
+.selstrip-name:hover,
+.selstrip-name:focus {
+  border-color: var(--line);
+  background: var(--sunk);
+  outline: none;
+}
+
+.selstrip-name.is-static {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selstrip-chips {
+  width: 120px;
+  flex: none;
+}
+
+.pill-ok {
+  border-color: var(--line);
+  color: var(--ink);
+}

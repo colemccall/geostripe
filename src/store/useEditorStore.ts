@@ -11,6 +11,8 @@ import { DEFAULT_VINTAGE } from '../map/basemaps';
 import { createDemoStreets } from '../demo/washingtonPark';
 import { DEFAULT_CORNER_RADIUS_METRES } from '../geo/intersection';
 import type { CornerOverride, JunctionOverride, LegOverride } from '../geo/derived';
+import { allLayersVisible } from '../map/layerGroups';
+import type { LayerGroupId } from '../map/layerGroups';
 import { DEFAULT_CURVE } from '../geo/curve';
 import { LANDCOVERS } from '../library/landcover';
 import type { LandcoverType } from '../library/landcover';
@@ -110,6 +112,17 @@ interface EditorState extends Snapshot {
   recentTemplateIds: string[];
   /** Show every street's centerline, not only the selected one. */
   showAllCenterlines: boolean;
+  /**
+   * What is drawn on the map, and how strongly the imagery shows through.
+   *
+   * View settings, outside the undo history like the rest of them: hiding the lanes to
+   * check the trace underneath is looking, not editing, and it should not sit between an
+   * edit and the undo that takes it back.
+   */
+  layerVisibility: Record<LayerGroupId, boolean>;
+  imageryOpacity: number;
+  /** The side rail. Collapsing it gives the map the whole window. */
+  railOpen: boolean;
 
   // ---- selection
   selectedStreetId: string | null;
@@ -143,6 +156,9 @@ interface EditorState extends Snapshot {
   setTrimAtJunctions: (value: boolean) => void;
   setJunctionMergeSlack: (metres: number) => void;
   setShowAllCenterlines: (value: boolean) => void;
+  setLayerVisible: (id: LayerGroupId, visible: boolean) => void;
+  setImageryOpacity: (value: number) => void;
+  setRailOpen: (open: boolean) => void;
   /** Merge a patch into one corner's settings. A field left out is left alone. */
   updateCorner: (key: string, cornerIndex: number, patch: Partial<CornerOverride>) => void;
   /** Merge a patch into one leg's settings. */
@@ -346,6 +362,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
     recentComponentTypes: [],
     recentTemplateIds: [],
     showAllCenterlines: false,
+    layerVisibility: allLayersVisible(),
+    imageryOpacity: 1,
+    railOpen: true,
 
     selectedStreetId: initialStreets[0]?.id ?? null,
     selectedAreaId: null,
@@ -375,6 +394,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
     setTrimAtJunctions: (trimAtJunctions) => set({ trimAtJunctions }),
     setJunctionMergeSlack: (junctionMergeSlackMeters) => set({ junctionMergeSlackMeters }),
     setShowAllCenterlines: (showAllCenterlines) => set({ showAllCenterlines }),
+    setLayerVisible: (id, visible) =>
+      set({ layerVisibility: { ...get().layerVisibility, [id]: visible } }),
+    setImageryOpacity: (imageryOpacity) => set({ imageryOpacity }),
+    setRailOpen: (railOpen) => set({ railOpen }),
 
     updateCorner: (key, cornerIndex, patch) => {
       const existing = get().junctionOverrides[key];

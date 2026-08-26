@@ -239,6 +239,13 @@ the width that is really there, and save it as GeoJSON you can reopen and keep e
   than a convenience here: junctions are derived from where centerlines actually meet, so a
   vertex that lands where it was aimed is the difference between a junction at the crossing
   and one at a near miss.
+- **Controls on the map, not beside it.** A vertical dock holds the tools, the actions for
+  whatever is selected, and undo/redo; a contextual bar appears at the top only while a
+  modal tool is running; a selection strip under the map shows what is selected and the fit
+  check it has to answer to; and view controls bottom-right carry zoom, framing, the
+  before/after swipe, and switches for every layer plus imagery opacity. The side rail
+  collapses entirely, so the map can have the window. Fading the imagery back is how you
+  check that the bands actually sit on the pavement, which is the claim the tool is making.
 - **A browsable library.** 96 primitives and 157 presets in a two-level tree — category,
   then group — with search that flattens the whole thing and covers each entry's purpose,
   not just its name. Recently used sits above the tree, because assembling one street uses
@@ -301,6 +308,7 @@ junction detection.
 | R | Merges — a road joining another, with a taper and a gore instead of a box | done |
 | S | Snapping — to vertices, to centerlines, and to 15° increments | done |
 | T | Library browser — a two-level tree, search, recents, per-band actions | done |
+| U | On-map controls — dock, context bar, selection strip, layer switches | done |
 | G | Protected (Dutch) intersection, incl. the corner refuge island | next |
 | H | Roundabout, as a junction form | planned |
 | P | Signal phasing — which movements run together, and the conflicts left over | planned |
@@ -336,6 +344,11 @@ Worth recording, because these are the calls that would be quietly re-litigated 
   special cases and produces the nose for free.
 - **A vertex beats an edge** (S), even when the edge is marginally nearer. An existing
   control point is a decision somebody made; a point on a segment is not.
+- **The map is the workspace** (U). Every control that acts on what is under the cursor
+  lives over the imagery, because a side rail costs a glance away from the thing being
+  traced once per action, and drawing one street is a hundred actions. Tool selection lives
+  in the dock and nowhere else — two controls for one piece of state is how they end up
+  disagreeing.
 - **The centerline hides itself** (T). It is an editing handle, not part of the design —
   the one line on the map that does not exist on the ground — so it appears only for the
   street you have selected, with a toggle for when you want them all.
