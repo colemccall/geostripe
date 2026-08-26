@@ -272,11 +272,21 @@ the width that is really there, and save it as GeoJSON you can reopen and keep e
   inside the neighbour suppressed. One slider moves the threshold in both directions.
 - **Grade separation** — `level` marks a street as a tunnel or an overpass, and streets at
   different levels do not form junctions.
-- **766 unit tests** across geometry, curves, junction detection, intersection geometry,
-  complex and staggered junctions, merges, snapping, road markings, the memoisation that
-  keeps dragging affordable, cross-section arithmetic, the dimensional audit, the asset
-  catalogue, the project round-trip, and store history.
+- **801 unit tests** across geometry, curves, junction detection, intersection geometry,
+  complex and staggered junctions, merges, snapping, joining, road markings, the
+  memoisation that keeps dragging affordable, cross-section arithmetic, the dimensional
+  audit, the asset catalogue, the project round-trip, and store history.
 
+- **Joining** — a line drawn over imagery never stops exactly where it was aimed, and the
+  three ways it misses all read as "the intersections are a mess": an overshoot of one
+  metre turns a T into a four-way with a phantom leg; an undershoot leaves a strip of bare
+  imagery between the two; and past the detector's tolerance nothing is found at all.
+  Finishing a street welds its ends onto whatever they were drawn to meet — trimming a
+  tail that never escapes the junction box, extending along the street's own heading, or
+  closing an L between two dead ends. The weld moves the centerline rather than loosening
+  the detector, so what is stored stays what is drawn stays what is measured, and it undoes
+  like any other edit. Ends that still do not meet are ringed in orange with a Join button
+  beside them.
 - **Intersections** — detected automatically wherever centerlines cross, with no node to
   place or maintain. Each junction carries its legs sorted by bearing and a corner between
   each adjacent pair.
@@ -326,6 +336,8 @@ junction detection.
 | U | On-map controls — dock, context bar, selection strip, layer switches | done |
 | V | Placed intersections — nodes you own, drag, disable, delete | done |
 | W | Straight/arc segments while drawing, and a stale-build notice | done |
+| X | Joining — welding loose ends onto the streets they were drawn to meet | done |
+| Y | Every shortcut has a button, and a reference sheet that says which | done |
 | G | Protected (Dutch) intersection, incl. the corner refuge island | next |
 | H | Roundabout, as a junction form | planned |
 | P | Signal phasing — which movements run together, and the conflicts left over | planned |

@@ -5,6 +5,7 @@ import { TEMPLATES, instantiateTemplate } from '../library/templates';
 import type { Area, CrossSection, JunctionNode, SectionComponent, Street } from '../model/types';
 import { newId } from '../model/types';
 import { autoAnchorOffset, geometricCentreOffset } from '../model/section';
+import { applyConnections, planConnections } from '../geo/connect';
 import { detectJunctions } from '../geo/junctions';
 import type { DisplayUnits } from '../lib/units';
 import type { BasemapId } from '../map/basemaps';
@@ -93,6 +94,24 @@ interface EditorState extends Snapshot {
    * junction unless you put one there.
    */
   junctionMode: 'auto' | 'nodes';
+  /**
+   * Whether finishing a street welds its ends onto whatever they were drawn to meet.
+   *
+   * On by default, because the failure it prevents is silent: a metre of overshoot reads
+   * as a clean T on screen and builds a four-way junction underneath. Off is for tracing a
+   * network that genuinely has unconnected ends, where the weld would be an edit nobody
+   * asked for.
+   */
+  autoConnect: boolean;
+  /**
+   * What a click on a control point does.
+   *
+   * These were Alt-click and Shift-click and nothing else, which made two of the three
+   * things you can do to a vertex reachable only by holding a key nobody had been told
+   * about. A mode makes them buttons. Move stays the default, so dragging still works the
+   * way it always did, and the modifiers still work as accelerators on top.
+   */
+  pointAction: 'move' | 'sharp' | 'remove';
   /**
    * How the next point placed joins the last one, while drawing.
    *
@@ -211,6 +230,18 @@ interface EditorState extends Snapshot {
    */
   materialiseNodes: () => number;
   setJunctionMode: (mode: 'auto' | 'nodes') => void;
+  setAutoConnect: (on: boolean) => void;
+  setPointAction: (action: 'move' | 'sharp' | 'remove') => void;
+  /**
+   * Weld loose ends onto the streets they were drawn to meet.
+   *
+   * `streetIds` restricts what may MOVE, never what may be met — "connect this street"
+   * must not quietly rearrange the rest of the project inside the same undo step. Absent
+   * means every street is fair game, which is the "tidy up the whole thing" button.
+   *
+   * Returns how many ends moved, so the caller can say so rather than guess.
+   */
+  connectEnds: (streetIds?: readonly string[]) => number;
   setSegmentMode: (mode: 'straight' | 'curved') => void;
   setDrawRadius: (metres: number) => void;
   /** Drop every selection. What Escape does, and what clicking bare ground does. */
@@ -409,6 +440,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
     nodes: [],
     selectedNodeId: null,
     junctionMode: 'auto',
+    autoConnect: true,
+    pointAction: 'move',
     segmentMode: 'straight',
     drawRadiusMeters: DEFAULT_CURVE.radiusMeters,
 
@@ -548,6 +581,18 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     setJunctionMode: (junctionMode) => set({ junctionMode }),
+    setAutoConnect: (autoConnect) => set({ autoConnect }),
+    setPointAction: (pointAction) => set({ pointAction }),
+
+    connectEnds: (streetIds) => {
+      const streets = get().streets;
+      const plan = planConnections(streets, {
+        ...(streetIds ? { moveOnly: new Set(streetIds) } : {}),
+      });
+      if (plan.length === 0) return 0;
+      commit({ streets: applyConnections(streets, plan) });
+      return plan.length;
+    },
     setSegmentMode: (segmentMode) => set({ segmentMode }),
     setDrawRadius: (drawRadiusMeters) => set({ drawRadiusMeters }),
 
@@ -786,7 +831,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
         ...(curve && curve.mode !== 'straight' ? { curve } : {}),
       };
 
-      commit({ streets: [...streets, street] });
+      // The weld happens inside the same commit as the street itself, so one Ctrl+Z takes
+      // back "I drew this" rather than leaving a half-connected street behind.
+      const added = [...streets, street];
+      const welded = get().autoConnect
+        ? applyConnections(added, planConnections(added, { moveOnly: new Set([street.id]) }))
+        : added;
+
+      commit({ streets: welded });
       // Drop straight back to select so the new street can be adjusted immediately —
       // staying in draw mode makes the next stray click start another street.
       set({ selectedStreetId: street.id, selectedComponentId: null, tool: 'select' });

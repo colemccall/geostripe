@@ -128,6 +128,21 @@ interface Props {
   mergeBelowDegrees?: number;
   nodes?: readonly JunctionNode[];
   junctionMode?: 'auto' | 'nodes';
+  /**
+   * Where street ends fail to meet what they were drawn to meet.
+   *
+   * Passed in rather than computed here: the same plan drives the Join button's count, and
+   * two independent calculations of "what is loose" would eventually disagree.
+   */
+  looseEnds?: readonly LngLat[];
+  /**
+   * What a plain click on a control point means.
+   *
+   * The modifiers below still work regardless, because holding Alt to delete one point is
+   * faster than switching modes and back. This exists so that not knowing about the
+   * modifiers costs you nothing.
+   */
+  pointAction?: 'move' | 'sharp' | 'remove';
   selectedNodeId?: string | null;
   onSelectNode?: (id: string | null) => void;
   onPlaceNode?: (position: LngLat) => void;
@@ -244,6 +259,7 @@ const DESIGN_SOURCES = [
   'measure',
   'measure-points',
   'nodes',
+  'loose-ends',
   'snap',
 ] as const;
 
@@ -508,6 +524,23 @@ function addDesignLayers(map: MapLibreMap) {
     },
   });
 
+  // Ends that do not meet what they were drawn to meet.
+  //
+  // A hollow warning ring rather than a filled dot, because this marks an ABSENCE — there
+  // is nothing here, which is the problem. Filled would read as another handle to grab.
+  addLayerSafely(map, {
+    id: 'loose-end',
+    type: 'circle',
+    source: 'loose-ends',
+    paint: {
+      'circle-radius': 8,
+      'circle-color': 'rgba(0,0,0,0)',
+      'circle-stroke-width': 2.4,
+      'circle-stroke-color': '#FF9E6D',
+      'circle-stroke-opacity': 0.9,
+    },
+  });
+
   addLayerSafely(map, {
     id: 'measure-vertex',
     type: 'circle',
@@ -593,6 +626,8 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     imageryOpacity,
     onDraftChange,
     onDrawComplete,
+    looseEnds,
+    pointAction,
     segmentMode,
     drawRadiusMeters,
     onGestureStart,
@@ -645,6 +680,8 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     imageryOpacity,
     onDraftChange,
     onDrawComplete,
+    looseEnds,
+    pointAction,
     segmentMode,
     drawRadiusMeters,
     onGestureStart,
@@ -939,6 +976,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     setData(map, 'midpoints', data.midpoints);
     setData(map, 'junction-points', data.junctionPoints);
     setData(map, 'nodes', data.nodes);
+    setData(map, 'loose-ends', pointsFC(latest.current.looseEnds ?? []));
     setData(map, 'stop-lines', data.stopLines);
 
     // queryRenderedFeatures only reports once tiles are built, so sample shortly after —
@@ -1323,13 +1361,21 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
 
       event.preventDefault();
 
-      // Alt-click removes, shift-click pins the corner. Both held rather than separate
-      // modes, because each is a one-off correction, not somewhere you stay.
-      if (event.originalEvent.altKey) {
+      // The mode says what a plain click does; the modifiers override it for a one-off.
+      // Both routes exist because each suits a different moment: the mode for cleaning up
+      // a line point by point, the modifier for the single stray vertex you noticed while
+      // doing something else.
+      const action = event.originalEvent.altKey
+        ? 'remove'
+        : event.originalEvent.shiftKey
+          ? 'sharp'
+          : (latest.current.pointAction ?? 'move');
+
+      if (action === 'remove') {
         latest.current.onVertexDelete?.(kind, streetId, index);
         return;
       }
-      if (event.originalEvent.shiftKey) {
+      if (action === 'sharp') {
         latest.current.onVertexSharp?.(kind, streetId, index);
         return;
       }
@@ -1485,6 +1531,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     showAllCenterlines,
     layerVisibility,
     imageryOpacity,
+    looseEnds,
   ]);
 
   // ---- scale bar unit follows the app

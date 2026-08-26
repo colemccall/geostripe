@@ -30,6 +30,8 @@ import LandcoverPalette from '../components/LandcoverPalette';
 import TemplatePicker from '../components/TemplatePicker';
 import JunctionInspector from '../components/JunctionInspector';
 import MapDock from '../components/MapDock';
+import { planConnections } from '../geo/connect';
+import ShortcutSheet from '../components/ShortcutSheet';
 import MapViewControls from '../components/MapViewControls';
 import SelectionStrip from '../components/SelectionStrip';
 import NoticeBar from '../components/NoticeBar';
@@ -128,6 +130,8 @@ export default function MapEditor() {
   const nodes = useEditorStore((s) => s.nodes);
   const selectedNodeId = useEditorStore((s) => s.selectedNodeId);
   const junctionMode = useEditorStore((s) => s.junctionMode);
+  const autoConnect = useEditorStore((s) => s.autoConnect);
+  const pointAction = useEditorStore((s) => s.pointAction);
   const segmentMode = useEditorStore((s) => s.segmentMode);
   const drawRadiusMeters = useEditorStore((s) => s.drawRadiusMeters);
   // Subscribed rather than read once: the dock's undo button has to grey out the moment
@@ -188,6 +192,9 @@ export default function MapEditor() {
     moveNodeLive,
     materialiseNodes,
     setJunctionMode,
+    setAutoConnect,
+    setPointAction,
+    connectEnds,
     setSegmentMode,
     setDrawRadius,
     clearSelection,
@@ -230,6 +237,7 @@ export default function MapEditor() {
     sourceLoaded: string;
     layerCount: number;
   } | null>(null);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const mapWrapRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapHandle | null>(null);
 
@@ -268,6 +276,19 @@ export default function MapEditor() {
         separationMeters: pair.separationMeters,
       }));
   }, [offsetPairs, selectedJunctionKey]);
+
+  /**
+   * Ends that do not meet what they were drawn to meet.
+   *
+   * Computed rather than stored, and computed by the same function the Connect button
+   * runs, so the count on the button and the rings on the map can never disagree with what
+   * pressing it actually does.
+   */
+  const loosePlan = useMemo(() => planConnections(streets), [streets]);
+  const looseEndPoints = useMemo(
+    () => loosePlan.map((c) => c.point),
+    [loosePlan],
+  );
 
   /** The section a newly drawn street gets — also the fallback for a bare line import. */
   const drawingSection = useMemo(() => {
@@ -387,6 +408,34 @@ export default function MapEditor() {
       details: result.warnings,
     });
   }
+
+  /**
+   * Weld loose ends, and say what happened.
+   *
+   * Reports rather than acting silently: this MOVES geometry the user drew, so it has to
+   * be visible that it did, and undoable if it guessed wrong.
+   */
+  const handleConnect = (streetIds?: readonly string[]) => {
+    const moved = connectEnds(streetIds);
+    if (moved === 0) {
+      setNotice({
+        kind: 'success',
+        title: streetIds ? 'That street already meets its neighbours' : 'Every end already meets',
+        details: [],
+      });
+      return;
+    }
+    setNotice({
+      kind: 'success',
+      title: `Joined ${moved} loose end${moved === 1 ? '' : 's'}`,
+      // Filtered to what was actually asked for: "join this street" naming three others
+      // would read as though it had gone off and edited them too.
+      details: loosePlan
+        .filter((c) => !streetIds || streetIds.includes(c.streetId))
+        .slice(0, 6)
+        .map((c) => `${streetNames[c.streetId] ?? c.streetId} — ${c.label}`),
+    });
+  };
 
   /** One place for "get rid of what is selected", shared by the key, the dock and the strip. */
   const deleteSelection = () => {
@@ -754,6 +803,35 @@ export default function MapEditor() {
             </label>
           )}
 
+          {/* Loose ends first, above the junctions that DID form. An end that does not
+              meet anything is the reason a junction is missing from the list below, so
+              reading the list without it is reading half the story. */}
+          {loosePlan.length > 0 && (
+            <div className="loose-note">
+              <p>
+                <b>
+                  {loosePlan.length} street end{loosePlan.length === 1 ? '' : 's'}
+                </b>{' '}
+                {loosePlan.length === 1 ? 'does' : 'do'} not quite meet what{' '}
+                {loosePlan.length === 1 ? 'it was' : 'they were'} drawn to meet — marked in
+                orange on the map. Until they do, an overshoot reads as an extra leg and a
+                gap reads as no junction at all.
+              </p>
+              <div className="btn-row">
+                <button type="button" className="btn btn-solid" onClick={() => handleConnect()}>
+                  Join {loosePlan.length === 1 ? 'it' : 'them all'}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => mapRef.current?.zoomTo(looseEndPoints)}
+                >
+                  Show me
+                </button>
+              </div>
+            </div>
+          )}
+
           {junctions.length === 0 && nodes.length === 0 ? (
             <p className="empty-note">
               None yet. Draw two streets that cross, or use the <b>Intersection</b> tool to
@@ -840,10 +918,13 @@ export default function MapEditor() {
       <main className="stage">
         <NoticeBar notice={notice} onDismiss={() => setNotice(null)} />
 
+        {shortcutsOpen && <ShortcutSheet onClose={() => setShortcutsOpen(false)} />}
+
         <div className="map-wrap" ref={mapWrapRef}>
           {/* Rendered only when the active tool has something to say — an empty strip
-              sitting over the imagery is worse than no strip. */}
-          {tool !== 'select' && (
+              sitting over the imagery is worse than no strip. In select mode that means
+              once something is selected, where the point controls become relevant. */}
+          {(tool !== 'select' || street || area) && (
           <div className="toolbar is-floating">
             {tool === 'draw' && (
               <>
@@ -928,6 +1009,28 @@ export default function MapEditor() {
                 >
                   Undo point
                 </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={draft.points === 0}
+                  title="Throw the line away and start again (Esc)"
+                  onClick={() => mapRef.current?.cancelDraw()}
+                >
+                  Cancel
+                </button>
+                <label className="control control-inline">
+                  <input
+                    type="checkbox"
+                    checked={autoConnect}
+                    onChange={(e) => setAutoConnect(e.target.checked)}
+                  />
+                  <span
+                    className="label"
+                    title="When a line finishes near a street it was aiming at, its end is moved onto that street so the two really meet"
+                  >
+                    Join ends
+                  </span>
+                </label>
               </>
             )}
 
@@ -958,6 +1061,59 @@ export default function MapEditor() {
                 >
                   Undo point
                 </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={draft.points === 0}
+                  title="Throw the shape away and start again (Esc)"
+                  onClick={() => mapRef.current?.cancelDraw()}
+                >
+                  Cancel
+                </button>
+              </>
+            )}
+
+            {tool === 'select' && (street || area) && (
+              <>
+                <div className="segmented" role="group" aria-label="What a click on a point does">
+                  {(
+                    [
+                      ['move', 'Move', 'Drag a point to reshape the line'],
+                      ['sharp', 'Pin corner', 'Click a point to keep it a hard corner through a curve'],
+                      ['remove', 'Remove', 'Click a point to take it out of the line'],
+                    ] as const
+                  ).map(([mode, label, hint]) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      aria-pressed={pointAction === mode}
+                      title={hint}
+                      onClick={() => setPointAction(mode)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                {street && (
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    title="Move this street's loose ends onto the streets they were drawn to meet"
+                    disabled={!loosePlan.some((c) => c.streetId === street.id)}
+                    onClick={() => handleConnect([street.id])}
+                  >
+                    Join its ends
+                  </button>
+                )}
+
+                <span className="pill pill-note">
+                  {pointAction === 'move'
+                    ? 'drag a point · Alt-click removes · Shift-click pins'
+                    : pointAction === 'sharp'
+                      ? 'click a point to pin it as a corner'
+                      : 'click a point to remove it'}
+                </span>
               </>
             )}
 
@@ -1026,6 +1182,20 @@ export default function MapEditor() {
                 },
               },
               {
+                id: 'connect',
+                label:
+                  loosePlan.length > 0
+                    ? `Join ${loosePlan.length} loose end${loosePlan.length === 1 ? '' : 's'}`
+                    : 'Everything is joined',
+                icon: '⚯',
+                hint:
+                  loosePlan.length > 0
+                    ? 'Move ends onto the streets they were drawn to meet. Ctrl+Z undoes it.'
+                    : 'No street ends are left hanging',
+                disabled: loosePlan.length === 0,
+                onClick: () => handleConnect(),
+              },
+              {
                 id: 'duplicate',
                 label: 'Duplicate',
                 icon: '⧉',
@@ -1066,6 +1236,13 @@ export default function MapEditor() {
               },
             ]}
             history={[
+              {
+                id: 'shortcuts',
+                label: 'Keyboard shortcuts',
+                icon: '?',
+                hint: 'Every shortcut, and the button that does the same thing',
+                onClick: () => setShortcutsOpen(true),
+              },
               {
                 id: 'undo',
                 label: 'Undo',
@@ -1134,6 +1311,8 @@ export default function MapEditor() {
             onDraftChange={(points, metres) => setDraft({ points: points.length, metres })}
             segmentMode={segmentMode}
             drawRadiusMeters={drawRadiusMeters}
+            looseEnds={looseEndPoints}
+            pointAction={pointAction}
             onDrawComplete={(points, sharpVertices) =>
               addStreet(points, {
                 // Every point pinned means the line is straight throughout, and saying so

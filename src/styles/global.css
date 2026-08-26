@@ -2025,3 +2025,130 @@ button {
 .update-notice:hover {
   filter: brightness(1.08);
 }
+
+/* ============================================================================
+   Keyboard reference sheet.
+
+   Modal because it is a lookup you leave immediately, not a panel you work
+   beside — and a scrim makes "click anywhere to go back" true without needing a
+   second instruction.
+   ============================================================================ */
+
+.sheet-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(8 12 14 / 0.55);
+}
+
+.sheet {
+  width: min(640px, 100%);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 18px 48px rgb(0 0 0 / 0.4);
+}
+
+.sheet-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.sheet-head h2 {
+  margin: 0 0 2px;
+  font-size: 15px;
+  letter-spacing: 0.01em;
+}
+
+.sheet-head .hint {
+  margin: 0;
+}
+
+.sheet-body {
+  overflow-y: auto;
+  padding: 4px 18px 18px;
+}
+
+.sheet-group {
+  margin-top: 16px;
+}
+
+.sheet-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 6px;
+}
+
+.sheet-table td {
+  padding: 5px 0;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  border-top: 1px solid var(--line-soft);
+  vertical-align: baseline;
+}
+
+.sheet-table tr:first-child td {
+  border-top: 0;
+}
+
+/* Fixed first column so every key lines up down the sheet and can be scanned. */
+.sheet-table td:first-child {
+  width: 150px;
+  padding-right: 12px;
+}
+
+.sheet-where {
+  text-align: right;
+  color: var(--ink-dim);
+  font-size: 11.5px;
+}
+
+.sheet kbd {
+  display: inline-block;
+  padding: 2px 6px;
+  font: 500 11px/1.3 var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  color: var(--ink);
+  background: var(--sunk);
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  white-space: nowrap;
+}
+
+/* A checkbox and its label on one line, for toggles that live in the tool bars. */
+.control-inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+.control-inline .label {
+  cursor: pointer;
+}
+
+/* A problem plus its fix, in the panel where the missing junctions would have been. */
+.loose-note {
+  margin-bottom: 10px;
+  padding: 10px 11px;
+  border: 1px solid var(--warn-fill);
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warn-fill) 12%, transparent);
+}
+
+.loose-note p {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink-2);
+}

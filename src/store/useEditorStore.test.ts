@@ -283,3 +283,129 @@ describe('placed intersections', () => {
     expect(useEditorStore.getState().nodes).toHaveLength(before + first);
   });
 });
+
+/**
+ * Welding loose ends, from the store's side.
+ *
+ * The geometry itself is covered in `geo/connect.test.ts`. What can only be tested here is
+ * the part that is about editing rather than about shapes: that the weld and the street it
+ * belongs to land in ONE undo step, and that turning the feature off really leaves the
+ * line where it was drawn.
+ */
+describe('joining ends as streets are drawn', () => {
+  const M_PER_LAT = 111132;
+  const M_PER_LNG = 111412 * Math.cos((39.11 * Math.PI) / 180);
+  const at = (east: number, north: number): [number, number] => [
+    -84.52 + east / M_PER_LNG,
+    39.11 + north / M_PER_LAT,
+  ];
+
+  /** One east–west street to join, and nothing else to confuse the plan. */
+  function blankWithMain() {
+    useEditorStore.setState({
+      streets: [],
+      areas: [],
+      nodes: [],
+      junctionOverrides: {},
+      past: [],
+      future: [],
+      autoConnect: true,
+      drawSectionId: TEMPLATES[1]!.id,
+    });
+    return useEditorStore.getState().addStreet([at(-100, 0), at(100, 0)]);
+  }
+
+  const endOf = (id: string) => {
+    const street = useEditorStore.getState().streets.find((s) => s.id === id)!;
+    return street.centerline[street.centerline.length - 1]!;
+  };
+
+  it('moves a new street onto the one it stopped short of', () => {
+    blankWithMain();
+    const side = useEditorStore.getState().addStreet([at(0, -80), at(0, -6)]);
+    // Welded to the main road's centerline at y = 0, not left where the click landed.
+    expect(endOf(side)[1]).toBeCloseTo(at(0, 0)[1], 9);
+  });
+
+  it('does that in one undo step, not two', () => {
+    const before = blankWithMain();
+    const past = useEditorStore.getState().past.length;
+    useEditorStore.getState().addStreet([at(0, -80), at(0, -6)]);
+    expect(useEditorStore.getState().past.length).toBe(past + 1);
+
+    // And one undo really takes the whole thing back.
+    useEditorStore.getState().undo();
+    expect(useEditorStore.getState().streets.map((s) => s.id)).toEqual([before]);
+  });
+
+  it('leaves the line exactly where it was drawn when the toggle is off', () => {
+    blankWithMain();
+    useEditorStore.getState().setAutoConnect(false);
+    const side = useEditorStore.getState().addStreet([at(0, -80), at(0, -6)]);
+    expect(endOf(side)[1]).toBeCloseTo(at(0, -6)[1], 9);
+  });
+
+  it('never moves the street that was already there', () => {
+    // Only the new street may move. Welding the through street to the spur would drag a
+    // hundred metres of design sideways to close a six-metre gap.
+    const main = blankWithMain();
+    const mainBefore = useEditorStore.getState().streets.find((s) => s.id === main)!.centerline;
+    useEditorStore.getState().addStreet([at(0, -80), at(0, -6)]);
+    expect(useEditorStore.getState().streets.find((s) => s.id === main)!.centerline).toEqual(
+      mainBefore,
+    );
+  });
+});
+
+describe('joining ends on demand', () => {
+  const M_PER_LAT = 111132;
+  const M_PER_LNG = 111412 * Math.cos((39.11 * Math.PI) / 180);
+  const at = (east: number, north: number): [number, number] => [
+    -84.52 + east / M_PER_LNG,
+    39.11 + north / M_PER_LAT,
+  ];
+
+  function messy() {
+    useEditorStore.setState({
+      streets: [],
+      areas: [],
+      nodes: [],
+      junctionOverrides: {},
+      past: [],
+      future: [],
+      autoConnect: false,
+      drawSectionId: TEMPLATES[1]!.id,
+    });
+    const store = useEditorStore.getState();
+    store.addStreet([at(-100, 0), at(100, 0)]);
+    store.addStreet([at(-40, -80), at(-40, -6)]);
+    store.addStreet([at(40, -80), at(40, 2)]);
+  }
+
+  it('reports how many ends it moved', () => {
+    messy();
+    expect(useEditorStore.getState().connectEnds()).toBe(2);
+  });
+
+  it('is a no-op on a project that is already sound, and adds no history', () => {
+    messy();
+    useEditorStore.getState().connectEnds();
+    const past = useEditorStore.getState().past.length;
+    expect(useEditorStore.getState().connectEnds()).toBe(0);
+    expect(useEditorStore.getState().past.length).toBe(past);
+  });
+
+  it('moves only the street it was given', () => {
+    messy();
+    const ids = useEditorStore.getState().streets.map((s) => s.id);
+    expect(useEditorStore.getState().connectEnds([ids[1]!])).toBe(1);
+  });
+
+  it('undoes as a single step', () => {
+    messy();
+    const before = useEditorStore.getState().streets;
+    useEditorStore.getState().connectEnds();
+    useEditorStore.getState().undo();
+    expect(useEditorStore.getState().streets).toEqual(before);
+  });
+});
