@@ -9,6 +9,8 @@ import type { DisplayUnits } from '../lib/units';
 import type { BasemapId } from '../map/basemaps';
 import { DEFAULT_VINTAGE } from '../map/basemaps';
 import { createDemoStreets } from '../demo/washingtonPark';
+import { DEFAULT_CORNER_RADIUS_METRES } from '../geo/intersection';
+import type { JunctionOverride } from '../geo/derived';
 
 /**
  * Editor state.
@@ -54,6 +56,15 @@ export interface Notice {
 interface Snapshot {
   streets: Street[];
   draftSection: CrossSection;
+  /**
+   * Per-junction customisation, keyed by the junction's stable key.
+   *
+   * Junctions themselves are derived — detected wherever centerlines cross — so there is
+   * nothing to keep in sync when a street moves. Only the overrides are stored, and only
+   * for junctions somebody has actually touched, which is why this is a sparse map rather
+   * than a list of junction records.
+   */
+  junctionOverrides: Record<string, JunctionOverride>;
 }
 
 interface EditorState extends Snapshot {
@@ -69,6 +80,11 @@ interface EditorState extends Snapshot {
   // ---- tools
   tool: Tool;
   drawSectionId: string;
+
+  // ---- junctions
+  selectedJunctionKey: string | null;
+  defaultCornerRadiusMeters: number;
+  trimAtJunctions: boolean;
 
   // ---- selection
   selectedStreetId: string | null;
@@ -94,6 +110,13 @@ interface EditorState extends Snapshot {
   // ---- tool actions
   setTool: (tool: Tool) => void;
   setDrawSectionId: (id: string) => void;
+
+  // ---- junction actions
+  selectJunction: (key: string | null) => void;
+  setDefaultCornerRadius: (metres: number) => void;
+  setTrimAtJunctions: (value: boolean) => void;
+  setCornerRadius: (key: string, cornerIndex: number, metres: number | null) => void;
+  resetJunction: (key: string) => void;
 
   // ---- selection actions
   selectStreet: (id: string | null) => void;
@@ -122,7 +145,7 @@ interface EditorState extends Snapshot {
   renameStreet: (streetId: string, name: string) => void;
   toggleStreetVisible: (streetId: string) => void;
   duplicateStreet: (streetId: string) => void;
-  loadStreets: (streets: Street[]) => void;
+  loadStreets: (streets: Street[], junctionOverrides?: Record<string, JunctionOverride>) => void;
 
   // ---- centerline vertex editing
   removeVertex: (streetId: string, index: number) => void;
@@ -165,8 +188,8 @@ export function cloneSection(section: CrossSection, name?: string): CrossSection
 
 export const useEditorStore = create<EditorState>((set, get) => {
   const snapshot = (): Snapshot => {
-    const { streets, draftSection } = get();
-    return { streets, draftSection };
+    const { streets, draftSection, junctionOverrides } = get();
+    return { streets, draftSection, junctionOverrides };
   };
 
   /** Captured at gesture start; null when no gesture is in flight. */
@@ -213,9 +236,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
     streets: initialStreets,
     draftSection: instantiateTemplate(TEMPLATES[1]!),
+    junctionOverrides: {},
 
     tool: 'select',
     drawSectionId: TEMPLATES[1]!.id,
+
+    selectedJunctionKey: null,
+    defaultCornerRadiusMeters: DEFAULT_CORNER_RADIUS_METRES,
+    trimAtJunctions: true,
 
     selectedStreetId: initialStreets[0]?.id ?? null,
     selectedComponentId: null,
@@ -238,7 +266,28 @@ export const useEditorStore = create<EditorState>((set, get) => {
     setTool: (tool) => set({ tool }),
     setDrawSectionId: (drawSectionId) => set({ drawSectionId }),
 
-    selectStreet: (selectedStreetId) => set({ selectedStreetId, selectedComponentId: null }),
+    selectJunction: (selectedJunctionKey) => set({ selectedJunctionKey }),
+    setDefaultCornerRadius: (defaultCornerRadiusMeters) => set({ defaultCornerRadiusMeters }),
+    setTrimAtJunctions: (trimAtJunctions) => set({ trimAtJunctions }),
+
+    setCornerRadius: (key, cornerIndex, metres) => {
+      const existing = get().junctionOverrides[key];
+      const corners = [...(existing?.corners ?? [])];
+      while (corners.length <= cornerIndex) corners.push(null);
+      corners[cornerIndex] = metres;
+      commit({
+        junctionOverrides: { ...get().junctionOverrides, [key]: { ...existing, corners } },
+      });
+    },
+
+    resetJunction: (key) => {
+      const next = { ...get().junctionOverrides };
+      delete next[key];
+      commit({ junctionOverrides: next });
+    },
+
+    selectStreet: (selectedStreetId) =>
+      set({ selectedStreetId, selectedComponentId: null, selectedJunctionKey: null }),
     selectComponent: (selectedComponentId) => set({ selectedComponentId }),
 
     addComponent: (target, type, index) =>
@@ -386,9 +435,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
       set({ selectedStreetId: copy.id, selectedComponentId: null });
     },
 
-    loadStreets: (streets) => {
-      commit({ streets });
-      set({ selectedStreetId: streets[0]?.id ?? null, selectedComponentId: null });
+    loadStreets: (streets, junctionOverrides = {}) => {
+      commit({ streets, junctionOverrides });
+      set({
+        selectedStreetId: streets[0]?.id ?? null,
+        selectedComponentId: null,
+        selectedJunctionKey: null,
+      });
     },
 
     insertVertexLive: (streetId, afterIndex, point) =>

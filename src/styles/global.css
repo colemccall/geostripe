@@ -1261,3 +1261,110 @@ button {
   height: 24px;
   font-size: 12px;
 }
+
+/* ------------------------------------------------------------ junction inspector */
+
+/*
+ * The wheel. An intersection is radial, so the inspector is too: a corner is only
+ * meaningful as the thing between two particular legs, and a list of "corner 1, corner 2"
+ * makes the reader hold that mapping in their head instead of seeing it.
+ */
+.junction-wheel {
+  display: grid;
+  place-items: center;
+  padding: 4px 0 8px;
+}
+
+.junction-wheel svg {
+  width: 100%;
+  max-width: 176px;
+  height: auto;
+}
+
+.wheel-leg {
+  stroke: var(--ink-dim);
+  stroke-linecap: round;
+  opacity: 0.55;
+}
+
+.wheel-corner {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 7;
+  stroke-linecap: butt;
+  cursor: pointer;
+  transition: 0.13s;
+}
+
+.wheel-corner:hover {
+  stroke: var(--ink-dim);
+}
+
+.wheel-corner.is-active {
+  stroke: var(--accent-fill);
+}
+
+/* A 180 degree "corner" is a street running straight past; there is nothing to round. */
+.wheel-corner.is-straight {
+  stroke-dasharray: 2 3;
+  opacity: 0.4;
+  cursor: default;
+}
+
+.wheel-hub {
+  fill: var(--panel-2);
+  stroke: var(--line);
+}
+
+.leg-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.leg-list li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 5px;
+  background: var(--panel-2);
+  font-size: 11.5px;
+}
+
+.leg-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leg-dir {
+  font-size: 10px;
+  color: var(--ink-dim);
+  letter-spacing: 0.06em;
+}
+
+.leg-cross {
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+.warn-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 9px;
+  font-size: 11.5px;
+  color: var(--ink-2);
+  cursor: pointer;
+}

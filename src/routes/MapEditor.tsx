@@ -14,7 +14,7 @@ import { TEMPLATES, instantiateTemplate, templateTotalWidth } from '../library/t
 import { basemapById } from '../map/basemaps';
 import MapCanvas from '../map/MapCanvas';
 import type { MapHandle, MapView } from '../map/MapCanvas';
-import type { DesignData } from '../map/designLayers';
+import type { DesignData, JunctionSummary } from '../map/designLayers';
 import { describeWarnings } from '../geo/curvature';
 import { lineLengthMeters } from '../geo/measure';
 import { downloadText, pickTextFile } from '../model/assetFile';
@@ -23,6 +23,7 @@ import { DEMO_CENTER, DEMO_ZOOM } from '../demo/washingtonPark';
 import CrossSectionSvg from '../components/CrossSectionSvg';
 import ComponentStack from '../components/ComponentStack';
 import PrimitivePalette from '../components/PrimitivePalette';
+import JunctionInspector from '../components/JunctionInspector';
 import NoticeBar from '../components/NoticeBar';
 
 /**
@@ -73,6 +74,10 @@ export default function MapEditor() {
   const notice = useEditorStore((s) => s.notice);
   const tool = useEditorStore((s) => s.tool);
   const drawSectionId = useEditorStore((s) => s.drawSectionId);
+  const selectedJunctionKey = useEditorStore((s) => s.selectedJunctionKey);
+  const junctionOverrides = useEditorStore((s) => s.junctionOverrides);
+  const defaultCornerRadiusMeters = useEditorStore((s) => s.defaultCornerRadiusMeters);
+  const trimAtJunctions = useEditorStore((s) => s.trimAtJunctions);
   const draftSection = useEditorStore((s) => s.draftSection);
   const street = useEditorStore(selectedStreet);
 
@@ -100,6 +105,10 @@ export default function MapEditor() {
     loadStreets,
     clearStreets,
     loadDemo,
+    selectJunction,
+    setCornerRadius,
+    resetJunction,
+    setTrimAtJunctions,
     beginGesture,
     endGesture,
     moveVertexLive,
@@ -114,6 +123,7 @@ export default function MapEditor() {
     metres: 0,
   });
   const [measure, setMeasure] = useState<{ points: number; metres: number } | null>(null);
+  const [junctions, setJunctions] = useState<JunctionSummary[]>([]);
   const [renderStats, setRenderStats] = useState<{
     bands: number;
     drawn: boolean;
@@ -136,6 +146,11 @@ export default function MapEditor() {
   const fit = section ? checkFit(section.components, available || total) : null;
   const basemap = basemapById(basemapId);
   const activeTool = TOOLS.find((t) => t.id === tool) ?? TOOLS[0]!;
+  const selectedJunction = junctions.find((j) => j.key === selectedJunctionKey) ?? null;
+  const streetNames = useMemo(
+    () => Object.fromEntries(streets.map((s) => [s.id, s.name])),
+    [streets],
+  );
 
   /** The section a newly drawn street gets — also the fallback for a bare line import. */
   const drawingSection = useMemo(() => {
@@ -193,7 +208,11 @@ export default function MapEditor() {
     }
     downloadText(
       projectFilename(projectName),
-      serializeProject(streets, { name: projectName, editorVersion: EDITOR_VERSION }),
+      serializeProject(
+        streets,
+        { name: projectName, editorVersion: EDITOR_VERSION },
+        junctionOverrides,
+      ),
       'application/geo+json',
     );
     setNotice({
@@ -223,7 +242,7 @@ export default function MapEditor() {
       return;
     }
 
-    loadStreets(result.streets);
+    loadStreets(result.streets, result.junctionOverrides);
     mapRef.current?.zoomTo(result.streets[0]?.centerline ?? []);
     setNotice({
       kind: result.warnings.length ? 'warning' : 'success',
@@ -365,6 +384,59 @@ export default function MapEditor() {
               Clear all
             </button>
           </div>
+        </section>
+
+        <section className="panel">
+          <header className="panel-head">
+            <span className="label">Intersections</span>
+            <span className="label mono">{junctions.length}</span>
+          </header>
+          {junctions.length === 0 ? (
+            <p className="empty-note">
+              None yet. Draw two streets that cross and the intersection appears on its own.
+            </p>
+          ) : (
+            <ul className="cards">
+              {junctions.map((j) => (
+                <li key={j.key}>
+                  <button
+                    type="button"
+                    className={`card${j.key === selectedJunctionKey ? ' is-active' : ''}`}
+                    onClick={() => selectJunction(j.key)}
+                    onDoubleClick={() => mapRef.current?.zoomTo([j.position])}
+                  >
+                    <span className="card-title">
+                      {j.legs
+                        .map((leg) => streetNames[leg.streetId] ?? 'Street')
+                        .filter((name, i, all) => all.indexOf(name) === i)
+                        .join(' × ')}
+                    </span>
+                    <span className="card-meta">
+                      <span>
+                        {j.legCount} legs · {j.kind}
+                      </span>
+                      <span className="mono">
+                        {formatWidth(
+                          Math.max(...j.legs.map((l) => l.crossingDistanceMeters)),
+                          units,
+                          { withUnit: true },
+                        )}{' '}
+                        max crossing
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={trimAtJunctions}
+              onChange={(e) => setTrimAtJunctions(e.target.checked)}
+            />
+            <span>Trim streets at intersections</span>
+          </label>
         </section>
 
         <section className="panel">
@@ -525,7 +597,13 @@ export default function MapEditor() {
             zoom={DEMO_ZOOM}
             onViewChange={setView}
             onSelectStreet={selectStreet}
+            onSelectJunction={selectJunction}
             onWarnings={setWarnings}
+            onJunctions={setJunctions}
+            junctionOverrides={junctionOverrides}
+            defaultCornerRadiusMeters={defaultCornerRadiusMeters}
+            trimAtJunctions={trimAtJunctions}
+            selectedJunctionKey={selectedJunctionKey}
             onDraftChange={(points, metres) => setDraft({ points: points.length, metres })}
             onDrawComplete={(points) => addStreet(points)}
             onGestureStart={beginGesture}
@@ -600,7 +678,12 @@ export default function MapEditor() {
                   : `${renderStats.bands} bands · not drawn (source loaded: ${renderStats.sourceLoaded})`
                 : '—',
             ],
-            ['Geometry', 'local plane · ±0.5%'],
+            [
+              'Junctions',
+              junctions.length === 0
+                ? 'none'
+                : `${junctions.length} · ${junctions.reduce((n, j) => n + j.legCount, 0)} legs`,
+            ],
           ].map(([k, v]) => (
             <div className="cell" key={k}>
               <span className="label">{k}</span>
@@ -612,7 +695,27 @@ export default function MapEditor() {
 
       {/* --------------------------------------------------------------- right rail */}
       <aside className="rail rail-right">
-        {!street || !section ? (
+        {selectedJunction ? (
+          <>
+            <button
+              type="button"
+              className="btn btn-ghost btn-block"
+              onClick={() => selectJunction(null)}
+            >
+              ← Back to the street
+            </button>
+            <JunctionInspector
+              junction={selectedJunction}
+              units={units}
+              streetNames={streetNames}
+              overriddenCorners={junctionOverrides[selectedJunction.key]?.corners}
+              onCornerRadius={(index, metres) =>
+                setCornerRadius(selectedJunction.key, index, metres)
+              }
+              onReset={() => resetJunction(selectedJunction.key)}
+            />
+          </>
+        ) : !street || !section ? (
           <section className="panel">
             <p className="empty-note">
               Select a street to edit its cross-section, or draw a new one.
