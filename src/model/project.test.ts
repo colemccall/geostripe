@@ -74,10 +74,28 @@ describe('project round-trip', () => {
     });
   });
 
-  it('mints fresh runtime ids rather than trusting the file', () => {
+  it('carries street ids back through the file', () => {
+    // This reverses an earlier decision, on purpose. Ids used to be minted fresh on load
+    // so a file could never collide with what was already open. Then junctions arrived,
+    // and a junction's stable key is built from the ids of the streets that meet there —
+    // so discarding them silently dropped every saved corner radius. Loading replaces the
+    // whole project, so there is nothing to collide with; only self-collision inside one
+    // file still has to be guarded, which the next test covers.
     const loaded = roundTrip(original);
-    const before = new Set(original.map((s) => s.id));
-    for (const street of loaded) expect(before.has(street.id)).toBe(false);
+    expect(loaded.map((s) => s.id)).toEqual(original.map((s) => s.id));
+  });
+
+  it('reassigns an id a file uses twice, rather than fusing two streets', () => {
+    const file = toProjectGeoJSON(original, META);
+    const streetFeatures = file.features.filter((f) => f.properties?.['geostripe'] === 'street');
+    streetFeatures[1]!.id = streetFeatures[0]!.id;
+
+    const result = parseProject(JSON.stringify(file), DEFAULTS);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.streets).toHaveLength(original.length);
+    expect(new Set(result.streets.map((s) => s.id)).size).toBe(original.length);
+    expect(result.warnings.join(' ')).toMatch(/duplicated and reassigned/);
   });
 
   it('survives a second round-trip unchanged', () => {
@@ -112,6 +130,39 @@ describe('derived geometry', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.warnings.join(' ')).toMatch(/discarded and rebuilt/);
+  });
+});
+
+describe('intersection settings', () => {
+  const original = createDemoStreets();
+  // Keyed the way the detector keys them: sorted street ids, then an ordinal.
+  const key = `${[...original.map((s) => s.id)].sort().join('~')}#0`;
+  const overrides = { [key]: { corners: [3, null, 7.5, null] } };
+
+  it('round-trips a customised corner radius', () => {
+    const text = serializeProject(original, META, overrides);
+    const result = parseProject(text, DEFAULTS);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.junctionOverrides[key]).toEqual({ corners: [3, null, 7.5, null] });
+  });
+
+  it('writes nothing when no corner has been touched', () => {
+    const file = JSON.parse(serializeProject(original, META)) as {
+      metadata: Record<string, unknown>;
+    };
+    expect(file.metadata['junctions']).toBeUndefined();
+  });
+
+  it('drops settings whose streets are not in the file', () => {
+    const text = serializeProject(original, META, {
+      'st-ghost~st-phantom#0': { corners: [2] },
+    });
+    const result = parseProject(text, DEFAULTS);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(Object.keys(result.junctionOverrides)).toHaveLength(0);
+    expect(result.warnings.join(' ')).toMatch(/not in this file/);
   });
 });
 

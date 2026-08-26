@@ -1,17 +1,37 @@
 import * as polyclip from 'polyclip-ts';
 import type { Feature, FeatureCollection, MultiPolygon, Polygon } from 'geojson';
 import type { Street } from '../model/types';
-import { bandsForStreet, markingsForStreet } from '../geo/banding';
+import { deriveProject } from '../geo/derived';
+import type { JunctionOverride } from '../geo/derived';
+import type { JunctionGeometry } from '../geo/intersection';
 import { midpoint } from '../geo/measure';
 import type { CurvatureWarning } from '../geo/curvature';
+import { PRIMITIVES } from '../library/primitives';
 
 /**
  * Turning the document into map layers.
  *
  * Bands are derived here on every render and never stored. That is the whole "parametric,
  * still alive" premise: change a width, drag a vertex, and the geometry is rebuilt from
- * the inputs rather than edited in place.
+ * the inputs rather than edited in place. The rebuild is memoised in geo/derived.ts, so
+ * only what actually changed is recomputed.
+ *
+ * Junctions produce two fills whose stacking order does real work. The footprint goes
+ * down first in footway colour; the paved area goes on top in asphalt. Streets are trimmed
+ * so roadway bands stop at the paved edge and everything else stops at the footprint edge,
+ * which leaves exactly the corner showing as footway. No boolean is needed to carve the
+ * corner sidewalk — the z-order is the boolean.
  */
+
+export interface JunctionSummary {
+  key: string;
+  position: [number, number];
+  legCount: number;
+  kind: string;
+  corners: JunctionGeometry['corners'];
+  legs: JunctionGeometry['legs'];
+  warnings: string[];
+}
 
 export interface DesignData {
   bands: FeatureCollection;
@@ -20,29 +40,57 @@ export interface DesignData {
   vertices: FeatureCollection;
   /** Half-way handles on the selected centerline; dragging one inserts a vertex. */
   midpoints: FeatureCollection;
+  /** Kerb-to-kerb intersection area, drawn as asphalt. */
+  junctionPaved: FeatureCollection;
+  /** Full intersection footprint, drawn underneath in footway colour. */
+  junctionFootprint: FeatureCollection;
+  /** One point per junction, for selection. */
+  junctionPoints: FeatureCollection;
+  /** Stop lines across each leg of the selected junction. */
+  stopLines: FeatureCollection;
   warnings: { streetId: string; streetName: string; warnings: CurvatureWarning[] }[];
+  junctions: JunctionSummary[];
+  junctionWarnings: string[];
 }
 
 const empty = (): FeatureCollection => ({ type: 'FeatureCollection', features: [] });
 
-export function buildDesignData(streets: readonly Street[], selectedStreetId: string | null): DesignData {
+export interface BuildOptions {
+  overrides?: Readonly<Record<string, JunctionOverride>>;
+  defaultCornerRadiusMeters?: number;
+  trimAtJunctions?: boolean;
+  selectedJunctionKey?: string | null;
+}
+
+export function buildDesignData(
+  streets: readonly Street[],
+  selectedStreetId: string | null,
+  options: BuildOptions = {},
+): DesignData {
   const bands = empty();
   const markings = empty();
   const centerlines = empty();
   const vertices = empty();
   const midpoints = empty();
-  const warnings: DesignData['warnings'] = [];
+  const junctionPaved = empty();
+  const junctionFootprint = empty();
+  const junctionPoints = empty();
+  const stopLines = empty();
+
+  const derived = deriveProject(streets, {
+    overrides: options.overrides,
+    defaultCornerRadiusMeters: options.defaultCornerRadiusMeters,
+    trimAtJunctions: options.trimAtJunctions,
+  });
 
   for (const street of streets) {
     if (!street.visible) continue;
 
-    const result = bandsForStreet(street.id, street.centerline, street.section);
-    bands.features.push(...result.bands);
-    if (result.warnings.length > 0) {
-      warnings.push({ streetId: street.id, streetName: street.name, warnings: result.warnings });
+    const geometry = derived.byStreet.get(street.id);
+    if (geometry) {
+      bands.features.push(...geometry.bands);
+      markings.features.push(...geometry.markings);
     }
-
-    markings.features.push(...markingsForStreet(street.id, street.centerline, street.section));
 
     const selected = street.id === selectedStreetId;
     centerlines.features.push({
@@ -76,7 +124,77 @@ export function buildDesignData(streets: readonly Street[], selectedStreetId: st
     }
   }
 
-  return { bands, markings, centerlines, vertices, midpoints, warnings };
+  const junctions: JunctionSummary[] = [];
+
+  derived.junctionGeometry.forEach((geometry, index) => {
+    const junction = derived.junctions[index]!;
+    const selected = geometry.key === options.selectedJunctionKey;
+
+    if (geometry.footprint.length > 3) {
+      junctionFootprint.features.push({
+        type: 'Feature',
+        id: `${geometry.key}:foot`,
+        properties: { junctionKey: geometry.key, color: PRIMITIVES.sidewalk.color },
+        geometry: { type: 'Polygon', coordinates: [geometry.footprint] },
+      });
+    }
+
+    if (geometry.paved.length > 3) {
+      junctionPaved.features.push({
+        type: 'Feature',
+        id: `${geometry.key}:paved`,
+        properties: {
+          junctionKey: geometry.key,
+          color: PRIMITIVES.travelLane.color,
+          selected,
+        },
+        geometry: { type: 'Polygon', coordinates: [geometry.paved] },
+      });
+    }
+
+    junctionPoints.features.push({
+      type: 'Feature',
+      id: `${geometry.key}:pt`,
+      properties: { junctionKey: geometry.key, selected },
+      geometry: { type: 'Point', coordinates: geometry.centre },
+    });
+
+    if (selected) {
+      geometry.legs.forEach((leg, legIndex) => {
+        stopLines.features.push({
+          type: 'Feature',
+          id: `${geometry.key}:stop${legIndex}`,
+          properties: { junctionKey: geometry.key, legIndex },
+          geometry: { type: 'LineString', coordinates: leg.stopLine },
+        });
+      });
+    }
+
+    junctions.push({
+      key: geometry.key,
+      position: geometry.centre,
+      legCount: geometry.legs.length,
+      kind: junction.kind,
+      corners: geometry.corners,
+      legs: geometry.legs,
+      warnings: geometry.warnings,
+    });
+  });
+
+  return {
+    bands,
+    markings,
+    centerlines,
+    vertices,
+    midpoints,
+    junctionPaved,
+    junctionFootprint,
+    junctionPoints,
+    stopLines,
+    warnings: derived.warnings,
+    junctions,
+    junctionWarnings: derived.junctionWarnings,
+  };
 }
 
 /**

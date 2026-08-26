@@ -14,6 +14,7 @@ import { basemapById, tileUrlsFor, unconfiguredReason } from './basemaps';
 import type { BasemapId, TileSourceOptions } from './basemaps';
 import { buildDesignData, clipEastOf, clipLinesEastOf } from './designLayers';
 import type { DesignData } from './designLayers';
+import type { JunctionOverride } from '../geo/derived';
 import { lineLengthMeters } from '../geo/measure';
 import type { Street } from '../model/types';
 import type { Tool } from '../store/useEditorStore';
@@ -94,7 +95,15 @@ interface Props {
   zoom: number;
   onViewChange?: (view: MapView) => void;
   onSelectStreet?: (streetId: string) => void;
+  onSelectJunction?: (key: string) => void;
   onWarnings?: (warnings: DesignData['warnings']) => void;
+  onJunctions?: (junctions: DesignData['junctions'], warnings: string[]) => void;
+
+  // ---- junctions
+  junctionOverrides?: Readonly<Record<string, JunctionOverride>>;
+  defaultCornerRadiusMeters?: number;
+  trimAtJunctions?: boolean;
+  selectedJunctionKey?: string | null;
 
   // ---- drawing
   /** Committed draft vertices and their running length, for the toolbar readout. */
@@ -154,6 +163,10 @@ function buildStyle(basemapId: BasemapId, options: TileSourceOptions): MapStyle 
 }
 
 const DESIGN_SOURCES = [
+  'junction-footprint',
+  'junction-paved',
+  'junction-points',
+  'stop-lines',
   'bands',
   'markings',
   'centerlines',
@@ -185,6 +198,34 @@ function addDesignLayers(map: MapLibreMap) {
   for (const id of DESIGN_SOURCES) {
     if (!map.getSource(id)) map.addSource(id, { type: 'geojson', data: EMPTY });
   }
+
+  // Order is load-bearing. The footprint goes down first in footway colour and the paved
+  // area on top of it; streets are trimmed so roadway stops at the paved edge and footway
+  // at the footprint edge, which leaves precisely the corner showing as footway. The
+  // stacking order IS the boolean that carves the corner sidewalk.
+  addLayerSafely(map, {
+    id: 'junction-footprint-fill',
+    type: 'fill',
+    source: 'junction-footprint',
+    paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.82 },
+  });
+
+  addLayerSafely(map, {
+    id: 'junction-paved-fill',
+    type: 'fill',
+    source: 'junction-paved',
+    paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.82 },
+  });
+
+  addLayerSafely(map, {
+    id: 'junction-paved-outline',
+    type: 'line',
+    source: 'junction-paved',
+    paint: {
+      'line-color': ['case', ['get', 'selected'], '#F2C14E', 'rgba(0,0,0,0.55)'],
+      'line-width': ['case', ['get', 'selected'], 1.8, 0.6],
+    },
+  });
 
   addLayerSafely(map, {
     id: 'band-fill',
@@ -263,6 +304,25 @@ function addDesignLayers(map: MapLibreMap) {
       'circle-radius': 4.5,
       'circle-color': '#F2C14E',
       'circle-stroke-color': '#14181A',
+      'circle-stroke-width': 1.6,
+    },
+  });
+
+  addLayerSafely(map, {
+    id: 'stop-line',
+    type: 'line',
+    source: 'stop-lines',
+    paint: { 'line-color': '#F5F2E8', 'line-width': 2.4, 'line-opacity': 0.9 },
+  });
+
+  addLayerSafely(map, {
+    id: 'junction-point',
+    type: 'circle',
+    source: 'junction-points',
+    paint: {
+      'circle-radius': ['case', ['get', 'selected'], 6, 4],
+      'circle-color': ['case', ['get', 'selected'], '#F2C14E', 'rgba(20,24,26,0.75)'],
+      'circle-stroke-color': '#F2C14E',
       'circle-stroke-width': 1.6,
     },
   });
@@ -352,7 +412,13 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     zoom,
     onViewChange,
     onSelectStreet,
+    onSelectJunction,
     onWarnings,
+    onJunctions,
+    junctionOverrides,
+    defaultCornerRadiusMeters,
+    trimAtJunctions,
+    selectedJunctionKey,
     onDraftChange,
     onDrawComplete,
     onGestureStart,
@@ -378,7 +444,13 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     swipe,
     onViewChange,
     onSelectStreet,
+    onSelectJunction,
     onWarnings,
+    onJunctions,
+    junctionOverrides,
+    defaultCornerRadiusMeters,
+    trimAtJunctions,
+    selectedJunctionKey,
     onDraftChange,
     onDrawComplete,
     onGestureStart,
@@ -512,14 +584,29 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     // exist, which addDesignLayers guarantees before it calls back here.
     if (!map.getSource('bands')) return;
 
-    const { streets: s, selectedStreetId: sel, swipe: sw, onWarnings: warn } = latest.current;
-    const data = buildDesignData(s, sel);
+    const {
+      streets: s,
+      selectedStreetId: sel,
+      swipe: sw,
+      onWarnings: warn,
+      onJunctions: reportJunctions,
+    } = latest.current;
+
+    const data = buildDesignData(s, sel, {
+      overrides: latest.current.junctionOverrides,
+      defaultCornerRadiusMeters: latest.current.defaultCornerRadiusMeters,
+      trimAtJunctions: latest.current.trimAtJunctions,
+      selectedJunctionKey: latest.current.selectedJunctionKey,
+    });
     warn?.(data.warnings);
+    reportJunctions?.(data.junctions, data.junctionWarnings);
 
     if (sw === null) {
       setData(map, 'bands', data.bands);
       setData(map, 'markings', data.markings);
       setData(map, 'centerlines', data.centerlines);
+      setData(map, 'junction-paved', data.junctionPaved);
+      setData(map, 'junction-footprint', data.junctionFootprint);
     } else {
       // Screen x -> longitude. Exact while the map is north-up, which it always is here.
       const x = map.getContainer().clientWidth * sw;
@@ -527,12 +614,16 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
       setData(map, 'bands', clipEastOf(data.bands, minLng));
       setData(map, 'markings', clipLinesEastOf(data.markings, minLng));
       setData(map, 'centerlines', clipLinesEastOf(data.centerlines, minLng));
+      setData(map, 'junction-paved', clipEastOf(data.junctionPaved, minLng));
+      setData(map, 'junction-footprint', clipEastOf(data.junctionFootprint, minLng));
     }
 
     // Editing handles are never clipped: they are UI, not design, and a handle that
     // disappears behind the swipe divider is a handle you cannot grab.
     setData(map, 'vertices', data.vertices);
     setData(map, 'midpoints', data.midpoints);
+    setData(map, 'junction-points', data.junctionPoints);
+    setData(map, 'stop-lines', data.stopLines);
 
     // queryRenderedFeatures only reports once tiles are built, so sample shortly after —
     // and only once the edits stop, or a drag would queue one probe per frame.
@@ -671,11 +762,26 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
       // Wrapped because queryRenderedFeatures throws if the layer is not in the style yet,
       // which is a real window right after a basemap switch.
       try {
+        // The junction marker wins over the pavement beneath it: it is small, deliberate,
+        // and the only way to reach the intersection inspector.
+        const marker = map.queryRenderedFeatures(
+          [
+            [event.point.x - SNAP_PX, event.point.y - SNAP_PX],
+            [event.point.x + SNAP_PX, event.point.y + SNAP_PX],
+          ],
+          { layers: ['junction-point'] },
+        );
+        const junctionKey = marker[0]?.properties?.['junctionKey'];
+        if (typeof junctionKey === 'string') {
+          latest.current.onSelectJunction?.(junctionKey);
+          return;
+        }
+
         const hits = map.queryRenderedFeatures(event.point, { layers: ['band-fill'] });
         const streetId = hits[0]?.properties?.['streetId'];
         if (typeof streetId === 'string') latest.current.onSelectStreet?.(streetId);
       } catch {
-        // No band layer yet; nothing to select.
+        // No design layers yet; nothing to select.
       }
     });
 
@@ -857,7 +963,17 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
   // ---- design data
   useEffect(() => {
     if (ready) scheduleRefresh();
-  }, [streets, selectedStreetId, swipe, ready, scheduleRefresh]);
+  }, [
+    streets,
+    selectedStreetId,
+    swipe,
+    ready,
+    scheduleRefresh,
+    junctionOverrides,
+    defaultCornerRadiusMeters,
+    trimAtJunctions,
+    selectedJunctionKey,
+  ]);
 
   // ---- scale bar unit follows the app
   useEffect(() => {

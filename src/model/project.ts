@@ -6,6 +6,7 @@ import { bandsForStreet } from '../geo/banding';
 import { componentSchema } from './schema';
 import type { Street } from './types';
 import { newId } from './types';
+import type { JunctionOverride } from '../geo/derived';
 
 /**
  * The project interchange format: plain GeoJSON, editable by hand and readable by QGIS.
@@ -53,6 +54,19 @@ const streetPropertiesSchema = z.object({
 const featureCollectionSchema = z.object({
   type: z.literal('FeatureCollection'),
   features: z.array(z.unknown()),
+  metadata: z
+    .object({
+      junctions: z
+        .record(
+          z.string(),
+          z.object({
+            corners: z.array(z.number().finite().min(0).max(60).nullable()).max(24).optional(),
+            stopOffsets: z.array(z.number().finite().min(0).max(300).nullable()).max(24).optional(),
+          }),
+        )
+        .optional(),
+    })
+    .optional(),
 });
 
 export interface ProjectMeta {
@@ -62,7 +76,12 @@ export interface ProjectMeta {
 }
 
 export type ProjectParseResult =
-  | { ok: true; streets: Street[]; warnings: string[] }
+  | {
+      ok: true;
+      streets: Street[];
+      junctionOverrides: Record<string, JunctionOverride>;
+      warnings: string[];
+    }
   | { ok: false; errors: string[] };
 
 /** Field-level messages that name something a person can fix, not a Zod dump. */
@@ -85,6 +104,7 @@ function round(value: number): number {
 export function toProjectGeoJSON(
   streets: readonly Street[],
   meta: Pick<ProjectMeta, 'name' | 'editorVersion'>,
+  junctionOverrides: Readonly<Record<string, JunctionOverride>> = {},
 ): FeatureCollection {
   const features: Feature[] = [];
 
@@ -104,8 +124,9 @@ export function toProjectGeoJSON(
           street.section.anchorOffsetMeters === null
             ? null
             : round(street.section.anchorOffsetMeters),
-        // Runtime ids are dropped: they are session identity, and honouring ids from a
-        // file invites collisions with whatever is already open.
+        // Component ids are dropped — they are session identity and nothing refers to
+        // them across a save. The street id above is written and honoured, because
+        // junction keys are built from it.
         components: street.section.components.map((c) => ({
           componentType: c.componentType,
           widthMeters: round(c.widthMeters),
@@ -138,6 +159,10 @@ export function toProjectGeoJSON(
       name: meta.name,
       editorVersion: meta.editorVersion,
       generated: new Date().toISOString(),
+      // Junctions are derived from where the centerlines cross, so there is nothing to
+      // store about them except what somebody deliberately changed. The keys are built
+      // from street ids, which is why those ids are written above and honoured on load.
+      ...(Object.keys(junctionOverrides).length > 0 ? { junctions: junctionOverrides } : {}),
     },
   });
 }
@@ -145,8 +170,9 @@ export function toProjectGeoJSON(
 export function serializeProject(
   streets: readonly Street[],
   meta: Pick<ProjectMeta, 'name' | 'editorVersion'>,
+  junctionOverrides: Readonly<Record<string, JunctionOverride>> = {},
 ): string {
-  return `${JSON.stringify(toProjectGeoJSON(streets, meta), null, 2)}\n`;
+  return `${JSON.stringify(toProjectGeoJSON(streets, meta, junctionOverrides), null, 2)}\n`;
 }
 
 export function projectFilename(name: string): string {
@@ -178,6 +204,7 @@ export interface ImportDefaults {
 }
 
 function makeStreet(
+  id: string,
   name: string,
   centerline: [number, number][],
   sectionName: string,
@@ -187,7 +214,7 @@ function makeStreet(
   visible: boolean,
 ): Street {
   return {
-    id: newId('st'),
+    id,
     name,
     centerline,
     visible,
@@ -218,9 +245,36 @@ export function parseProject(text: string, defaults: ImportDefaults): ProjectPar
   const warnings: string[] = [];
   let bandsDropped = 0;
   let skipped = 0;
+  let idsRebuilt = 0;
+
+  /**
+   * Street ids are read back from the file rather than minted fresh.
+   *
+   * They are not merely cosmetic any more: a junction's stable key is built from the ids
+   * of the streets that meet there, so discarding them would silently drop every corner
+   * radius on load. Loading replaces the whole project, so there is nothing already open
+   * for a file id to collide with — but a file that repeats an id within itself would
+   * fuse two streets into one, so uniqueness is still enforced here.
+   */
+  const usedIds = new Set<string>();
+  const claimId = (raw: unknown): string => {
+    if (typeof raw === 'string' && raw.length > 0 && raw.length <= 80 && !usedIds.has(raw)) {
+      usedIds.add(raw);
+      return raw;
+    }
+    if (raw !== undefined && raw !== null) idsRebuilt++;
+    let id = newId('st');
+    while (usedIds.has(id)) id = newId('st');
+    usedIds.add(id);
+    return id;
+  };
 
   outer.data.features.forEach((entry, index) => {
-    const feature = entry as { properties?: Record<string, unknown>; geometry?: unknown };
+    const feature = entry as {
+      id?: unknown;
+      properties?: Record<string, unknown>;
+      geometry?: unknown;
+    };
     const props = feature.properties ?? {};
     const kind = props['geostripe'];
     const label = `Feature ${index + 1}`;
@@ -250,6 +304,7 @@ export function parseProject(text: string, defaults: ImportDefaults): ProjectPar
           : `Imported line ${streets.length + 1}`;
       streets.push(
         makeStreet(
+          claimId(feature.id),
           name,
           centerline,
           defaults.sectionName,
@@ -277,6 +332,7 @@ export function parseProject(text: string, defaults: ImportDefaults): ProjectPar
     const data = parsed.data;
     streets.push(
       makeStreet(
+        claimId(feature.id),
         data.name ?? `Street ${streets.length + 1}`,
         centerline,
         data.sectionName ?? data.name ?? 'Cross-section',
@@ -312,6 +368,26 @@ export function parseProject(text: string, defaults: ImportDefaults): ProjectPar
   if (skipped > 0) {
     warnings.push(`${skipped} feature${skipped === 1 ? '' : 's'} skipped — not a street centerline.`);
   }
+  if (idsRebuilt > 0) {
+    warnings.push(
+      `${idsRebuilt} street id${idsRebuilt === 1 ? ' was' : 's were'} duplicated and reassigned; any saved intersection corners on them fall back to defaults.`,
+    );
+  }
 
-  return { ok: true, streets, warnings };
+  // An override whose streets did not load would sit in state forever, matching nothing.
+  const stored = outer.data.metadata?.junctions ?? {};
+  const junctionOverrides: Record<string, JunctionOverride> = {};
+  let orphaned = 0;
+  for (const [key, value] of Object.entries(stored)) {
+    const ids = key.split('#')[0]?.split('~') ?? [];
+    if (ids.length > 0 && ids.every((id) => usedIds.has(id))) junctionOverrides[key] = value;
+    else orphaned++;
+  }
+  if (orphaned > 0) {
+    warnings.push(
+      `${orphaned} saved intersection setting${orphaned === 1 ? '' : 's'} referenced streets that are not in this file.`,
+    );
+  }
+
+  return { ok: true, streets, junctionOverrides, warnings };
 }

@@ -191,13 +191,56 @@ the width that is really there, and save it as GeoJSON you can reopen and keep e
   cross-section elevation with dimension lines, asset JSON round-trip with Zod validation
   and readable per-field errors.
 - 8 starter cross-section templates, feet/metres toggle, undo/redo with Ctrl+Z.
-- **77 unit tests** across geometry, cross-section arithmetic, the project round-trip, and
-  store history.
+- **136 unit tests** across geometry, junction detection, intersection geometry, the
+  memoisation that keeps dragging affordable, cross-section arithmetic, the project
+  round-trip, and store history.
 
-#### Not built yet
+- **Intersections** — detected automatically wherever centerlines cross, with no node to
+  place or maintain. Each junction carries its legs sorted by bearing and a corner between
+  each adjacent pair.
+  - **Curb returns** at a per-corner radius, clamped with a warning when the legs meeting
+    there are too short or too acute to carry it.
+  - **Two-boundary trimming.** Roadway components are cut at the kerb-to-kerb box and the
+    junction fills it, so asphalt reads as one continuous surface; everything else is cut
+    at the wider footprint, which is drawn underneath, so the footway turns the corner.
+    The stacking order is the boolean — no per-corner polygon is computed.
+  - **Crossing distance** per leg, the pedestrian counterpart to the fit check.
+  - A radial inspector: click the corner you can see, not "corner 3" in a list.
+  - Customisation is keyed by which streets meet, not by position or vertex index, so it
+    survives dragging the crossing, inserting vertices, and reversing a centerline.
 
-Crosswalks, roundabouts, intersection trimming (crossing streets simply overlap for now,
-resolved by draw order), snapping, and touch support for vertex dragging.
+## Roadmap
+
+Phases are ordered by dependency, not by appeal. Anything that other work builds on is
+proven headless and unit-tested before it gets a UI — the geometry engine was, and so was
+junction detection.
+
+| | Phase | State |
+|---|---|---|
+| 1 | Prototype, shell, map, imagery | done |
+| 2 | Geometry core — projection, offsetting, banding, curvature | done |
+| 3 | Drawing — centerline authoring, vertex editing | done |
+| 4 | Library and cross-sections | done |
+| 5 | Editing — inspector, measure tool, fit check | done |
+| 6 | Save / load — GeoJSON round-trip | done |
+| 7 | Templates and palette | done |
+| 8 | Asset Builder page | done |
+| 9 | Before / after swipe | done |
+| A | Junction detection | done |
+| B | Derived-geometry cache | done |
+| C | Intersection footprint, curb returns, trimming | done |
+| D | Intersection inspector | done |
+| E | Crosswalks and stop bars | next |
+| F | Corner treatments — bulb-outs, daylighting, islands | planned |
+| G | Protected (Dutch) intersection | planned |
+| H | Roundabout, as a junction form | planned |
+| I | Swept-path / design-vehicle check | stretch |
+
+Also outstanding, smaller: endpoint and angle snapping while drawing, touch support for
+vertex dragging (mouse only today), and point components such as trees and signals.
+
+Deliberately out of scope for v1: image/PNG export, accounts, a backend, 3D, and traffic
+simulation.
 
 ### Why the geometry is its own phase
 
