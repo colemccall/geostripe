@@ -32,6 +32,7 @@ import JunctionInspector from '../components/JunctionInspector';
 import MapDock from '../components/MapDock';
 import { planConnections } from '../geo/connect';
 import { levelAt, stationAt } from '../geo/grade';
+import { INTERCHANGE_FORMS } from '../geo/interchange';
 import type { Connection } from '../geo/connect';
 import ShortcutSheet from '../components/ShortcutSheet';
 import ViewReadout, { createViewSource } from '../components/ViewReadout';
@@ -227,6 +228,7 @@ export default function MapEditor() {
     setStreetLevel,
     setStreetGrade,
     gradeSeparateAt,
+    buildInterchange,
     toggleSharpVertex,
     addArea,
     selectArea,
@@ -264,6 +266,7 @@ export default function MapEditor() {
   } | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [railTab, setRailTab] = useState<RailTab>('streets');
+  const [interchangeMainline, setInterchangeMainline] = useState<string | null>(null);
   const mapWrapRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapHandle | null>(null);
 
@@ -804,6 +807,74 @@ export default function MapEditor() {
                 >
                   Make this one mine
                 </button>
+              </div>
+            )}
+
+            {/* ------------------------------------------------ grade separation */}
+            {selectedJunction && selectedJunction.legs.length >= 3 && (
+              <div className="field" style={{ marginTop: 12 }}>
+                <span className="label">Make this an interchange</span>
+                <p className="hint" style={{ marginTop: 2 }}>
+                  Carries one road over the other and lays the ramps out as ordinary
+                  streets — drag them, delete them, change their cross-section. Where a ramp
+                  rejoins, it is read as a merge and gets a taper.
+                </p>
+
+                <label className="field" style={{ marginTop: 8 }}>
+                  <span className="label">Which road goes over</span>
+                  <select
+                    className="text-input"
+                    value={interchangeMainline ?? ''}
+                    onChange={(e) => setInterchangeMainline(e.target.value || null)}
+                  >
+                    <option value="">Choose…</option>
+                    {[...new Set(selectedJunction.legs.map((l) => l.streetId))].map((id) => (
+                      <option key={id} value={id}>
+                        {streetNames[id] ?? 'Street'}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <div className="btn-row" style={{ marginTop: 8, flexWrap: 'wrap' }}>
+                  {INTERCHANGE_FORMS.map((form) => (
+                    <button
+                      key={form.id}
+                      type="button"
+                      className="btn btn-ghost"
+                      disabled={!interchangeMainline}
+                      title={form.detail}
+                      onClick={() => {
+                        if (!interchangeMainline) return;
+                        const result = buildInterchange(selectedJunction.key, {
+                          mainlineId: interchangeMainline,
+                          form: form.id,
+                        });
+                        setNotice(
+                          result
+                            ? {
+                                kind: result.warnings.length ? 'warning' : 'success',
+                                title: `${form.label} interchange — ${result.ramps} ramp${
+                                  result.ramps === 1 ? '' : 's'
+                                } placed`,
+                                details: result.warnings.length
+                                  ? result.warnings
+                                  : ['They are ordinary streets. Ctrl+Z takes the whole thing back.'],
+                              }
+                            : {
+                                kind: 'warning',
+                                title: 'Not enough room for an interchange here',
+                                details: [
+                                  'The ramps need a couple of hundred metres of mainline and about ninety of cross road either side. Extend one of them and try again.',
+                                ],
+                              },
+                        );
+                      }}
+                    >
+                      {form.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
             <p className="hint">

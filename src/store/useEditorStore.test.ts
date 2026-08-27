@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { useEditorStore, cloneSection } from './useEditorStore';
 import { createDemoStreets } from '../demo/washingtonPark';
 import { TEMPLATES, instantiateTemplate } from '../library/templates';
+import { detectJunctions } from '../geo/junctions';
 
 /**
  * Store behaviour that is easy to get subtly wrong and impossible to see on screen.
@@ -410,5 +411,244 @@ describe('joining ends on demand', () => {
     useEditorStore.getState().connectEnd(ids[1]!, 'end');
     useEditorStore.getState().undo();
     expect(useEditorStore.getState().streets).toEqual(before);
+  });
+});
+
+/**
+ * Building an interchange, from the store's side.
+ *
+ * The geometry is covered in `geo/interchange.test.ts`. What only the store can answer is
+ * whether the whole arrangement is one edit — four ramps and a grade profile arriving
+ * together, and leaving together. A half-undone interchange is four orphan ramps around a
+ * crossing that is back at grade, which is worse than either state.
+ */
+describe('building an interchange', () => {
+  const M_PER_LAT = 111132;
+  const M_PER_LNG = 111412 * Math.cos((39.11 * Math.PI) / 180);
+  const at = (east: number, north: number): [number, number] => [
+    -84.52 + east / M_PER_LNG,
+    39.11 + north / M_PER_LAT,
+  ];
+
+  function freewayCrossing() {
+    useEditorStore.setState({
+      streets: [],
+      areas: [],
+      nodes: [],
+      junctionOverrides: {},
+      past: [],
+      future: [],
+      autoConnect: false,
+      drawSectionId: TEMPLATES[1]!.id,
+    });
+    const store = useEditorStore.getState();
+    const mainline = store.addStreet([at(-600, 0), at(600, 0)]);
+    store.addStreet([at(0, -400), at(0, 400)]);
+    return mainline;
+  }
+
+  /** The key of the one junction there is. */
+  function onlyJunctionKey(): string {
+    const { streets } = useEditorStore.getState();
+    return detectJunctions(streets).junctions[0]!.key;
+  }
+
+  it('places the ramps and grades the mainline', () => {
+    const mainline = freewayCrossing();
+    const result = useEditorStore
+      .getState()
+      .buildInterchange(onlyJunctionKey(), { mainlineId: mainline, form: 'diamond' });
+
+    expect(result?.ramps).toBe(4);
+    const state = useEditorStore.getState();
+    expect(state.streets).toHaveLength(6);
+    expect(state.streets.find((s) => s.id === mainline)!.grade).toBeDefined();
+  });
+
+  it('is one edit, so one undo takes the whole thing back', () => {
+    const mainline = freewayCrossing();
+    const before = useEditorStore.getState().past.length;
+
+    useEditorStore
+      .getState()
+      .buildInterchange(onlyJunctionKey(), { mainlineId: mainline, form: 'diamond' });
+    expect(useEditorStore.getState().past.length).toBe(before + 1);
+
+    useEditorStore.getState().undo();
+    const after = useEditorStore.getState();
+    expect(after.streets).toHaveLength(2);
+    expect(after.streets.find((s) => s.id === mainline)!.grade).toBeUndefined();
+  });
+
+  it('gives the ramps a ramp cross-section, whatever the draw tool is set to', () => {
+    // A ramp with a boulevard cross-section is not a ramp. The section comes from the
+    // ramp template, not from whatever was last used for drawing.
+    const mainline = freewayCrossing();
+    useEditorStore.getState().setDrawSectionId(TEMPLATES[0]!.id);
+    useEditorStore
+      .getState()
+      .buildInterchange(onlyJunctionKey(), { mainlineId: mainline, form: 'diamond' });
+
+    const ramps = useEditorStore.getState().streets.filter((s) => s.name.includes('ramp'));
+    expect(ramps).toHaveLength(4);
+    for (const ramp of ramps) {
+      expect(ramp.section.name).toBe('Ramp, single lane');
+      // A rampLane, not a travelLane — the library models them as different things, and a
+      // ramp carrying a plain travel lane would be a road that happens to be curved.
+      const lanes = ramp.section.components.filter((c) => c.componentType === 'rampLane');
+      expect(lanes).toHaveLength(1);
+    }
+  });
+
+  it('leaves the mainline carrying a profile and no flat level', () => {
+    // The two would contradict each other: the profile says the road climbs and comes back
+    // down, a flat level says it is elevated for its whole length. Which won would depend
+    // on which piece of code asked.
+    const mainline = freewayCrossing();
+    useEditorStore
+      .getState()
+      .buildInterchange(onlyJunctionKey(), { mainlineId: mainline, form: 'diamond' });
+
+    const street = useEditorStore.getState().streets.find((s) => s.id === mainline)!;
+    expect(street.grade).toBeDefined();
+    expect(street.level).toBeUndefined();
+  });
+
+  it('has nothing to build on once the street is elevated end to end', () => {
+    // Not a limitation so much as the point restated: a street marked elevated for its
+    // whole length crosses nothing, so there is no junction to make an interchange of.
+    // That is exactly the hole grade profiles were added to fill.
+    const mainline = freewayCrossing();
+    const key = onlyJunctionKey();
+    useEditorStore.getState().setStreetLevel(mainline, 1);
+
+    expect(
+      useEditorStore.getState().buildInterchange(key, { mainlineId: mainline, form: 'diamond' }),
+    ).toBeNull();
+  });
+
+  it('changes nothing when there is no room', () => {
+    useEditorStore.setState({
+      streets: [], areas: [], nodes: [], junctionOverrides: {},
+      past: [], future: [], autoConnect: false, drawSectionId: TEMPLATES[1]!.id,
+    });
+    const store = useEditorStore.getState();
+    const mainline = store.addStreet([at(-40, 0), at(40, 0)]);
+    store.addStreet([at(0, -40), at(0, 40)]);
+
+    const before = useEditorStore.getState().streets.length;
+    const result = useEditorStore
+      .getState()
+      .buildInterchange(onlyJunctionKey(), { mainlineId: mainline, form: 'diamond' });
+
+    expect(result).toBeNull();
+    expect(useEditorStore.getState().streets).toHaveLength(before);
+  });
+});
+
+/**
+ * Sections you build and keep.
+ *
+ * The loop this closes: before it, composing a cross-section in the Asset Builder and
+ * using it meant exporting a file and importing it back. A preset you have to export to
+ * use is not in your library.
+ */
+describe('saving a cross-section to the library', () => {
+  beforeEach(() => {
+    useEditorStore.setState({ savedSections: [] });
+    try {
+      window.localStorage.clear();
+    } catch {
+      // No DOM in this environment, so nothing to clear. The store falls back to keeping
+      // presets in memory, which is what these tests then exercise.
+    }
+  });
+
+  it('keeps it under the name it was given', () => {
+    const section = instantiateTemplate(TEMPLATES[3]!);
+    useEditorStore.getState().saveSection('My high street', section);
+
+    const saved = useEditorStore.getState().savedSections;
+    expect(saved).toHaveLength(1);
+    expect(saved[0]!.label).toBe('My high street');
+    expect(saved[0]!.category).toBe('saved');
+  });
+
+  it('keeps the whole section, not a lossy summary of it', () => {
+    // `specs` can only carry type, direction and width. A section somebody built can also
+    // carry a pavement glyph and a stripe, and rebuilding from specs would drop both.
+    const section = instantiateTemplate(TEMPLATES[3]!);
+    const withMarkings = {
+      ...section,
+      components: section.components.map((c, i) =>
+        i === 1 ? { ...c, glyph: 'arrowThrough' as const, stripeLeft: 'laneDashed' as const } : c,
+      ),
+    };
+    useEditorStore.getState().saveSection('Marked up', withMarkings);
+
+    const preset = useEditorStore.getState().savedSections[0]!;
+    expect(preset.section).toBeDefined();
+    expect(preset.section!.components[1]!.glyph).toBe('arrowThrough');
+    expect(preset.section!.components[1]!.stripeLeft).toBe('laneDashed');
+  });
+
+  it('instantiates back into a section with fresh component ids', () => {
+    // Two streets sharing a preset must not alias each other's bands — the same guarantee
+    // the generated presets give.
+    const section = instantiateTemplate(TEMPLATES[3]!);
+    useEditorStore.getState().saveSection('Reusable', section);
+    const preset = useEditorStore.getState().savedSections[0]!;
+
+    const a = instantiateTemplate(preset);
+    const b = instantiateTemplate(preset);
+    expect(a.components[0]!.id).not.toBe(b.components[0]!.id);
+    expect(a.components.map((c) => c.widthMeters)).toEqual(b.components.map((c) => c.widthMeters));
+  });
+
+  it('falls back to a name rather than saving an untitled blank', () => {
+    useEditorStore.getState().saveSection('   ', instantiateTemplate(TEMPLATES[3]!));
+    expect(useEditorStore.getState().savedSections[0]!.label).toBe('Untitled section');
+  });
+
+  it('renames and removes', () => {
+    const id = useEditorStore.getState().saveSection('First', instantiateTemplate(TEMPLATES[3]!));
+    useEditorStore.getState().renameSavedSection(id, 'Second');
+    expect(useEditorStore.getState().savedSections[0]!.label).toBe('Second');
+
+    useEditorStore.getState().removeSavedSection(id);
+    expect(useEditorStore.getState().savedSections).toHaveLength(0);
+  });
+
+  it('is not part of the drawing, so undo does not touch it', () => {
+    // A preset is a tool. Undoing a street should not take a section out of your library.
+    useEditorStore.getState().saveSection('Kept', instantiateTemplate(TEMPLATES[3]!));
+    const before = useEditorStore.getState().savedSections.length;
+
+    useEditorStore.getState().addStreet(line);
+    useEditorStore.getState().undo();
+
+    expect(useEditorStore.getState().savedSections).toHaveLength(before);
+  });
+
+  it('still saves when the browser will not store anything', () => {
+    // These tests run without a DOM, so there is no localStorage — which makes this the
+    // exact condition a private window or a blocked-storage setting produces. Saving has
+    // to keep working in memory: refusing to save at all because it cannot be remembered
+    // is worse than remembering it only for this session.
+    const hasStorage = (() => {
+      try {
+        return typeof window !== 'undefined' && !!window.localStorage;
+      } catch {
+        return false;
+      }
+    })();
+
+    useEditorStore.getState().saveSection('Persisted', instantiateTemplate(TEMPLATES[3]!));
+    expect(useEditorStore.getState().savedSections[0]!.label).toBe('Persisted');
+
+    if (hasStorage) {
+      const raw = window.localStorage.getItem('geostripe.savedSections.v1');
+      expect(JSON.parse(raw!)[0].label).toBe('Persisted');
+    }
   });
 });

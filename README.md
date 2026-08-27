@@ -300,7 +300,7 @@ the width that is really there, and save it as GeoJSON you can reopen and keep e
     Keyed per street, an edit costs what the edit is worth.
   - Mid-drag, neighbours keep the trim they had; the street under the cursor is always
     exact. A vertex drag went from **85 ms a frame to 27**.
-- **855 unit tests** across geometry, curves, junction detection, intersection geometry,
+- **893 unit tests** across geometry, curves, junction detection, intersection geometry,
   complex and staggered junctions, merges, snapping, joining, road markings, the
   memoisation that keeps dragging affordable, cross-section arithmetic, the dimensional
   audit, the asset catalogue, the project round-trip, store history, and a baseline suite
@@ -347,40 +347,29 @@ happened:
 | **Cross-sections** | 96 primitives, 157 presets, 10 categories · Asset Builder page · fit check against measured right-of-way · two-level searchable library |
 | **Intersections** | Detection, footprints, curb returns, two-boundary trimming · radial inspector · crosswalks and stop bars · bulb-outs and daylighting · 5/6-way and staggered pairs · lane assignment and turn pockets · merges with taper and gore · placed nodes you own |
 | **Markings** | Longitudinal stripes, 19 pavement glyphs authored in real metres, lane-use arrows on junction approaches |
-| **Grade** | Profiles along a street — climb, cross, come back down — with per-crossing level checks, deck and ramp overlays, and an under/at-grade/over switch per crossing |
+| **Grade** | Profiles along a street — climb, cross, come back down — with per-crossing level checks and an under/at-grade/over switch. The carriageway is banded in pieces, so the road itself fades into the ground as it descends and solidifies as it rises |
+| **Interchanges** | Diamond, half diamond and trumpet, built from one crossing. Ramps come out as ordinary streets with a ramp cross-section — delete one, drag it, restyle it — and where a ramp rejoins the mainline the merge detector reads the angle and builds a taper |
+| **Your library** | Sections built in the Asset Builder are saved under a name and appear in the picker under *Yours*, first in the list. Saved whole, so glyphs and stripes survive. Kept in the browser, not the project: a preset is a tool, not part of any one drawing |
 | **Land** | Land-cover polygons with their own material palette |
 | **Output** | GeoJSON round-trip, Zod-validated, graceful partial load · before/after swipe |
 | **Craft** | Derived-geometry cache keyed on reference identity · error-bounded curve tessellation · per-street junction trimming · every shortcut has a button, plus a reference sheet · build stamp and stale-build notice |
 
 ### Next
 
-**1 · Ramps and interchange forms.** The parts all exist — grade profiles, merges,
-junctions — but building a diamond still means drawing four ramps by hand and setting each
-one's grade separately. An interchange form should place the ramps as real, editable
-streets from one crossing, the way a cross-section template places bands. Per crossing,
-never project-wide, and everything it makes stays editable afterwards.
-
-**2 · The Asset Builder should publish into the library.** Today you compose a
-cross-section there, export it as JSON, and import it back to use it. It should appear in
-the searchable tree like any other preset. This is the prefab loop, and it is the oldest
-thing on this list.
-
-**3 · The deck is an overlay, not the road.** A graded street's bands still render as
-ground-level asphalt with deck edges drawn over the top, so a tunnel does not go
-translucent along its buried stretch. Splitting bands at grade breakpoints fixes it, and it
-is what makes an interchange read correctly rather than approximately.
+Nothing — the three that were here have shipped. See **Interchanges**, **Your library** and
+**Grade** above.
 
 ### Then
 
-**4 · Trim at junctions by station, not by polygon boolean.** Cold derive is ~340 ms on a
+**1 · Trim at junctions by station, not by polygon boolean.** Cold derive is ~340 ms on a
 ten-street project and polyclip is the floor at roughly 3 ms a band. The junction already
 computes where the roadway resumes on each leg, so trimming the centerline's station range
 and generating bands from *that* removes the boolean from the hot path entirely. The right
 architecture, and a real rewrite.
 
-**5 · Roundabouts**, as a junction form alongside intersection and merge.
+**2 · Roundabouts**, as a junction form alongside intersection and merge.
 
-**6 · Live connections.** Welding a loose end is a one-shot edit: drag the through street
+**3 · Live connections.** Welding a loose end is a one-shot edit: drag the through street
 later and the side street does not follow. It reappears as an orange loose end and one
 click re-fixes it, which is honest but not automatic.
 

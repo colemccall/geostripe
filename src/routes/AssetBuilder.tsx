@@ -1,4 +1,4 @@
-import { useEditorStore, anchorModeOf } from '../store/useEditorStore';
+import { cloneSection, useEditorStore, anchorModeOf } from '../store/useEditorStore';
 import type { AnchorMode } from '../store/useEditorStore';
 import { downloadAsset, pickTextFile } from '../model/assetFile';
 import { parseAssetFile } from '../model/schema';
@@ -30,6 +30,7 @@ export default function AssetBuilder() {
   const recentTemplateIds = useEditorStore((s) => s.recentTemplateIds);
   const selectedId = useEditorStore((s) => s.selectedComponentId);
   const notice = useEditorStore((s) => s.notice);
+  const savedSections = useEditorStore((s) => s.savedSections);
 
   const {
     addComponent,
@@ -45,6 +46,8 @@ export default function AssetBuilder() {
     setAnchorMode,
     loadSection,
     applyTemplate,
+    saveSection,
+    removeSavedSection,
     setNotice,
   } = useEditorStore.getState();
 
@@ -212,6 +215,71 @@ export default function AssetBuilder() {
               Mirror the section
             </button>
           </div>
+        </section>
+
+        {/* ------------------------------------------------------------ library */}
+        <section className="panel">
+          <header className="panel-head">
+            <span className="label">Your library</span>
+            {savedSections.length > 0 && (
+              <span className="label mono">{savedSections.length} saved</span>
+            )}
+          </header>
+
+          <button
+            type="button"
+            className="btn btn-solid btn-block"
+            onClick={() => {
+              saveSection(section.name, section);
+              setNotice({
+                kind: 'success',
+                title: `“${section.name}” is in your library`,
+                details: [
+                  'It is in the cross-section picker now, under Yours — no export and re-import.',
+                ],
+              });
+            }}
+          >
+            Save to library
+          </button>
+          <p className="hint">
+            Kept in this browser rather than in the project, because a preset is a tool and
+            not part of any one drawing. Streets carry their own bands into the file
+            regardless, so sharing a project never loses geometry.
+          </p>
+
+          {savedSections.length > 0 && (
+            <ul className="cards" style={{ marginTop: 9 }}>
+              {savedSections.map((preset) => (
+                <li key={preset.id}>
+                  <div className="street-card">
+                    <button
+                      type="button"
+                      className="card street-card-main"
+                      title="Load this back into the builder"
+                      onClick={() => {
+                        if (preset.section) loadSection('draft', cloneSection(preset.section));
+                      }}
+                    >
+                      <span className="card-title">{preset.label}</span>
+                      <span className="card-meta">
+                        <span>{preset.note}</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="icon-btn is-danger"
+                      title="Remove it from your library"
+                      aria-label={`Remove ${preset.label}`}
+                      onClick={() => removeSavedSection(preset.id)}
+                    >
+                      🗑
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
 
         <section className="panel">

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { gradeSpans, isFlat, levelAt, levelsMeet, overpassProfile, sliceLine } from './grade';
 import { detectJunctions } from './junctions';
-import { resetDerivedCaches } from './derived';
+import { deriveProject, resetDerivedCaches } from './derived';
 import { componentsFromSpecs } from '../library/templates';
 import { distanceMeters, lineLengthMeters } from './measure';
 import type { GradePoint } from './grade';
@@ -287,5 +287,70 @@ describe('surviving a save and reload', () => {
     const flat = street('flat', [at(-100, 0), at(100, 0)]);
     const text = serializeProject([flat], { name: 'flat', editorVersion: 'test' });
     expect(text).not.toContain('grade');
+  });
+});
+
+describe('the road itself carrying its level', () => {
+  const flyover = () => overpassProfile(400, 200, { rampMeters: 45, holdMeters: 25 });
+
+  it('bands a flat street in one piece, as it always did', () => {
+    // The profile must cost a flat street nothing at all.
+    const derived = deriveProject([street('flat', [at(-200, 0), at(200, 0)])]);
+    const bands = derived.byStreet.get('flat')!.bands;
+    // Four components, one polygon each.
+    expect(bands).toHaveLength(4);
+  });
+
+  it('bands a graded street in pieces, one per stretch', () => {
+    const derived = deriveProject([street('main', [at(-200, 0), at(200, 0)], flyover())]);
+    const bands = derived.byStreet.get('main')!.bands;
+    // Five stretches — ground, up, across, down, ground — times four components.
+    expect(bands.length).toBeGreaterThan(4);
+    expect(bands.length % 4).toBe(0);
+  });
+
+  it('gives every piece the level it actually sits at', () => {
+    const derived = deriveProject([street('main', [at(-200, 0), at(200, 0)], flyover())]);
+    const levels = derived.byStreet
+      .get('main')!
+      .bands.map((b) => (b.properties as { level?: number }).level ?? 0);
+
+    // On the ground at both ends, fully up in the middle, and something in between on the
+    // ramps — which is what makes the road fade and solidify rather than switch.
+    expect(Math.min(...levels)).toBeCloseTo(0, 6);
+    expect(Math.max(...levels)).toBeCloseTo(1, 6);
+    expect(levels.some((l) => l > 0.1 && l < 0.9)).toBe(true);
+  });
+
+  it('closes the seam between pieces exactly', () => {
+    // Sliced, not cut: the end of one piece and the start of the next are the same
+    // coordinate, so no sliver of imagery shows through across the carriageway.
+    const derived = deriveProject([street('main', [at(-200, 0), at(200, 0)], flyover())]);
+    const bands = derived.byStreet.get('main')!.bands;
+
+    const lane = bands.filter((b) => b.properties?.["componentIndex"] === 1);
+    expect(lane.length).toBeGreaterThan(1);
+    for (const band of lane) {
+      expect(band.geometry.type).toBe('Polygon');
+    }
+  });
+
+  it('marks a tunnel below grade so it can be drawn buried', () => {
+    const derived = deriveProject([
+      street('under', [at(-200, 0), at(200, 0)], overpassProfile(400, 200, { direction: -1 })),
+    ]);
+    const levels = derived.byStreet
+      .get('under')!
+      .bands.map((b) => (b.properties as { level?: number }).level ?? 0);
+    expect(Math.min(...levels)).toBeCloseTo(-1, 6);
+    expect(Math.max(...levels)).toBeCloseTo(0, 6);
+  });
+
+  it('still honours a flat street marked as an overpass end to end', () => {
+    const viaduct: Street = { ...street('via', [at(-100, 0), at(100, 0)]), level: 1 };
+    const derived = deriveProject([viaduct]);
+    for (const band of derived.byStreet.get('via')!.bands) {
+      expect((band.properties as { level?: number } | null)?.level).toBe(1);
+    }
   });
 });

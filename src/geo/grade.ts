@@ -168,6 +168,57 @@ export function sliceLine(
   return out;
 }
 
+export interface GradeSegment {
+  fromMeters: number;
+  toMeters: number;
+  /** One level for the whole piece: the mean of its two ends. */
+  level: number;
+}
+
+/**
+ * The street cut into pieces that can each be drawn at a single level.
+ *
+ * A band is one polygon for a whole street, so a street that climbs has no way to render
+ * as ground at one end and structure at the other — the deck was drawn as an overlay on
+ * top of asphalt that still looked like it was lying on the earth. Banding each piece
+ * separately is what lets the road itself carry the level, and it costs nothing on a flat
+ * street: an empty result means "use the whole line", which is the common case.
+ *
+ * Cut at every breakpoint rather than only where the level crosses into being elevated.
+ * A ramp is where the interesting rendering happens — it is the part that has to look like
+ * it is going somewhere — and one polygon per ramp is what lets it be shaded along its run.
+ */
+export function gradeSegments(
+  profile: readonly GradePoint[] | undefined,
+  totalLengthMeters: number,
+): GradeSegment[] {
+  if (isFlat(profile) || !profile || profile.length < 2) return [];
+
+  // Breakpoints, plus the ends of the street, in order and without duplicates.
+  const cuts = [0, ...profile.map((p) => p.stationMeters), totalLengthMeters]
+    .filter((m) => m >= 0 && m <= totalLengthMeters)
+    .sort((a, b) => a - b);
+
+  const segments: GradeSegment[] = [];
+  for (let i = 0; i < cuts.length - 1; i++) {
+    const from = cuts[i]!;
+    const to = cuts[i + 1]!;
+    // Pieces shorter than this are a rounding artefact of two breakpoints landing together,
+    // and banding one produces a sliver the offsetter cannot do anything useful with.
+    if (to - from < 0.5) continue;
+    segments.push({
+      fromMeters: from,
+      toMeters: to,
+      level: (levelAt(profile, from) + levelAt(profile, to)) / 2,
+    });
+  }
+
+  // One piece covering the whole street is the flat case wearing a profile. Say so, so the
+  // caller takes the cheap path.
+  if (segments.length <= 1) return [];
+  return segments;
+}
+
 /**
  * How far along a line a point sits, in metres.
  *

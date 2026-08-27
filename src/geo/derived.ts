@@ -18,7 +18,8 @@ import type { CurveSettings } from './curve';
 import type { Junction } from './junctions';
 import { DEFAULT_CORNER_RADIUS_METRES, junctionGeometry } from './intersection';
 import { classifyJunction, mergeGeometry } from './merge';
-import { gradeSpans, sliceLine } from './grade';
+import { gradeSegments, gradeSpans, sliceLine } from './grade';
+import { lineLengthMeters } from './measure';
 import { sectionExtent } from '../model/section';
 import type { JunctionForm } from './merge';
 import type {
@@ -219,11 +220,65 @@ export interface DeriveOptions {
   liveStreetId?: string | null;
 }
 
+/**
+ * Bands for a street, cut into pieces wherever its level changes.
+ *
+ * A flat street bands once, exactly as before — the profile costs it nothing. A street
+ * that climbs bands once per piece, and each piece carries the level it sits at, so the
+ * road itself renders as ground, ramp or structure instead of a deck outline drawn over
+ * asphalt that still looks like it is lying on the earth.
+ *
+ * Sliced rather than cut: `sliceLine` puts the same coordinate at the end of one piece and
+ * the start of the next, so the seam across the carriageway closes exactly and no sliver
+ * appears between them.
+ */
+function bandsForGrade(
+  street: Street,
+  line: readonly LngLat[],
+): { bands: BandFeature[]; warnings: CurvatureWarning[] } {
+  const segments = gradeSegments(street.grade, lineLengthMeters(line));
+  if (segments.length === 0) {
+    const flat = bandsForStreet(street.id, line, street.section);
+    return {
+      bands: flat.bands.map((band) => withLevel(band, street.level ?? 0)),
+      warnings: flat.warnings,
+    };
+  }
+
+  const bands: BandFeature[] = [];
+  const warnings: CurvatureWarning[] = [];
+
+  for (const segment of segments) {
+    const piece = sliceLine(line, segment.fromMeters, segment.toMeters);
+    if (piece.length < 2) continue;
+    const result = bandsForStreet(street.id, piece, street.section);
+    for (const band of result.bands) bands.push(withLevel(band, segment.level));
+    // Curvature is a property of the alignment, not of a piece of it. Vertex indices are
+    // per-piece here, so they cannot be compared across segments — the angle and the
+    // run-out identify a repeat well enough to stop the same bend being reported four times.
+    for (const warning of result.warnings) {
+      const seen = warnings.some(
+        (w) =>
+          Math.abs(w.turnDegrees - warning.turnDegrees) < 0.01 &&
+          Math.abs(w.requiredMeters - warning.requiredMeters) < 0.01,
+      );
+      if (!seen) warnings.push(warning);
+    }
+  }
+
+  return { bands, warnings };
+}
+
+function withLevel(band: BandFeature, level: number): BandFeature {
+  return { ...band, properties: { ...band.properties, level } };
+}
+
 // ------------------------------------------------------------------------ raw bands
 
 interface RawEntry {
   centerline: Street['centerline'];
   curve: CurveSettings | undefined;
+  grade: Street['grade'];
   section: CrossSection;
   bands: BandFeature[];
   markings: Feature[];
@@ -241,16 +296,18 @@ function rawFor(street: Street): RawEntry {
     hit &&
     hit.centerline === street.centerline &&
     hit.curve === street.curve &&
+    hit.grade === street.grade &&
     hit.section === street.section
   ) {
     return hit;
   }
 
   const line = resolveCenterline(street);
-  const result = bandsForStreet(street.id, line, street.section);
+  const result = bandsForGrade(street, line);
   const entry: RawEntry = {
     centerline: street.centerline,
     curve: street.curve,
+    grade: street.grade,
     section: street.section,
     bands: result.bands,
     markings: stripesForStreet(street.id, line, street.section),
@@ -911,8 +968,13 @@ export function deriveProject(
       const trimmed = subtractRings(band, holesNear(roadway ? myRoadway : myFootprint, bandBounds));
       if (!trimmed) continue;
       // Carried onto the feature so the map can draw a tunnel translucent and an overpass
-      // with a deck edge, without needing to know which street a band came from.
-      trimmed.properties = { ...trimmed.properties, level: street.level ?? 0 };
+      // with a deck edge, without needing to know which street a band came from. Set when
+      // the band was made — a graded street's pieces each carry their own — so this only
+      // fills in for anything that arrived without one.
+      trimmed.properties = {
+        ...trimmed.properties,
+        level: trimmed.properties?.['level'] ?? street.level ?? 0,
+      };
 
       const daylightNear = holesNear(myDaylight, bandBounds);
       if (!roadway || !isParking(type) || daylightNear.length === 0) {

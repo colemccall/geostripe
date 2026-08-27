@@ -20,6 +20,8 @@ import { newId } from '../model/types';
 type Spec = readonly [ComponentType, Direction] | readonly [ComponentType, Direction, number];
 
 export type TemplateCategory =
+  /** Sections you built in the Asset Builder and kept. Always listed first. */
+  | 'saved'
   | 'existing'
   | 'diet'
   | 'bike'
@@ -32,6 +34,7 @@ export type TemplateCategory =
   | 'special';
 
 export const TEMPLATE_CATEGORIES: { id: TemplateCategory; label: string }[] = [
+  { id: 'saved', label: 'Yours' },
   { id: 'existing', label: 'As built' },
   { id: 'diet', label: 'Road diet' },
   { id: 'bike', label: 'Bike' },
@@ -58,6 +61,15 @@ export interface TemplateDef {
    */
   readonly family: string;
   readonly specs: readonly Spec[];
+  /**
+   * A whole cross-section, for presets that came out of the Asset Builder.
+   *
+   * `specs` can only say type, direction and width. A section somebody built by hand can
+   * also carry a pavement glyph, a stripe on one side, a colour override — everything the
+   * builder can set. Rebuilding one from specs would silently drop all of it, so a saved
+   * preset carries the section itself and this takes precedence.
+   */
+  readonly section?: CrossSection;
 }
 
 /** A narrowed lane, the number a road diet is arguing for. */
@@ -1556,6 +1568,21 @@ export function componentsFromSpecs(specs: readonly Spec[]): SectionComponent[] 
 }
 
 export function instantiateTemplate(template: TemplateDef): CrossSection {
+  // A saved section is copied whole, with fresh component ids so two streets sharing a
+  // preset never alias each other's bands — the same guarantee `componentsFromSpecs` gives
+  // for a generated one.
+  if (template.section) {
+    return {
+      id: newId('sec'),
+      name: template.section.name || template.label,
+      anchorOffsetMeters: template.section.anchorOffsetMeters,
+      components: template.section.components.map((component) => ({
+        ...component,
+        id: newId('cmp'),
+      })),
+    };
+  }
+
   return {
     id: newId('sec'),
     name: template.label,
@@ -1593,10 +1620,13 @@ export function templateTree(
   }).filter((entry) => entry.groups.length > 0);
 }
 
-export function searchTemplates(query: string): TemplateDef[] {
+export function searchTemplates(
+  query: string,
+  templates: readonly TemplateDef[] = TEMPLATES,
+): TemplateDef[] {
   const q = query.trim().toLowerCase();
-  if (!q) return [...TEMPLATES];
-  return TEMPLATES.filter((template) => {
+  if (!q) return [...templates];
+  return templates.filter((template) => {
     if (
       template.label.toLowerCase().includes(q) ||
       template.note.toLowerCase().includes(q) ||

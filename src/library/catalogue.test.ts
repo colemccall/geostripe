@@ -138,9 +138,24 @@ describe('the template catalogue', () => {
   it('puts every template in a category the filter offers, and leaves none empty', () => {
     const offered = new Set(TEMPLATE_CATEGORIES.map((c) => c.id));
     for (const template of TEMPLATES) expect(offered.has(template.category)).toBe(true);
+
     for (const group of TEMPLATE_CATEGORIES) {
+      // 'saved' is the one category the catalogue does not fill: it holds sections the
+      // user built, and a fresh install has none. The tree drops empty groups, so it
+      // simply does not appear until there is something in it.
+      if (group.id === 'saved') continue;
       expect(TEMPLATES.filter((t) => t.category === group.id).length).toBeGreaterThan(0);
     }
+  });
+
+  it('ships no saved sections of its own', () => {
+    // Guards the exemption above from becoming a hiding place: 'saved' means "yours", and
+    // a built-in preset sitting in it would be the library claiming credit for your work.
+    expect(TEMPLATES.filter((t) => t.category === 'saved')).toHaveLength(0);
+  });
+
+  it('offers Yours first, where a saved section is easiest to find', () => {
+    expect(TEMPLATE_CATEGORIES[0]!.id).toBe('saved');
   });
 
   it('produces a plausible street from every single one', () => {

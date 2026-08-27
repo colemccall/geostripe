@@ -393,8 +393,42 @@ function addDesignLayers(map: MapLibreMap) {
     paint: {
       // Colour travels with the feature so a palette change needs no layer rebuild.
       'fill-color': ['get', 'color'],
-      // A tunnel shows the ground through it; anything at or above grade is solid.
-      'fill-opacity': ['case', ['<', ['coalesce', ['get', 'level'], 0], 0], 0.42, 0.82],
+      // Level is now per band rather than per street, because a street that climbs is
+      // banded in pieces. So the road itself fades into the ground as it descends and
+      // solidifies as it rises, instead of a deck outline being drawn over asphalt that
+      // still looks like it is lying on the earth.
+      //
+      // Interpolated rather than stepped: a ramp is a continuum, and stepping it would put
+      // a hard line across the carriageway at a station where nothing happens.
+      'fill-opacity': [
+        'interpolate', ['linear'], ['coalesce', ['get', 'level'], 0],
+        -1, 0.3,
+        -0.5, 0.42,
+        0, 0.86,
+        0.5, 0.93,
+        1, 0.97,
+      ],
+    },
+  });
+
+  // A structure casts a shadow and the ground does not. One line under the elevated
+  // pieces, offset nothing but drawn dark and soft, is the cheapest thing that reads as
+  // "this is above the other road" without pretending to be a 3D view.
+  addLayerSafely(map, {
+    id: 'band-lift',
+    type: 'line',
+    source: 'bands',
+    filter: ['>=', ['coalesce', ['get', 'level'], 0], 0.5],
+    layout: { 'line-join': 'round' },
+    paint: {
+      'line-color': 'rgba(6,10,12,0.5)',
+      'line-width': [
+        'interpolate', ['linear'], ['zoom'],
+        15, 1.5,
+        20, 5,
+      ],
+      'line-blur': 2.5,
+      'line-translate': [2, 3],
     },
   });
 

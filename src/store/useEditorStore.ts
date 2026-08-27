@@ -4,10 +4,14 @@ import { PRIMITIVES } from '../library/primitives';
 import { TEMPLATES, instantiateTemplate } from '../library/templates';
 import type { Area, CrossSection, JunctionNode, SectionComponent, Street } from '../model/types';
 import { newId } from '../model/types';
-import { autoAnchorOffset, geometricCentreOffset } from '../model/section';
+import { autoAnchorOffset, geometricCentreOffset, totalWidth } from '../model/section';
 import { applyConnections, planConnections } from '../geo/connect';
 import { createCincinnatiProject } from '../demo/cincinnati';
 import { overpassProfile } from '../geo/grade';
+import { planInterchange } from '../geo/interchange';
+import type { TemplateDef } from '../library/templates';
+import type { InterchangeOptions } from '../geo/interchange';
+import { detectJunctions } from '../geo/junctions';
 import type { GradePoint } from '../geo/grade';
 import { lineLengthMeters } from '../geo/measure';
 import { resolveCenterline } from '../geo/curve';
@@ -116,6 +120,16 @@ interface EditorState extends Snapshot {
    * way it always did, and the modifiers still work as accelerators on top.
    */
   pointAction: 'move' | 'sharp' | 'remove';
+  /**
+   * Cross-sections you built and kept, alongside the built-in presets.
+   *
+   * Deliberately outside the undo snapshot and outside the project. A preset is a tool,
+   * not a part of the drawing: undoing a street should not take a section out of your
+   * library, and opening someone else's project should not replace it. They persist in the
+   * browser instead, which is what makes them feel like they are yours rather than the
+   * file's.
+   */
+  savedSections: TemplateDef[];
   /**
    * How the next point placed joins the last one, while drawing.
    *
@@ -237,6 +251,10 @@ interface EditorState extends Snapshot {
   setJunctionMode: (mode: 'auto' | 'nodes') => void;
   setAutoConnect: (on: boolean) => void;
   setPointAction: (action: 'move' | 'sharp' | 'remove') => void;
+  /** Keep a cross-section in the library under a name. Returns its preset id. */
+  saveSection: (name: string, section: CrossSection) => string;
+  renameSavedSection: (id: string, name: string) => void;
+  removeSavedSection: (id: string) => void;
 /**
    * Weld ONE loose end onto the street it was drawn to meet.
    *
@@ -327,6 +345,21 @@ interface EditorState extends Snapshot {
    * a flyover something you can build an interchange out of rather than a floating road.
    */
   setStreetGrade: (streetId: string, grade: GradePoint[] | null) => void;
+  /**
+   * Turn one crossing into a grade-separated interchange.
+   *
+   * Places the ramps as ordinary streets and puts a grade profile on the mainline, all in
+   * one commit — so a single Ctrl+Z takes the whole interchange back rather than leaving
+   * four orphan ramps behind. Nothing it makes is special: delete a ramp and it is gone,
+   * drag its vertices and it moves, and where it rejoins the mainline the merge detector
+   * reads the angle and builds a taper.
+   *
+   * Returns what happened, so the caller can report it instead of guessing.
+   */
+  buildInterchange: (
+    junctionKey: string,
+    options: InterchangeOptions,
+  ) => { ramps: number; warnings: string[] } | null;
   /** Raise or lower the street over the junction at `stationMeters`, ramps included. */
   gradeSeparateAt: (
     streetId: string,
@@ -396,6 +429,50 @@ const initialStreets = createDemoStreets();
  * street's widths would silently rewrite the draft, and two streets from the same draft
  * would share component ids and select as one.
  */
+/**
+ * Where saved cross-sections live between visits.
+ *
+ * The browser, not the project file. A preset is a tool rather than a part of any one
+ * drawing — opening somebody else's project should not swap out your library, and undoing
+ * a street should not take a section out of it. Streets carry their own components in the
+ * file regardless, so a shared project never loses geometry; what the recipient does not
+ * get is the *named preset* in their own library, which is the right split.
+ */
+const SAVED_SECTIONS_KEY = 'geostripe.savedSections.v1';
+
+function loadSavedSections(): TemplateDef[] {
+  try {
+    const raw = window.localStorage.getItem(SAVED_SECTIONS_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    // Validated shallowly rather than trusted. This is data a previous version of the app
+    // wrote, and the shape it wrote is not something this one can assume.
+    return parsed.filter(
+      (entry): entry is TemplateDef =>
+        !!entry &&
+        typeof entry === 'object' &&
+        typeof (entry as TemplateDef).id === 'string' &&
+        typeof (entry as TemplateDef).label === 'string' &&
+        Array.isArray((entry as TemplateDef).specs),
+    );
+  } catch {
+    // Private browsing, a cleared store, a half-written value. An empty library is a
+    // working app; a thrown error on first paint is not.
+    return [];
+  }
+}
+
+function persistSavedSections(sections: readonly TemplateDef[]): void {
+  try {
+    window.localStorage.setItem(SAVED_SECTIONS_KEY, JSON.stringify(sections));
+  } catch {
+    // Storage full or blocked. The section is still in memory for this session, which is
+    // better than refusing to save it at all.
+  }
+}
+
 export function cloneSection(section: CrossSection, name?: string): CrossSection {
   return {
     id: newId('sec'),
@@ -413,6 +490,19 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
   /** Captured at gesture start; null when no gesture is in flight. */
   let gestureBefore: Snapshot | null = null;
+
+  /**
+   * A street carrying a grade profile, with the flat level it contradicts removed.
+   *
+   * Both in one place because setting one while leaving the other is the bug: the profile
+   * would say the road climbs while `level` said it was elevated end to end, and which one
+   * won would depend on which piece of code asked.
+   */
+  const withGrade = (street: Street, grade: GradePoint[]): Street => {
+    const next: Street = { ...street, grade };
+    delete next.level;
+    return next;
+  };
 
   const editStreet = (streetId: string, fn: (street: Street) => Street) =>
     get().streets.map((s) => (s.id === streetId ? fn(s) : s));
@@ -465,6 +555,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     junctionMode: 'auto',
     autoConnect: true,
     pointAction: 'move',
+    savedSections: loadSavedSections(),
     segmentMode: 'straight',
     drawRadiusMeters: DEFAULT_CURVE.radiusMeters,
 
@@ -611,6 +702,43 @@ export const useEditorStore = create<EditorState>((set, get) => {
     setJunctionMode: (junctionMode) => set({ junctionMode }),
     setAutoConnect: (autoConnect) => set({ autoConnect }),
     setPointAction: (pointAction) => set({ pointAction }),
+
+    saveSection: (name, section) => {
+      const label = name.trim() || 'Untitled section';
+      const preset: TemplateDef = {
+        id: newId('saved'),
+        label,
+        note: `${section.components.length} bands · ${totalWidth(section.components).toFixed(1)} m`,
+        category: 'saved',
+        family: 'Yours',
+        // Specs are kept as a readable fallback for anything that only understands them;
+        // `section` is what actually gets instantiated and carries the glyphs and stripes.
+        specs: section.components.map(
+          (c) => [c.componentType, c.direction, c.widthMeters] as const,
+        ),
+        section: cloneSection({ ...section, name: label }),
+      };
+      const savedSections = [...get().savedSections, preset];
+      set({ savedSections });
+      persistSavedSections(savedSections);
+      return preset.id;
+    },
+
+    renameSavedSection: (id, name) => {
+      const savedSections = get().savedSections.map((preset) =>
+        preset.id === id
+          ? { ...preset, label: name, section: preset.section ? { ...preset.section, name } : undefined }
+          : preset,
+      );
+      set({ savedSections });
+      persistSavedSections(savedSections);
+    },
+
+    removeSavedSection: (id) => {
+      const savedSections = get().savedSections.filter((preset) => preset.id !== id);
+      set({ savedSections });
+      persistSavedSections(savedSections);
+    },
 
     connectEnd: (streetId, end) => {
       const streets = get().streets;
@@ -911,6 +1039,52 @@ export const useEditorStore = create<EditorState>((set, get) => {
           return next;
         }),
       }),
+
+    buildInterchange: (junctionKey, options) => {
+      const { streets, drawSectionId, nodes, junctionMode, junctionMergeSlackMeters } = get();
+      // Resolved here rather than passed in: the UI holds a flattened summary of a
+      // junction, and the planner needs the real thing — legs, stations, half-widths. The
+      // store already owns the streets it comes from, so this is the honest place to find
+      // it, and it cannot go stale between the click and the build.
+      const { junctions } = detectJunctions(streets, {
+        mergeSlackMeters: junctionMergeSlackMeters,
+        nodes,
+        mode: junctionMode,
+      });
+      const junction = junctions.find((j) => j.key === junctionKey);
+      if (!junction) return null;
+
+      const plan = planInterchange(junction, streets, options);
+      if (!plan) return null;
+
+      // Ramps get a ramp section, not whatever the draw tool happens to be set to. A ramp
+      // with a boulevard cross-section is not a ramp.
+      const rampTemplate =
+        TEMPLATES.find((t) => t.id === 'ramp-1') ??
+        TEMPLATES.find((t) => t.id === drawSectionId) ??
+        TEMPLATES[0]!;
+
+      const ramps: Street[] = plan.ramps.map((ramp) => ({
+        id: newId('st'),
+        name: ramp.name,
+        centerline: ramp.centerline.map((p) => [...p] as [number, number]),
+        curve: ramp.curve,
+        section: instantiateTemplate(rampTemplate),
+        visible: true,
+      }));
+
+      commit({
+        streets: [
+          ...streets.map((s) =>
+            s.id === plan.mainlineId ? withGrade(s, plan.mainlineGrade) : s,
+          ),
+          ...ramps,
+        ],
+      });
+      set({ selectedStreetId: plan.mainlineId, selectedJunctionKey: null });
+
+      return { ramps: ramps.length, warnings: plan.warnings };
+    },
 
     gradeSeparateAt: (streetId, stationMeters, direction, options = {}) => {
       const street = get().streets.find((s) => s.id === streetId);

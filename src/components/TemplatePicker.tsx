@@ -3,6 +3,7 @@ import { TEMPLATES, searchTemplates, templateTotalWidth, templateTree } from '..
 import type { TemplateDef } from '../library/templates';
 import { PRIMITIVES } from '../library/primitives';
 import LibraryTree from './LibraryTree';
+import { useEditorStore } from '../store/useEditorStore';
 import { formatWidth } from '../lib/units';
 import type { DisplayUnits } from '../lib/units';
 
@@ -16,6 +17,10 @@ import type { DisplayUnits } from '../lib/units';
  *
  * Search covers the components a preset contains as well as its name, so "busway" finds the
  * one with a busway in it even though the word is not in its label.
+ *
+ * Sections saved from the Asset Builder appear here alongside the built-in presets, in a
+ * category of their own that sorts first. That is the whole point of saving one: a preset
+ * you have to export and re-import to use is not in your library, it is in your downloads.
  */
 
 interface Props {
@@ -35,11 +40,13 @@ export default function TemplatePicker({
   recent = [],
 }: Props) {
   const [query, setQuery] = useState('');
+  const saved = useEditorStore((s) => s.savedSections);
 
-  const tree = useMemo(() => templateTree(), []);
+  const all = useMemo(() => [...saved, ...TEMPLATES], [saved]);
+  const tree = useMemo(() => templateTree(all), [all]);
   const filtered = useMemo(
-    () => (query.trim() ? templateTree(searchTemplates(query)) : tree),
-    [query, tree],
+    () => (query.trim() ? templateTree(searchTemplates(query, all)) : tree),
+    [query, tree, all],
   );
 
   const card = (template: TemplateDef) => (
@@ -71,7 +78,7 @@ export default function TemplatePicker({
   );
 
   const recentTemplates = recent
-    .map((id) => TEMPLATES.find((t) => t.id === id))
+    .map((id) => all.find((t) => t.id === id))
     .filter((t): t is TemplateDef => Boolean(t));
 
   return (
@@ -81,7 +88,9 @@ export default function TemplatePicker({
       query={query}
       onQuery={setQuery}
       placeholder="Search cross-sections…"
-      totalLabel={`${TEMPLATES.length} presets`}
+      totalLabel={
+        saved.length > 0 ? `${TEMPLATES.length} presets · ${saved.length} yours` : `${TEMPLATES.length} presets`
+      }
       keyOf={(template) => template.id}
       renderItem={card}
       header={

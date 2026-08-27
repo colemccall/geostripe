@@ -35,6 +35,14 @@ export interface BandProperties {
   direction: Direction;
   widthMeters: number;
   color: string;
+  /**
+   * Where this piece of the street sits relative to the ground.
+   *
+   * On the band rather than looked up per street, because a street with a grade profile is
+   * banded in pieces and each piece is at a different level — which is the whole point of
+   * banding it in pieces.
+   */
+  level?: number;
 }
 
 export type BandFeature = Feature<Polygon | MultiPolygon, BandProperties>;
