@@ -300,7 +300,7 @@ the width that is really there, and save it as GeoJSON you can reopen and keep e
     Keyed per street, an edit costs what the edit is worth.
   - Mid-drag, neighbours keep the trim they had; the street under the cursor is always
     exact. A vertex drag went from **85 ms a frame to 27**.
-- **893 unit tests** across geometry, curves, junction detection, intersection geometry,
+- **898 unit tests** across geometry, curves, junction detection, intersection geometry,
   complex and staggered junctions, merges, snapping, joining, road markings, the
   memoisation that keeps dragging affordable, cross-section arithmetic, the dimensional
   audit, the asset catalogue, the project round-trip, store history, and a baseline suite
@@ -348,7 +348,7 @@ happened:
 | **Intersections** | Detection, footprints, curb returns, two-boundary trimming · radial inspector · crosswalks and stop bars · bulb-outs and daylighting · 5/6-way and staggered pairs · lane assignment and turn pockets · merges with taper and gore · placed nodes you own |
 | **Markings** | Longitudinal stripes, 19 pavement glyphs authored in real metres, lane-use arrows on junction approaches |
 | **Grade** | Profiles along a street — climb, cross, come back down — with per-crossing level checks and an under/at-grade/over switch. The carriageway is banded in pieces, so the road itself fades into the ground as it descends and solidifies as it rises |
-| **Interchanges** | Diamond, half diamond and trumpet, built from one crossing. Ramps come out as ordinary streets with a ramp cross-section — delete one, drag it, restyle it — and where a ramp rejoins the mainline the merge detector reads the angle and builds a taper |
+| **Interchanges** | Diamond, half diamond and trumpet, built from one crossing. A diamond comes out as **four merges on the mainline and two ordinary crossroads on the cross road** — the terminals have corners, crossings and approaches to design like any other intersection. Ramps are ordinary streets: delete one, drag it, restyle it |
 | **Your library** | Sections built in the Asset Builder are saved under a name and appear in the picker under *Yours*, first in the list. Saved whole, so glyphs and stripes survive. Kept in the browser, not the project: a preset is a tool, not part of any one drawing |
 | **Land** | Land-cover polygons with their own material palette |
 | **Output** | GeoJSON round-trip, Zod-validated, graceful partial load · before/after swipe |

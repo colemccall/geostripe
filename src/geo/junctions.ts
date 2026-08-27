@@ -37,6 +37,24 @@ const MIN_CLUSTER_METRES = 3;
 export const STUB_METRES = 12;
 
 /**
+ * Below this an arm is not a road, it is slop.
+ *
+ * Narrower than a single lane, so nothing anybody drew on purpose falls here. Three tiers:
+ * under three metres is an artefact and is dropped; three to twelve is a stub, kept and
+ * warned about because it genuinely constrains what the junction can carry; above that is
+ * an ordinary leg.
+ *
+ * The artefacts it removes are real and were doing damage. A street that stops on another
+ * is usually found twice — once as an endpoint projected onto the through street, once as
+ * a proper crossing a metre or so along, because a line arriving tangentially grazes the
+ * one it lands on. Averaging those leaves a metre of tail past the junction, and that tail
+ * counted as a leg: a T came out as a crossroads, with four corner fillets, four approaches
+ * to design and a phantom arm nobody drew. The same thing happened to a centreline that
+ * overshot by a metre while being traced.
+ */
+const MIN_ARM_METRES = 3;
+
+/**
  * One arm of a junction: a street leaving the junction point in one direction.
  *
  * A street passing straight through contributes two legs; a street that ends there
@@ -329,19 +347,30 @@ function buildLegs(group: Crossing[], tracks: Map<string, Track>): JunctionLeg[]
     }
   }
 
+
   const legs: JunctionLeg[] = [];
 
   for (const [streetId, stations] of stationByStreet) {
     const track = tracks.get(streetId);
     if (!track) continue;
-    const station = stations.reduce((sum, s) => sum + s, 0) / stations.length;
+    const station = stationFor(track, stations);
     const tangent = tangentAt(track, station);
 
-    // A leg exists in each direction that still has street left in it. A street ending
-    // here yields one leg; a street passing through yields two.
+    // A leg exists in each direction that still has street left in it — but "left in it"
+    // means enough to get clear of the junction, not merely more than nothing.
+    //
+    // A street that stops on another is usually found twice: once as an endpoint projected
+    // onto the through street, and once as a proper crossing a metre or two along, because
+    // a line arriving tangentially grazes the one it lands on. The average of those sits
+    // slightly inside the street and leaves a metre of tail hanging past the junction. That
+    // tail was then a leg in its own right, so a T came out as a crossroads: four corner
+    // fillets, four approaches to design, and a phantom arm nobody drew.
+    //
+    // Nobody draws a two-metre street. See MIN_ARM_METRES.
     const arms: { sense: 1 | -1; lengthMeters: number }[] = [];
-    if (track.length - station > EPS) arms.push({ sense: 1, lengthMeters: track.length - station });
-    if (station > EPS) arms.push({ sense: -1, lengthMeters: station });
+    const ahead = track.length - station;
+    if (ahead > MIN_ARM_METRES) arms.push({ sense: 1, lengthMeters: ahead });
+    if (station > MIN_ARM_METRES) arms.push({ sense: -1, lengthMeters: station });
 
     for (const arm of arms) {
       const dx = tangent.x * arm.sense;
@@ -369,6 +398,31 @@ function buildLegs(group: Crossing[], tracks: Map<string, Track>): JunctionLeg[]
 
   legs.sort((a, b) => a.bearing - b.bearing);
   return legs;
+}
+
+/**
+ * Where along a street this junction sits, given every way the crossing was found.
+ *
+ * The average, except when one of those ways was the street's own end — then it is the end.
+ *
+ * A street that stops on another is routinely found twice: once as an endpoint projected
+ * onto the through street, and once as a proper crossing a few metres along, because a line
+ * arriving at a shallow angle grazes the one it is landing on. Averaging those two puts the
+ * junction several metres inside the street and leaves the difference hanging past it as a
+ * phantom arm.
+ *
+ * Snapping is not a tolerance fudge. A street cannot meet anything beyond where it stops,
+ * so if one of the hits is its end, that is the answer and the graze is the artefact.
+ *
+ * The threshold is deliberately tight — a lane's width, the same figure that decides
+ * whether an arm is a road at all. A stub genuinely six metres long is not an endpoint
+ * artefact and keeps its real station, so the corner-radius clamp still has something short
+ * to complain about.
+ */
+function stationFor(track: Track, stations: readonly number[]): number {
+  if (Math.min(...stations) <= MIN_ARM_METRES) return 0;
+  if (track.length - Math.max(...stations) <= MIN_ARM_METRES) return track.length;
+  return stations.reduce((sum, station) => sum + station, 0) / stations.length;
 }
 
 function classify(legs: readonly JunctionLeg[], streetCount: number): JunctionKind {

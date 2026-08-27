@@ -97,9 +97,14 @@ describe('planning a diamond', () => {
     expect(plan.crossStreetId).toBe('cross');
   });
 
-  it('starts every ramp on the mainline and ends it on the cross road', () => {
+  it('starts every ramp beside the mainline and ends it on the cross road', () => {
     // The whole arrangement depends on this. A ramp that stops short of either forms no
     // junction at all, and the interchange is four disconnected curves.
+    //
+    // Beside, not on. A ramp that starts exactly on the centreline curves away and grazes
+    // it again a few metres on, and that second crossing is a phantom four-legged junction
+    // sitting beside every merge. Starting clear of the line — but well inside the
+    // detector's tolerance, which is the mainline's own half-width — gives one clean T.
     const streets = crossing();
     const plan = planInterchange(junctionFor(streets), streets, {
       mainlineId: 'freeway',
@@ -109,16 +114,26 @@ describe('planning a diamond', () => {
     for (const ramp of plan.ramps) {
       const start = ramp.centerline[0]!;
       const end = ramp.centerline[ramp.centerline.length - 1]!;
+
       // The mainline runs along y = 0 and the cross road along x = 0.
-      expect(Math.abs(start[1] - at(0, 0)[1])).toBeLessThan(1e-9);
+      const offMainline = Math.abs(start[1] - at(0, 0)[1]) * M_PER_LAT;
+      expect(offMainline).toBeGreaterThan(0.5);
+      expect(offMainline).toBeLessThan(3);
+
       expect(Math.abs(end[0] - at(0, 0)[0])).toBeLessThan(1e-9);
     }
   });
 
-  it('leaves the mainline along the mainline, so it reads as a merge', () => {
+  it('leaves the mainline shallowly, so it reads as a merge', () => {
     // The merge detector decides from the angle a road comes in at. A ramp that kinks away
     // at forty degrees the moment it leaves is a junction, not a merge, and the taper and
     // gore never get built.
+    //
+    // Not zero, though. A second control point exactly on the mainline looks like the
+    // obvious way to make the divergence tangential, but the spline through it bows away
+    // from the point after and dips back across the centerline — which the detector reads
+    // as the ramp crossing its own mainline, giving a phantom four-legged junction beside
+    // every merge. A couple of degrees is enough to stay on one side.
     const streets = crossing();
     const plan = planInterchange(junctionFor(streets), streets, {
       mainlineId: 'freeway',
@@ -128,8 +143,12 @@ describe('planning a diamond', () => {
     for (const ramp of plan.ramps) {
       const a = ramp.centerline[0]!;
       const b = ramp.centerline[1]!;
-      // Second control point is still on the mainline's line.
-      expect(Math.abs(b[1] - a[1])).toBeLessThan(1e-9);
+      const along = Math.abs(b[0] - a[0]) * M_PER_LNG;
+      const across = Math.abs(b[1] - a[1]) * M_PER_LAT;
+      const degrees = (Math.atan2(across, along) * 180) / Math.PI;
+
+      expect(degrees).toBeGreaterThan(0);
+      expect(degrees).toBeLessThan(12);
     }
   });
 
@@ -262,6 +281,66 @@ describe('what the ramps become once they are streets', () => {
       ...ramps,
     ];
   }
+
+  it('is four merges on the mainline and two intersections on the cross road', () => {
+    // The shape of a diamond, and the thing that was wrong. Both ramps on one side used to
+    // leave the mainline from the SAME point, which made that a three-street junction —
+    // and a merge is by definition one road ending on another that continues through,
+    // exactly two streets. So nothing was ever read as a merge: every ramp got a box
+    // intersection carved through the freeway.
+    //
+    // Staggering them is also what real diamonds do. The exit leaves before the structure
+    // and the entrance rejoins after it, because they are different manoeuvres.
+    const built = build();
+    resetDerivedCaches();
+    const derived = deriveProject(built);
+
+    const merges = derived.junctionForms.filter((f) => f === 'merge');
+    expect(merges).toHaveLength(4);
+
+    // And the two ramp terminals, each an ordinary crossroads with corners, crossings and
+    // approaches to design — which is the whole point of bringing a ramp into one.
+    const terminals = derived.junctions.filter((j) => j.streetIds.includes('cross'));
+    expect(terminals).toHaveLength(2);
+    for (const terminal of terminals) {
+      expect(terminal.legs).toHaveLength(4);
+    }
+
+    expect(derived.junctions).toHaveLength(6);
+  });
+
+  it('gives every ramp terminal real corners to design', () => {
+    const built = build();
+    resetDerivedCaches();
+    const derived = deriveProject(built);
+
+    const terminals = derived.junctionGeometry.filter((g) =>
+      g.legs.some((l) => l.streetId === 'cross'),
+    );
+    expect(terminals).toHaveLength(2);
+    for (const terminal of terminals) {
+      expect(terminal.corners.length).toBeGreaterThanOrEqual(3);
+      // A crossing distance per leg is what the pedestrian side of the design is argued on.
+      for (const leg of terminal.legs) {
+        expect(leg.crossingDistanceMeters).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('never has a ramp cross its own mainline twice', () => {
+    // The phantom four-legged junction beside every merge, caused by the spline dipping
+    // back across the centerline it was supposed to be leaving.
+    const built = build();
+    resetDerivedCaches();
+    const { junctions } = detectJunctions(built);
+
+    for (const ramp of ['ramp-0', 'ramp-1', 'ramp-2', 'ramp-3']) {
+      const withFreeway = junctions.filter(
+        (j) => j.streetIds.includes(ramp) && j.streetIds.includes('freeway'),
+      );
+      expect(withFreeway).toHaveLength(1);
+    }
+  });
 
   it('forms a junction where each ramp lands on the cross road', () => {
     const built = build();

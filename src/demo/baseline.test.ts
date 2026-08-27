@@ -54,10 +54,15 @@ describe('the baseline project', () => {
     expect(planConnections(demo.streets)).toHaveLength(6);
   });
 
-  it('is carrying three junctions that are secretly the wrong shape', () => {
-    // The bug the joining engine was written for, found in a real project three times: a
-    // side street overshooting by a couple of metres reads as a clean T on screen and
-    // builds a four-way underneath, with a phantom leg and a fourth corner fillet.
+  it('is carrying a junction that is secretly the wrong shape', () => {
+    // The bug the joining engine was written for: a side street overshooting reads as a
+    // clean T on screen and builds a four-way underneath, with a phantom leg and a fourth
+    // corner fillet. This project had three of them.
+    //
+    // Two are now handled before the joining engine sees them — the detector drops an arm
+    // shorter than a lane is wide, because nobody draws a two-metre street. The third
+    // overshoots by more than that, so it is a real arm until the weld moves the line.
+    // Both mechanisms are wanted: one ignores slop, the other corrects it.
     const demo = createCincinnatiProject();
     const before = deriveProject(demo.streets, { overrides: demo.junctionOverrides });
     resetDerivedCaches();
@@ -67,7 +72,7 @@ describe('the baseline project', () => {
     const tees = (d: ReturnType<typeof deriveProject>) =>
       d.junctionGeometry.filter((g) => g.legs.length === 3).length;
 
-    expect(tees(after) - tees(before)).toBe(3);
+    expect(tees(after) - tees(before)).toBe(1);
     // No junction invented or destroyed — the same intersections, correctly shaped.
     expect(after.junctionGeometry).toHaveLength(before.junctionGeometry.length);
   });

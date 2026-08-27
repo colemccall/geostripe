@@ -99,6 +99,30 @@ const DEFAULT_TERMINAL_OFFSET = 95;
 /** Ramps shorter than this cannot hold a turn worth driving. */
 const MIN_REACH = 60;
 
+/**
+ * How far apart the two ramps on the same side of the mainline attach to it.
+ *
+ * The single most important number here, and it was missing. Both ramps on one side used
+ * to leave from the *same* point, which made that point a three-street junction — and a
+ * merge is defined as one road ending on another that continues through, exactly two
+ * streets. So no part of an interchange was ever read as a merge; every one came out as a
+ * box intersection carved through the freeway, which is what "merge just lets both lines
+ * exist" looks like from the map.
+ *
+ * Separating them is also what real diamonds do: the exit leaves before the structure and
+ * the entrance rejoins after it. They are different places because they are different
+ * manoeuvres.
+ */
+const RAMP_SPREAD_METRES = 80;
+
+/**
+ * How far off the mainline's centreline a ramp begins.
+ *
+ * Comfortably inside the detector's tolerance for an endpoint landing on a street, so the
+ * junction still forms; comfortably clear of the centreline, so the ramp never crosses it.
+ */
+const DEPARTURE_OFFSET_METRES = 1.5;
+
 const sub = (a: PlanePoint, b: PlanePoint): PlanePoint => ({ x: a.x - b.x, y: a.y - b.y });
 
 function norm(p: PlanePoint): PlanePoint {
@@ -139,11 +163,17 @@ function directionAt(line: readonly LngLat[], plane: LocalPlane, station: number
 /**
  * One ramp, as control points a smooth curve can run through.
  *
- * Five points rather than three. The first two sit on the mainline and the last two on the
- * cross road, so the curve leaves and arrives tangentially instead of kinking at each end —
- * which matters more than it sounds: the merge detector reads the angle a ramp comes in at
- * to decide whether it is a merge or a junction, and a kinked tangent gives it the wrong
- * one.
+ * The two ends are deliberately different, because they are different things.
+ *
+ * At the mainline it leaves *tangentially* — the second point is still on the mainline —
+ * so the merge detector reads a shallow angle and builds a taper and a gore. A ramp that
+ * kinked away the moment it left would be classified as a junction and get a box.
+ *
+ * At the cross road it arrives at an *angle*. The point before the last used to sit on the
+ * cross road's own centerline, which made the ramp run along it for its final stretch and
+ * cross it more than once — that is where the six-legged junctions came from. Holding the
+ * approach off to one side until the last point makes the terminal an ordinary T or
+ * crossroads: something with corners, crossings and turn lanes you can design.
  */
 function rampPoints(
   crossing: PlanePoint,
@@ -152,18 +182,30 @@ function rampPoints(
   reach: number,
   offset: number,
 ): PlanePoint[] {
-  const start = add(crossing, scale(mainDir, reach));
-  const end = add(crossing, scale(crossDir, offset));
-
   return [
-    start,
-    // Still on the mainline: this is what makes the divergence tangential.
-    add(crossing, scale(mainDir, reach * 0.52)),
-    // The bend, pulled off both axes so the curve sweeps rather than turning a corner.
-    add(add(crossing, scale(mainDir, reach * 0.2)), scale(crossDir, offset * 0.46)),
-    // On the cross road, approaching along it.
-    add(crossing, scale(crossDir, offset * 0.86)),
-    end,
+    // Beside the mainline, not on it — the ramp starts a metre and a half off the
+    // centreline, which is where a ramp actually diverges from anyway: the edge of the
+    // carriageway, not the middle of it.
+    //
+    // The junction detector still finds this. Its tolerance for an endpoint landing on a
+    // street is that street's own half-width, several metres, so a metre and a half inside
+    // it reads as a T at the projection. What it does NOT do is touch the centreline, and
+    // that is the point: a ramp that starts exactly on the line and curves away grazes it
+    // again a few metres on, and the graze is a second crossing. That showed up as a
+    // phantom four-legged intersection sitting beside every merge.
+    //
+    // Every offset below increases monotonically for the same reason — a spline through
+    // points that hesitate will bow back across the line they came from.
+    add(add(crossing, scale(mainDir, reach)), scale(crossDir, DEPARTURE_OFFSET_METRES)),
+    add(
+      add(crossing, scale(mainDir, reach * 0.85)),
+      scale(crossDir, DEPARTURE_OFFSET_METRES + offset * 0.04),
+    ),
+    // The sweep, off both axes so the curve turns rather than corners.
+    add(add(crossing, scale(mainDir, reach * 0.55)), scale(crossDir, offset * 0.26)),
+    // Approaching the cross road but still clear of it, so the arrival has an angle.
+    add(add(crossing, scale(mainDir, reach * 0.2)), scale(crossDir, offset * 0.7)),
+    add(crossing, scale(crossDir, offset)),
   ];
 }
 
@@ -221,11 +263,19 @@ export function planInterchange(
   const mainDir = directionAt(mainLine, plane, mainStation);
   const crossDir = directionAt(crossLine, plane, crossStation);
 
-  const quadrants: { id: PlannedRamp['quadrant']; main: 1 | -1; cross: 1 | -1 }[] = [
-    { id: 'NE', main: 1, cross: 1 },
-    { id: 'SE', main: 1, cross: -1 },
-    { id: 'NW', main: -1, cross: 1 },
-    { id: 'SW', main: -1, cross: -1 },
+  // `rank` staggers the two ramps on the same side of the mainline: the nearer one
+  // attaches at `reach`, the further at `reach + spread`. They have to be separate points
+  // or the mainline sees a three-street junction there and a merge is, by definition, two.
+  const quadrants: {
+    id: PlannedRamp['quadrant'];
+    main: 1 | -1;
+    cross: 1 | -1;
+    rank: 0 | 1;
+  }[] = [
+    { id: 'NE', main: 1, cross: 1, rank: 0 },
+    { id: 'SE', main: 1, cross: -1, rank: 1 },
+    { id: 'NW', main: -1, cross: 1, rank: 0 },
+    { id: 'SW', main: -1, cross: -1, rank: 1 },
   ];
 
   const wanted =
@@ -240,9 +290,17 @@ export function planInterchange(
   const ramps: PlannedRamp[] = [];
 
   for (const quadrant of wanted) {
-    const reach = quadrant.main === 1 ? mainFwd : mainBack;
+    const available = quadrant.main === 1 ? mainFwd : mainBack;
     const offset = quadrant.cross === 1 ? crossFwd : crossBack;
-    if (reach < MIN_REACH || offset < MIN_REACH * 0.5) {
+
+    // The far ramp of a pair sits a spread further out — but never past the end of the
+    // road. Where there is not room for the stagger, both land at the same place and the
+    // pair reads as one junction rather than two merges, which is honest: the road is too
+    // short for a diamond and saying so beats drawing one that overlaps itself.
+    const spread = Math.min(RAMP_SPREAD_METRES, Math.max(0, available - MIN_REACH));
+    const reach = quadrant.rank === 0 ? Math.max(MIN_REACH, available - spread) : available;
+
+    if (available < MIN_REACH || offset < MIN_REACH * 0.5) {
       warnings.push(
         `No room for the ${quadrant.id} ramp — ${reach.toFixed(0)} m of mainline and ${offset.toFixed(
           0,

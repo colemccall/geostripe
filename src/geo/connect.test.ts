@@ -59,14 +59,25 @@ function legCount(streets: readonly Street[]): number {
 beforeEach(() => resetDerivedCaches());
 
 describe('a side street that overshoots', () => {
-  it('is what turns a T into a four-way, which is the bug', () => {
-    // Establishing the premise the fix exists for. A metre and a half of slop past the
-    // centerline is invisible on imagery and completely changes the junction.
-    expect(legCount([main(), street('side', [at(0, -80), at(0, 1.5)])])).toBe(4);
+  it('is ignored by the detector when it is narrower than a lane', () => {
+    // The detector now drops an arm shorter than a lane is wide: nobody draws a
+    // metre-and-a-half street, so a tail that short is slop rather than a leg. It used to
+    // count, and a T came out as a four-way because of it.
+    //
+    // That does not make welding pointless — it moves the line where the pavement really
+    // goes, and it still matters above this threshold — but the worst symptom is gone at
+    // the source.
+    expect(legCount([main(), street('side', [at(0, -80), at(0, 1.5)])])).toBe(3);
+  });
+
+  it('is what turns a T into a four-way once the tail is a real length', () => {
+    // Six metres is longer than a lane is wide, so the detector reads it as an arm — and
+    // a T becomes a crossroads with a phantom leg and a fourth corner fillet.
+    expect(legCount([main(), street('side', [at(0, -80), at(0, 6)])])).toBe(4);
   });
 
   it('is cut back to the crossing, and the T comes back', () => {
-    const { streets } = connectStreets([main(), street('side', [at(0, -80), at(0, 1.5)])]);
+    const { streets } = connectStreets([main(), street('side', [at(0, -80), at(0, 6)])]);
     expect(legCount(streets)).toBe(3);
   });
 

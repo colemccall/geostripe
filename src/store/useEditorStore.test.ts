@@ -3,6 +3,7 @@ import { useEditorStore, cloneSection } from './useEditorStore';
 import { createDemoStreets } from '../demo/washingtonPark';
 import { TEMPLATES, instantiateTemplate } from '../library/templates';
 import { detectJunctions } from '../geo/junctions';
+import { deriveProject, resetDerivedCaches } from '../geo/derived';
 
 /**
  * Store behaviour that is easy to get subtly wrong and impossible to see on screen.
@@ -525,6 +526,33 @@ describe('building an interchange', () => {
     expect(
       useEditorStore.getState().buildInterchange(key, { mainlineId: mainline, form: 'diamond' }),
     ).toBeNull();
+  });
+
+  it('comes out as four merges and two designable terminals', () => {
+    // End to end, through the real ramp cross-section the store picks — not the test's.
+    // This is the arrangement the user asked for: ramps that merge into the freeway with a
+    // taper, and terminals on the cross road that are ordinary crossroads with corners,
+    // crossings and approaches to design.
+    const mainline = freewayCrossing();
+    useEditorStore
+      .getState()
+      .buildInterchange(onlyJunctionKey(), { mainlineId: mainline, form: 'diamond' });
+
+    const { streets } = useEditorStore.getState();
+    resetDerivedCaches();
+    const derived = deriveProject(streets);
+
+    expect(derived.junctionForms.filter((f) => f === 'merge')).toHaveLength(4);
+    expect(derived.junctions).toHaveLength(6);
+
+    const terminals = derived.junctionGeometry.filter((g) =>
+      g.legs.every((l) => l.streetId !== mainline),
+    );
+    expect(terminals).toHaveLength(2);
+    for (const terminal of terminals) {
+      expect(terminal.legs).toHaveLength(4);
+      expect(terminal.corners.length).toBeGreaterThanOrEqual(3);
+    }
   });
 
   it('changes nothing when there is no room', () => {
