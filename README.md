@@ -332,53 +332,74 @@ the width that is really there, and save it as GeoJSON you can reopen and keep e
 
 ## Roadmap
 
-Phases are ordered by dependency, not by appeal. Anything that other work builds on is
-proven headless and unit-tested before it gets a UI — the geometry engine was, and so was
-junction detection.
+Ordered by dependency, not by appeal. Anything other work builds on is proven headless and
+unit-tested before it gets a UI — the geometry engine was, and so was junction detection.
 
-| | Phase | State |
-|---|---|---|
-| 1 | Prototype, shell, map, imagery | done |
-| 2 | Geometry core — projection, offsetting, banding, curvature | done |
-| 3 | Drawing — centerline authoring, vertex editing | done |
-| 4 | Library and cross-sections | done |
-| 5 | Editing — inspector, measure tool, fit check | done |
-| 6 | Save / load — GeoJSON round-trip | done |
-| 7 | Templates and palette | done |
-| 8 | Asset Builder page | done |
-| 9 | Before / after swipe | done |
-| A | Junction detection | done |
-| B | Derived-geometry cache | done |
-| C | Intersection footprint, curb returns, trimming | done |
-| D | Intersection inspector | done |
-| E | Crosswalks and stop bars | done |
-| F | Corner treatments — bulb-outs, daylighting | done |
-| J | Curved alignments — arcs and splines | done |
-| K | Land cover polygons | done |
-| L | Asset library — 96 primitives, 157 presets, grade separation | done |
-| M | Paths and shared-use paths as their own kind of alignment | done |
-| N | Road markings — stripes, lane symbols, lane-use arrows | done |
-| O | Complex junctions — 5/6-way, staggered pairs, lane assignment, turn pockets | done |
-| R | Merges — a road joining another, with a taper and a gore instead of a box | done |
-| S | Snapping — to vertices, to centerlines, and to 15° increments | done |
-| T | Library browser — a two-level tree, search, recents, per-band actions | done |
-| U | On-map controls — dock, context bar, selection strip, layer switches | done |
-| V | Placed intersections — nodes you own, drag, disable, delete | done |
-| W | Straight/arc segments while drawing, and a stale-build notice | done |
-| X | Joining — welding loose ends onto the streets they were drawn to meet | done |
-| Y | Every shortcut has a button, and a reference sheet that says which | done |
-| Z | Performance — error-bounded curves, per-street junction trimming | done |
-| AA | Grade profiles — an overpass that climbs, crosses and comes back down | done |
-| G | Protected (Dutch) intersection, incl. the corner refuge island | next |
-| H | Roundabout, as a junction form | planned |
-| P | Signal phasing — which movements run together, and the conflicts left over | planned |
-| I | Swept-path / design-vehicle check | stretch |
-| Q | Text pavement markings (ONLY, BUS, STOP) — needs glyph outlines, not a font | stretch |
+### Done
 
-Also outstanding, smaller: touch support for vertex dragging (mouse only today), point
-components such as trees and signals, and asymmetric template generators (everything
-generated today is mirrored about the centerline, so "parking on one side" is still
-hand-authored).
+Thirty-three phases, grouped by what they were for rather than listed in the order they
+happened:
+
+| Area | What landed |
+|---|---|
+| **Foundation** | Local metric tangent plane, polyline offsetting, cross-section banding, curvature warnings · Vite/React/Zustand shell · imagery picker (USGS NAIP, Esri, Wayback with vintages, custom XYZ) |
+| **Drawing** | Centerline authoring, vertex editing, midpoint insertion · straight/arc pen with mixed segments in one street · snapping to vertices, centerlines and 15° increments · joining, which welds loose ends onto the streets they were drawn to meet |
+| **Cross-sections** | 96 primitives, 157 presets, 10 categories · Asset Builder page · fit check against measured right-of-way · two-level searchable library |
+| **Intersections** | Detection, footprints, curb returns, two-boundary trimming · radial inspector · crosswalks and stop bars · bulb-outs and daylighting · 5/6-way and staggered pairs · lane assignment and turn pockets · merges with taper and gore · placed nodes you own |
+| **Markings** | Longitudinal stripes, 19 pavement glyphs authored in real metres, lane-use arrows on junction approaches |
+| **Grade** | Profiles along a street — climb, cross, come back down — with per-crossing level checks, deck and ramp overlays, and an under/at-grade/over switch per crossing |
+| **Land** | Land-cover polygons with their own material palette |
+| **Output** | GeoJSON round-trip, Zod-validated, graceful partial load · before/after swipe |
+| **Craft** | Derived-geometry cache keyed on reference identity · error-bounded curve tessellation · per-street junction trimming · every shortcut has a button, plus a reference sheet · build stamp and stale-build notice |
+
+### Next
+
+**1 · Ramps and interchange forms.** The parts all exist — grade profiles, merges,
+junctions — but building a diamond still means drawing four ramps by hand and setting each
+one's grade separately. An interchange form should place the ramps as real, editable
+streets from one crossing, the way a cross-section template places bands. Per crossing,
+never project-wide, and everything it makes stays editable afterwards.
+
+**2 · The Asset Builder should publish into the library.** Today you compose a
+cross-section there, export it as JSON, and import it back to use it. It should appear in
+the searchable tree like any other preset. This is the prefab loop, and it is the oldest
+thing on this list.
+
+**3 · The deck is an overlay, not the road.** A graded street's bands still render as
+ground-level asphalt with deck edges drawn over the top, so a tunnel does not go
+translucent along its buried stretch. Splitting bands at grade breakpoints fixes it, and it
+is what makes an interchange read correctly rather than approximately.
+
+### Then
+
+**4 · Trim at junctions by station, not by polygon boolean.** Cold derive is ~340 ms on a
+ten-street project and polyclip is the floor at roughly 3 ms a band. The junction already
+computes where the roadway resumes on each leg, so trimming the centerline's station range
+and generating bands from *that* removes the boolean from the hot path entirely. The right
+architecture, and a real rewrite.
+
+**5 · Roundabouts**, as a junction form alongside intersection and merge.
+
+**6 · Live connections.** Welding a loose end is a one-shot edit: drag the through street
+later and the side street does not follow. It reappears as an orange loose end and one
+click re-fixes it, which is honest but not automatic.
+
+### Planned
+
+| Phase | Note |
+|---|---|
+| Protected (Dutch) intersection | Including the corner refuge island |
+| Signal phasing | Which movements run together, and the conflicts left over |
+| Swept-path / design-vehicle check | |
+| Text pavement markings | ONLY, BUS, STOP — needs glyph outlines, not a font |
+
+### Smaller, still outstanding
+
+- **Touch support for vertex dragging.** Mouse only today.
+- **Point components** — trees, signals, poles.
+- **Asymmetric template generators.** Everything generated is mirrored about the
+  centerline, so "parking on one side" is still hand-authored.
+- **Code splitting.** The Map Editor chunk is ~1.07 MB (285 KB gzipped) in one piece.
 
 ### What each of the finished phases actually decided
 
