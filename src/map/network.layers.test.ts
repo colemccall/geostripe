@@ -153,13 +153,13 @@ describe('the network layer group', () => {
     expect([...group!.layers]).toEqual(['network-cut', 'network-node']);
   });
 
-  it('starts switched off, unlike everything else', () => {
+  it('starts switched off, along with the old model it diagnoses', () => {
+    // Roads are drawn from the graph now, so the two halves of the old renderer start off
+    // — drawing both would stack two versions of the same design. Everything else is on.
     const visible = allLayersVisible();
-    expect(visible.network).toBe(false);
-    for (const other of LAYER_GROUPS) {
-      if (other.id === 'network') continue;
-      expect(visible[other.id], `${other.id} should start on`).toBe(true);
-    }
+    const off = LAYER_GROUPS.filter((group) => visible[group.id] === false).map((g) => g.id);
+    expect([...off].sort()).toEqual(['bands', 'junctions', 'network']);
+    expect(visible.roads).toBe(true);
   });
 
   it('agrees with the default used when a saved setting is missing', () => {

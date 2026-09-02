@@ -18,9 +18,22 @@ export const LAYER_GROUPS = [
     layers: ['area-fill', 'area-outline'],
   },
   {
+    id: 'roads',
+    label: 'Roads',
+    hint: 'The road network: segments between nodes, and the junctions where they meet.',
+    layers: [
+      'road-surface-fill',
+      'road-band-fill',
+      'road-band-outline',
+      'road-surface-outline',
+      'road-node-point',
+      'road-draft-line',
+    ],
+  },
+  {
     id: 'junctions',
-    label: 'Intersections',
-    hint: 'The paved box and footway corner at every crossing.',
+    label: 'Intersections (old model)',
+    hint: 'The paved box the old model cut out of the streets at every crossing.',
     layers: [
       'junction-footprint-fill',
       'junction-paved-fill',
@@ -30,8 +43,8 @@ export const LAYER_GROUPS = [
   },
   {
     id: 'bands',
-    label: 'Lanes',
-    hint: 'Every band of every cross-section. The design itself.',
+    label: 'Lanes (old model)',
+    hint: 'Bands generated from the long-polyline streets, with junction holes cut out.',
     layers: ['band-fill', 'band-outline'],
   },
   {
@@ -73,7 +86,17 @@ export const LAYER_GROUPS = [
  * roads meet, including the ones that carve nothing, which is exactly what you want when a
  * junction looks wrong and exactly what you do not want the rest of the time.
  */
-const DEFAULT_OFF: ReadonlySet<string> = new Set(['network']);
+const DEFAULT_OFF: ReadonlySet<string> = new Set([
+  'network',
+  // The two halves of the old model. Roads are drawn from the graph now — segments between
+  // nodes, junctions built up from the ends that meet — and drawing both at once would
+  // stack two versions of the same design on top of each other. They stay switchable
+  // because the old renderer still carries markings, crossings and symbols, which have not
+  // been ported across yet, and because comparing the two is the fastest way to see what
+  // changed.
+  'bands',
+  'junctions',
+]);
 
 export type LayerGroupId = (typeof LAYER_GROUPS)[number]['id'];
 

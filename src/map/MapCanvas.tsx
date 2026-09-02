@@ -14,6 +14,10 @@ import { basemapById, tileUrlsFor, unconfiguredReason } from './basemaps';
 import type { BasemapId, TileSourceOptions } from './basemaps';
 import { buildDesignData, clipEastOf, clipLinesEastOf } from './designLayers';
 import { LAYER_GROUPS, groupVisibleByDefault } from './layerGroups';
+import { buildRoadGeometry } from '../geo/roadGeometry';
+import type { RoadGeometry } from '../geo/roadGeometry';
+import { splitPointFor } from '../model/road';
+import type { RoadNetworkDoc, RoadSnap } from '../model/road';
 import type { LayerGroupId } from './layerGroups';
 import type { DesignData } from './designLayers';
 import type { JunctionOverride } from '../geo/derived';
@@ -124,6 +128,22 @@ interface Props {
     nodes: DesignData['networkNodeList'],
     segments: DesignData['networkSegments'],
   ) => void;
+
+  // ---- road network
+  roads?: RoadNetworkDoc;
+  selectedRoadNodeId?: string | null;
+  selectedSegmentId?: string | null;
+  /** The node a road is being drawn from, if one is. */
+  roadDraftFrom?: string | null;
+  /** A click with the road tool: where, and what it landed on. */
+  onRoadClick?: (position: LngLat, snap?: RoadSnap) => void;
+  onSelectRoadNode?: (nodeId: string) => void;
+  onSelectSegment?: (segmentId: string) => void;
+  /** A node dragged onto another one. */
+  onJoinRoadNodes?: (keepId: string, absorbId: string) => void;
+  onMoveRoadNode?: (nodeId: string, position: LngLat) => void;
+  /** Stop drawing without undoing what has been placed. */
+  onCancelRoadDraft?: () => void;
 
   // ---- junctions
   junctionOverrides?: Readonly<Record<string, JunctionOverride>>;
@@ -291,6 +311,10 @@ const DESIGN_SOURCES = [
   'snap',
   'network-cuts',
   'network-nodes',
+  'road-bands',
+  'road-surfaces',
+  'road-nodes',
+  'road-draft',
 ] as const;
 
 /**
@@ -684,6 +708,87 @@ function addDesignLayers(map: MapLibreMap) {
     },
   });
 
+  // ---- the road network
+  //
+  // Drawn from nodes and segments rather than from streets, so what is on screen is what
+  // the graph says: a road runs between two nodes and stops where the junction begins, and
+  // the junction is the ground between the stopped ends. Nothing here was cut out of
+  // anything, which is why there is no hole to leave behind.
+
+  addLayerSafely(map, {
+    id: 'road-surface-fill',
+    type: 'fill',
+    source: 'road-surfaces',
+    // The same asphalt as a travel lane: a junction is roadway, not a different material.
+    paint: { 'fill-color': '#4A5157', 'fill-opacity': 0.95 },
+  });
+
+  addLayerSafely(map, {
+    id: 'road-band-fill',
+    type: 'fill',
+    source: 'road-bands',
+    paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.95 },
+  });
+
+  addLayerSafely(map, {
+    id: 'road-band-outline',
+    type: 'line',
+    source: 'road-bands',
+    paint: { 'line-color': 'rgba(10,14,16,0.35)', 'line-width': 0.5 },
+  });
+
+  addLayerSafely(map, {
+    id: 'road-surface-outline',
+    type: 'line',
+    source: 'road-surfaces',
+    paint: { 'line-color': 'rgba(10,14,16,0.35)', 'line-width': 0.6 },
+  });
+
+  // The rubber band while a road is being drawn.
+  addLayerSafely(map, {
+    id: 'road-draft-line',
+    type: 'line',
+    source: 'road-draft',
+    paint: { 'line-color': '#6FD3C7', 'line-width': 2, 'line-dasharray': [1.5, 1.5] },
+  });
+
+  // Nodes last, above everything: they are the smallest target on the map and the one you
+  // have to be able to hit without hunting.
+  addLayerSafely(map, {
+    id: 'road-node-point',
+    type: 'circle',
+    source: 'road-nodes',
+    paint: {
+      'circle-radius': [
+        'case',
+        ['get', 'selected'],
+        8,
+        ['>=', ['get', 'endCount'], 3],
+        6,
+        4,
+      ],
+      // Colour says what kind of place it is; a road that simply ends is quietest.
+      'circle-color': [
+        'case',
+        ['get', 'selected'],
+        '#F2C14E',
+        [
+          'match',
+          ['get', 'form'],
+          'junction',
+          '#F2C14E',
+          'merge',
+          '#6FD3C7',
+          'continuation',
+          '#7FB2E5',
+          'rgba(230,236,240,0.8)',
+        ],
+      ],
+      'circle-stroke-width': 1.8,
+      'circle-stroke-color': 'rgba(10,14,16,0.85)',
+    },
+  });
+
   addLayerSafely(map, {
     id: 'junction-point',
     type: 'circle',
@@ -820,6 +925,16 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     onWarnings,
     onJunctions,
     onNetwork,
+    roads,
+    selectedRoadNodeId,
+    selectedSegmentId,
+    roadDraftFrom,
+    onRoadClick,
+    onSelectRoadNode,
+    onSelectSegment,
+    onJoinRoadNodes,
+    onMoveRoadNode,
+    onCancelRoadDraft,
     junctionOverrides,
     defaultCornerRadiusMeters,
     trimAtJunctions,
@@ -875,6 +990,16 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     onWarnings,
     onJunctions,
     onNetwork,
+    roads,
+    selectedRoadNodeId,
+    selectedSegmentId,
+    roadDraftFrom,
+    onRoadClick,
+    onSelectRoadNode,
+    onSelectSegment,
+    onJoinRoadNodes,
+    onMoveRoadNode,
+    onCancelRoadDraft,
     junctionOverrides,
     defaultCornerRadiusMeters,
     trimAtJunctions,
@@ -925,6 +1050,15 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
   const junctionSpotsRef = useRef<LngLat[]>([]);
   const hoverRef = useRef<LngLat | null>(null);
   const measureRef = useRef<LngLat[]>([]);
+  /**
+   * The last road geometry built, for picking.
+   *
+   * Clicks need to know what is under the cursor in graph terms — this node, or partway
+   * along this road — and the answer comes from the same geometry that was drawn, so a
+   * click can never disagree with what is on screen.
+   */
+  const roadGeometryRef = useRef<RoadGeometry | null>(null);
+
   const dragRef = useRef<{ kind: EntityKind; streetId: string; index: number } | null>(null);
   const nodeDragRef = useRef<string | null>(null);
   const statsTimer = useRef<number | null>(null);
@@ -1232,6 +1366,27 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     setData(map, 'network-nodes', data.networkNodes);
     setData(map, 'network-cuts', data.networkCuts);
 
+    // The road network. Built from the graph, not from the streets — a road runs between
+    // two nodes and stops where the junction begins, and the junction is the ground between
+    // the stopped ends.
+    const roadDoc = latest.current.roads;
+    if (roadDoc) {
+      const geometry = buildRoadGeometry(roadDoc, {
+        selectedSegmentId: latest.current.selectedSegmentId ?? null,
+        selectedNodeId: latest.current.selectedRoadNodeId ?? null,
+      });
+      roadGeometryRef.current = geometry;
+      setData(map, 'road-bands', { type: 'FeatureCollection', features: geometry.bands });
+      setData(map, 'road-surfaces', {
+        type: 'FeatureCollection',
+        features: geometry.nodeSurfaces,
+      });
+      setData(map, 'road-nodes', {
+        type: 'FeatureCollection',
+        features: geometry.nodePoints,
+      });
+    }
+
     // queryRenderedFeatures only reports once tiles are built, so sample shortly after —
     // and only once the edits stop, or a drag would queue one probe per frame.
     const bandCount = data.bands.features.length;
@@ -1418,6 +1573,65 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
         }
       };
 
+      /**
+       * What the pointer is over, in graph terms.
+       *
+       * A node beats a road, always: it is the smaller target and the one you are aiming
+       * at when you want to join something. Falling through to a road means the click
+       * splits it, so the new node is genuinely part of that road rather than sitting on
+       * top of it — which is how a ramp comes to meet a freeway.
+       *
+       * The tolerance is in pixels rather than metres because the question is "did you hit
+       * it", and that is a question about the screen. Metres would be forgiving at one zoom
+       * and impossible at another.
+       */
+      const roadSnapAt = (): RoadSnap | undefined => {
+        const box: [[number, number], [number, number]] = [
+          [event.point.x - SNAP_PX, event.point.y - SNAP_PX],
+          [event.point.x + SNAP_PX, event.point.y + SNAP_PX],
+        ];
+        try {
+          const onNode = map.queryRenderedFeatures(box, { layers: ['road-node-point'] });
+          const nodeId = onNode[0]?.properties?.['nodeId'];
+          if (typeof nodeId === 'string') return { kind: 'node', nodeId };
+        } catch {
+          // A layer the style has not built yet is not an error worth surfacing.
+        }
+        try {
+          const onRoad = map.queryRenderedFeatures(box, { layers: ['road-band-fill'] });
+          const segmentId = onRoad[0]?.properties?.['streetId'];
+          const doc = latest.current.roads;
+          if (typeof segmentId === 'string' && doc) {
+            const segment = doc.segments.find((candidate) => candidate.id === segmentId);
+            if (segment) {
+              const nodes = new Map(doc.nodes.map((node) => [node.id, node]));
+              const hit = splitPointFor(segment, nodes, event.lngLat.toArray() as LngLat);
+              if (hit) return { kind: 'segment', segmentId, shapeIndex: hit.shapeIndex };
+            }
+          }
+        } catch {
+          // As above.
+        }
+        return undefined;
+      };
+
+      if (active === 'road') {
+        latest.current.onRoadClick?.(event.lngLat.toArray() as LngLat, roadSnapAt());
+        return;
+      }
+
+      if (active === 'select') {
+        const snap = roadSnapAt();
+        if (snap?.kind === 'node') {
+          latest.current.onSelectRoadNode?.(snap.nodeId);
+          return;
+        }
+        if (snap?.kind === 'segment') {
+          latest.current.onSelectSegment?.(snap.segmentId);
+          return;
+        }
+      }
+
       if (active === 'node') {
         const existing = nodeUnder();
         if (existing) {
@@ -1522,6 +1736,34 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
 
     map.on('mousemove', (event) => {
       const active = latest.current.tool;
+
+      if (active === 'road') {
+        // The rubber band from the node the road is being drawn from. Without it there is
+        // no way to tell whether a click started a road or ended one.
+        const from = latest.current.roadDraftFrom;
+        const doc = latest.current.roads;
+        const node = from && doc ? doc.nodes.find((candidate) => candidate.id === from) : null;
+        setData(
+          map,
+          'road-draft',
+          node
+            ? {
+                type: 'FeatureCollection',
+                features: [
+                  {
+                    type: 'Feature',
+                    properties: {},
+                    geometry: {
+                      type: 'LineString',
+                      coordinates: [node.position, event.lngLat.toArray() as LngLat],
+                    },
+                  },
+                ],
+              }
+            : EMPTY,
+        );
+        return;
+      }
 
       if (active === 'draw' || active === 'area') {
         const draft = draftRef.current;
@@ -1732,7 +1974,13 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
 
       if (event.key === 'Escape') {
         event.preventDefault();
-        if (tool === 'draw' || tool === 'area') cancelDraw();
+        if (tool === 'road') {
+          // Stop the chain without undoing the roads already placed. The rubber band is
+          // cleared by the next mousemove, which finds no node to draw from.
+          latest.current.onCancelRoadDraft?.();
+          const live = mapRef.current;
+          if (live) setData(live, 'road-draft', EMPTY);
+        } else if (tool === 'draw' || tool === 'area') cancelDraw();
         else clearMeasure();
       } else if ((tool === 'draw' || tool === 'area') && event.key === 'Enter') {
         event.preventDefault();

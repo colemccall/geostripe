@@ -7,6 +7,19 @@ import { newId } from '../model/types';
 import { autoAnchorOffset, geometricCentreOffset, resolveAnchorOffset, totalWidth } from '../model/section';
 import { applyConnections, planConnections } from '../geo/connect';
 import { createCincinnatiProject, createI75Project } from '../demo/cincinnati';
+import {
+  addNode,
+  addSegment,
+  mergeNodes,
+  moveNode,
+  removeNode,
+  removeSegment,
+  splitSegment,
+} from '../model/road';
+import type { LngLat } from '../geo/projection';
+import type { RoadNetworkDoc, RoadNode, RoadSnap } from '../model/road';
+import { roadNetworkFromStreets } from '../model/roadImport';
+import type { NearMiss } from '../model/roadImport';
 import { overpassProfile } from '../geo/grade';
 import {
   DEFAULT_TAPER_METRES,
@@ -62,7 +75,7 @@ export type AnchorMode = 'travelway' | 'geometric' | 'leftEdge' | 'custom';
  * centerline and dragging an existing vertex both start with a mousedown on the map, and
  * guessing between them gets it wrong exactly when the user is being precise.
  */
-export type Tool = 'select' | 'draw' | 'area' | 'node' | 'measure';
+export type Tool = 'select' | 'draw' | 'area' | 'node' | 'measure' | 'road';
 
 /**
  * Which cross-section a newly drawn street gets. A template id, or DRAFT_SECTION to use
@@ -78,6 +91,14 @@ export interface Notice {
 }
 
 interface Snapshot {
+  /**
+   * The road network: nodes you place and roads between them.
+   *
+   * In the undo snapshot rather than beside it, because every edit to it is an edit to the
+   * design. Held as one document rather than two arrays so a change that touches both — a
+   * split, a join, a deletion that strands a node — is one value and cannot be half-applied.
+   */
+  roads: RoadNetworkDoc;
   streets: Street[];
   areas: Area[];
   draftSection: CrossSection;
@@ -206,6 +227,21 @@ interface EditorState extends Snapshot {
   /** Swipe divider position, 0..1 across the map. null = off. */
   swipe: number | null;
 
+  // ---- road network
+  /**
+   * Ends that came close to another road without joining it.
+   *
+   * Kept because it is the useful half of what the old detector was doing. It found these
+   * too, and quietly turned them into junctions at places no road reached; here they are a
+   * list you can look at and join deliberately, or leave alone because the roads really do
+   * just pass each other.
+   */
+  roadNearMisses: NearMiss[];
+  selectedRoadNodeId: string | null;
+  selectedSegmentId: string | null;
+  /** The node a road is being drawn from, while the road tool is mid-gesture. */
+  roadDraftFrom: string | null;
+
   past: Snapshot[];
   future: Snapshot[];
   notice: Notice | null;
@@ -222,6 +258,29 @@ interface EditorState extends Snapshot {
 
   // ---- tool actions
   setTool: (tool: Tool) => void;
+
+  // ---- road network
+  selectRoadNode: (nodeId: string | null) => void;
+  selectSegment: (segmentId: string | null) => void;
+  /**
+   * Put a node down, or pick up the one already there.
+   *
+   * Returns the node's id either way, so the caller does not have to care which happened —
+   * which is what makes click-to-draw work the same whether you land on empty ground, on an
+   * existing node, or partway along an existing road.
+   */
+  placeRoadNode: (position: LngLat, snap?: RoadSnap) => string;
+  /** Start drawing from a node, or finish the road being drawn. */
+  drawRoadTo: (position: LngLat, snap?: RoadSnap) => void;
+  cancelRoadDraft: () => void;
+  moveRoadNode: (nodeId: string, position: LngLat) => void;
+  /** Drop one node onto another, joining everything that met at either. */
+  joinRoadNodes: (keepId: string, absorbId: string) => void;
+  deleteRoadNode: (nodeId: string) => void;
+  deleteSegment: (segmentId: string) => void;
+  setRoadNodeForm: (nodeId: string, form: RoadNode['form']) => void;
+  /** Rebuild the network from the streets, discarding road edits. */
+  reimportRoads: () => void;
   setDrawSectionId: (id: string) => void;
 
   // ---- junction actions
@@ -457,6 +516,17 @@ interface EditorState extends Snapshot {
 const initialProject = createI75Project();
 
 /**
+ * The same project as a road network.
+ *
+ * Imported once at startup rather than converted on demand, so the two models never
+ * disagree about what is on screen. The import is strict about what counts as joined —
+ * see roadNetworkFromStreets — which is why the interchange opens with three junctions and
+ * a list of ends that come close without meeting, instead of a dozen junctions invented
+ * out of near misses.
+ */
+const initialRoads = roadNetworkFromStreets(initialProject.streets);
+
+/**
  * Copy a section with fresh component ids.
  *
  * Placing the Asset Builder draft on a street must not alias it — otherwise editing the
@@ -518,8 +588,8 @@ export function cloneSection(section: CrossSection, name?: string): CrossSection
 
 export const useEditorStore = create<EditorState>((set, get) => {
   const snapshot = (): Snapshot => {
-    const { streets, areas, draftSection, junctionOverrides, nodes } = get();
-    return { streets, areas, draftSection, junctionOverrides, nodes };
+    const { roads, streets, areas, draftSection, junctionOverrides, nodes } = get();
+    return { roads, streets, areas, draftSection, junctionOverrides, nodes };
   };
 
   /** Captured at gesture start; null when no gesture is in flight. */
@@ -580,6 +650,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
     waybackRelease: DEFAULT_VINTAGE,
     arcgisApiKey: '',
 
+    roads: initialRoads.doc,
+    roadNearMisses: initialRoads.nearMisses,
+    selectedRoadNodeId: null,
+    selectedSegmentId: null,
+    roadDraftFrom: null,
     streets: initialProject.streets,
     areas: initialProject.areas,
     draftSection: instantiateTemplate(TEMPLATES[1]!),
@@ -632,6 +707,108 @@ export const useEditorStore = create<EditorState>((set, get) => {
     setNotice: (notice) => set({ notice }),
 
     setTool: (tool) => set({ tool }),
+
+    // ---- road network
+
+    selectRoadNode: (selectedRoadNodeId) => set({ selectedRoadNodeId, selectedSegmentId: null }),
+    selectSegment: (selectedSegmentId) => set({ selectedSegmentId, selectedRoadNodeId: null }),
+
+    placeRoadNode: (position, snap) => {
+      const doc = get().roads;
+
+      // Landing on a node that is already there uses it. This is the whole of "snapping":
+      // there is no tolerance to tune at this level, because the caller has already decided
+      // what the pointer is over.
+      if (snap?.kind === 'node') return snap.nodeId;
+
+      // Landing partway along a road splits it, so the new node is genuinely part of that
+      // road rather than sitting on top of it. This is the move the old model could not make.
+      if (snap?.kind === 'segment') {
+        const split = splitSegment(doc, snap.segmentId, position, snap.shapeIndex);
+        if (split) {
+          commit({ roads: split.doc });
+          return split.nodeId;
+        }
+      }
+
+      const added = addNode(doc, position);
+      commit({ roads: added.doc });
+      return added.nodeId;
+    },
+
+    drawRoadTo: (position, snap) => {
+      const from = get().roadDraftFrom;
+      const nodeId = get().placeRoadNode(position, snap);
+
+      if (!from) {
+        set({ roadDraftFrom: nodeId });
+        return;
+      }
+      if (from === nodeId) {
+        // Clicking the node you started from is how you stop, not a road of zero length.
+        set({ roadDraftFrom: null });
+        return;
+      }
+
+      const added = addSegment(get().roads, {
+        fromNodeId: from,
+        toNodeId: nodeId,
+        shape: [],
+        section: cloneSection(get().draftSection),
+      });
+      commit({ roads: added.doc });
+      // Carry on from where this road ended, so a chain of roads is a chain of clicks.
+      set({ roadDraftFrom: nodeId, selectedSegmentId: added.segmentId, selectedRoadNodeId: null });
+    },
+
+    cancelRoadDraft: () => set({ roadDraftFrom: null }),
+
+    moveRoadNode: (nodeId, position) => {
+      commit({ roads: moveNode(get().roads, nodeId, position) });
+    },
+
+    joinRoadNodes: (keepId, absorbId) => {
+      const next = mergeNodes(get().roads, keepId, absorbId);
+      commit({ roads: next });
+      set({ selectedRoadNodeId: keepId });
+    },
+
+    deleteRoadNode: (nodeId) => {
+      commit({ roads: removeNode(get().roads, nodeId) });
+      set({ selectedRoadNodeId: null });
+    },
+
+    deleteSegment: (segmentId) => {
+      commit({ roads: removeSegment(get().roads, segmentId) });
+      set({ selectedSegmentId: null });
+    },
+
+    setRoadNodeForm: (nodeId, form) => {
+      commit({
+        roads: {
+          ...get().roads,
+          nodes: get().roads.nodes.map((node) => {
+            if (node.id !== nodeId) return node;
+            const next = { ...node };
+            if (form) next.form = form;
+            else delete next.form;
+            return next;
+          }),
+        },
+      });
+    },
+
+    reimportRoads: () => {
+      const result = roadNetworkFromStreets(get().streets);
+      commit({ roads: result.doc });
+      set({
+        roadNearMisses: result.nearMisses,
+        selectedRoadNodeId: null,
+        selectedSegmentId: null,
+        roadDraftFrom: null,
+      });
+    },
+
     setDrawSectionId: (drawSectionId) => set({ drawSectionId }),
 
     selectJunction: (selectedJunctionKey) => set({ selectedJunctionKey }),

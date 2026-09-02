@@ -88,6 +88,57 @@ export interface RoadNetworkDoc {
 
 export const emptyRoadNetwork = (): RoadNetworkDoc => ({ nodes: [], segments: [] });
 
+/**
+ * What the pointer is over, when a click has to decide what to attach to.
+ *
+ * Resolved by whatever is doing the picking — the map knows what is under the cursor and
+ * at what zoom, and a tolerance in metres would be wrong at every zoom but one. By the time
+ * it reaches the model the question is already answered: this node, or partway along this
+ * road, or neither.
+ */
+export type RoadSnap =
+  | { kind: 'node'; nodeId: string }
+  | { kind: 'segment'; segmentId: string; shapeIndex: number };
+
+/**
+ * Where along a road a click falls, as the index of the control edge it landed on.
+ *
+ * That index is exactly what splitSegment wants: splitting on edge i puts shape[0..i) on
+ * the first half and shape[i..] on the second, so a split inherits the bend either side of
+ * it rather than straightening the road.
+ */
+export function splitPointFor(
+  segment: RoadSegment,
+  nodes: ReadonlyMap<string, RoadNode>,
+  position: LngLat,
+): { shapeIndex: number; point: LngLat } | null {
+  const controls = segmentControlPoints(segment, nodes);
+  if (!controls || controls.length < 2) return null;
+
+  const scale = Math.cos((position[1] * Math.PI) / 180);
+  let best: { shapeIndex: number; point: LngLat; distance: number } | null = null;
+
+  for (let i = 0; i < controls.length - 1; i++) {
+    const a = controls[i]!;
+    const b = controls[i + 1]!;
+    const dx = (b[0] - a[0]) * scale;
+    const dy = b[1] - a[1];
+    const lenSq = dx * dx + dy * dy;
+    const t =
+      lenSq <= 0
+        ? 0
+        : Math.max(
+            0,
+            Math.min(1, ((position[0] - a[0]) * scale * dx + (position[1] - a[1]) * dy) / lenSq),
+          );
+    const point: LngLat = [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])];
+    const distance = Math.hypot((position[0] - point[0]) * scale, position[1] - point[1]);
+    if (!best || distance < best.distance) best = { shapeIndex: i, point, distance };
+  }
+
+  return best ? { shapeIndex: best.shapeIndex, point: best.point } : null;
+}
+
 /** The full centerline of a segment: its start node, its shape, its end node. */
 export function segmentControlPoints(
   segment: RoadSegment,

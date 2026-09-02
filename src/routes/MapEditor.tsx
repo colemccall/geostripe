@@ -14,6 +14,7 @@ import { TEMPLATES, TEMPLATE_CATEGORIES, instantiateTemplate } from '../library/
 import { basemapById } from '../map/basemaps';
 import MapCanvas from '../map/MapCanvas';
 import type { EntityKind, MapHandle } from '../map/MapCanvas';
+import { degrees } from '../model/road';
 import type {
   DesignData,
   JunctionSummary,
@@ -79,7 +80,7 @@ const CURVE_MODES: { id: CurveMode; label: string; hint: string }[] = [
  * intersection you were editing could be four screens below the street list and there was
  * no way to tell what was down there without going to look.
  */
-type RailTab = 'project' | 'streets' | 'land' | 'junctions' | 'sections';
+type RailTab = 'project' | 'streets' | 'land' | 'roads' | 'junctions' | 'sections';
 
 /**
  * What is at this end of a segment, in the words someone would use for it.
@@ -107,6 +108,7 @@ const RAIL_TABS: { id: RailTab; label: string; icon: string; hint: string }[] = 
   { id: 'streets', label: 'Streets', icon: '═', hint: 'Every street, and what it is made of' },
   { id: 'land', label: 'Land', icon: '▰', hint: 'Parks, water, buildings, plazas' },
   { id: 'junctions', label: 'Junctions', icon: '✛', hint: 'Where streets meet, and how' },
+  { id: 'roads', label: 'Roads', icon: '⌁', hint: 'Nodes, and the roads between them' },
   { id: 'sections', label: 'Sections', icon: '≡', hint: 'Cross-sections to apply' },
 ];
 
@@ -117,6 +119,13 @@ const TOOLS: { id: Tool; label: string; key: string; hint: string; icon: string 
     key: 'V',
     icon: '↖',
     hint: 'Click a band to select it. Drag a vertex to reshape, alt-click one to remove it, drag a hollow handle to add one.',
+  },
+  {
+    id: 'road',
+    label: 'Build road',
+    key: 'R',
+    icon: '⌁',
+    hint: 'Click to start a road, click again to end it, and keep clicking to carry on. Landing on a node joins to it; landing partway along a road splits that road at a new node, which is how a ramp comes to meet a freeway. Esc stops.',
   },
   {
     id: 'draw',
@@ -284,6 +293,20 @@ export default function MapEditor() {
   });
   const [measure, setMeasure] = useState<{ points: number; metres: number } | null>(null);
   const [junctions, setJunctions] = useState<JunctionSummary[]>([]);
+  const roads = useEditorStore((s) => s.roads);
+  const roadNearMisses = useEditorStore((s) => s.roadNearMisses);
+  const selectedRoadNodeId = useEditorStore((s) => s.selectedRoadNodeId);
+  const selectedSegmentId = useEditorStore((s) => s.selectedSegmentId);
+  const roadDraftFrom = useEditorStore((s) => s.roadDraftFrom);
+  const drawRoadTo = useEditorStore((s) => s.drawRoadTo);
+  const cancelRoadDraft = useEditorStore((s) => s.cancelRoadDraft);
+  const selectRoadNode = useEditorStore((s) => s.selectRoadNode);
+  const selectSegment = useEditorStore((s) => s.selectSegment);
+  const deleteRoadNode = useEditorStore((s) => s.deleteRoadNode);
+  const deleteSegment = useEditorStore((s) => s.deleteSegment);
+  const setRoadNodeForm = useEditorStore((s) => s.setRoadNodeForm);
+  const joinRoadNodes = useEditorStore((s) => s.joinRoadNodes);
+  const reimportRoads = useEditorStore((s) => s.reimportRoads);
   const [networkNodes, setNetworkNodes] = useState<NetworkNodeSummary[]>([]);
   const [networkSegments, setNetworkSegments] = useState<NetworkSegmentSummary[]>([]);
   const [offsetPairs, setOffsetPairs] = useState<DesignData['offsetPairs']>([]);
@@ -394,6 +417,38 @@ export default function MapEditor() {
         to: byNode.get(segment.toNodeId) ?? null,
       }));
   }, [street, networkNodes, networkSegments]);
+
+  /**
+   * Nodes close enough to the selected one to be worth joining.
+   *
+   * The other half of what the old detector was doing, offered as an edit rather than done
+   * silently. It found these too — ends seventeen metres apart — and turned them into
+   * junctions at places no road reached. Here you can see the gap and decide.
+   */
+  const joinableNodes = useMemo(() => {
+    if (!selectedRoadNodeId) return [];
+    const selected = roads.nodes.find((node) => node.id === selectedRoadNodeId);
+    if (!selected) return [];
+    const scale = Math.cos((selected.position[1] * Math.PI) / 180);
+    return roads.nodes
+      .filter((node) => node.id !== selected.id)
+      .map((node) => ({
+        node,
+        gapMeters:
+          Math.hypot(
+            (node.position[0] - selected.position[0]) * scale,
+            node.position[1] - selected.position[1],
+          ) * 111132,
+      }))
+      .filter((entry) => entry.gapMeters <= 40)
+      .sort((a, b) => a.gapMeters - b.gapMeters)
+      .slice(0, 6);
+  }, [roads, selectedRoadNodeId]);
+
+  const roadDegrees = useMemo(() => degrees(roads), [roads]);
+  const selectedRoadNode = roads.nodes.find((node) => node.id === selectedRoadNodeId) ?? null;
+  const selectedSegment =
+    roads.segments.find((segment) => segment.id === selectedSegmentId) ?? null;
 
   /** The section a newly drawn street gets — also the fallback for a bare line import. */
   const drawingSection = useMemo(() => {
@@ -819,6 +874,131 @@ export default function MapEditor() {
               </ul>
             )}
           </section>
+        )}
+
+        {railTab === 'roads' && (
+          <>
+            <section className="panel">
+              <header className="panel-head">
+                <span className="label">Road network</span>
+                <span className="label mono">
+                  {roads.nodes.length} nodes &middot; {roads.segments.length} roads
+                </span>
+              </header>
+              <p className="hint" style={{ marginTop: 0 }}>
+                Roads run between nodes, and a junction is the ground between the ends that
+                meet there — built up from the roads rather than cut out of them. Two roads
+                are joined when they share a node, and not otherwise.
+              </p>
+              <p className="hint">
+                Use <strong>Build road</strong> to draw. Landing on a node joins to it;
+                landing partway along a road splits that road at a new node.
+              </p>
+              {roadNearMisses.length > 0 && (
+                <p className="hint">
+                  {roadNearMisses.length} road ends come close to another road without
+                  meeting it. Select a node to see what is near enough to join.
+                </p>
+              )}
+              <button type="button" className="btn" onClick={() => reimportRoads()}>
+                Rebuild from streets
+              </button>
+            </section>
+
+            {selectedRoadNode && (
+              <section className="panel">
+                <header className="panel-head">
+                  <span className="label">Node</span>
+                  <span className="label mono">
+                    {roadDegrees.get(selectedRoadNode.id) ?? 0} roads
+                  </span>
+                </header>
+
+                <div className="field">
+                  <span className="label">What happens here</span>
+                  <div className="segmented" role="group" aria-label="Node form">
+                    {(
+                      [
+                        [undefined, 'Work it out'],
+                        ['junction', 'Crossing'],
+                        ['merge', 'Roads run together'],
+                        ['continuation', 'Carries on'],
+                      ] as const
+                    ).map(([form, label]) => (
+                      <button
+                        key={label}
+                        type="button"
+                        aria-pressed={(selectedRoadNode.form ?? undefined) === form}
+                        onClick={() => setRoadNodeForm(selectedRoadNode.id, form)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <span className="hint">
+                    A crossing builds a paved box with kerb corners. Roads running together
+                    leave the pavement to the roads, which is what a fork or a ramp merge
+                    actually is. Whether traffic yields or crosses is not something the
+                    angles can tell you, so this is here.
+                  </span>
+                </div>
+
+                {joinableNodes.length > 0 && (
+                  <div className="field">
+                    <span className="label">Join to a nearby end</span>
+                    <ul className="grade-list">
+                      {joinableNodes.map(({ node, gapMeters }) => (
+                        <li key={node.id}>
+                          <span className="grade-where">
+                            <span>{roadDegrees.get(node.id) ?? 0} roads</span>
+                            <span className="mono">
+                              {formatWidth(gapMeters, units, { decimals: 1, withUnit: true })}{' '}
+                              away
+                            </span>
+                          </span>
+                          <button
+                            type="button"
+                            className="btn"
+                            title="Make these one place"
+                            onClick={() => joinRoadNodes(selectedRoadNode.id, node.id)}
+                          >
+                            Join
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  className="btn is-danger"
+                  onClick={() => deleteRoadNode(selectedRoadNode.id)}
+                >
+                  Delete node and its roads
+                </button>
+              </section>
+            )}
+
+            {selectedSegment && (
+              <section className="panel">
+                <header className="panel-head">
+                  <span className="label">Road</span>
+                  <span className="label mono">{selectedSegment.name ?? 'Road'}</span>
+                </header>
+                <p className="hint" style={{ marginTop: 0 }}>
+                  {selectedSegment.section.components.length} bands across.
+                </p>
+                <button
+                  type="button"
+                  className="btn is-danger"
+                  onClick={() => deleteSegment(selectedSegment.id)}
+                >
+                  Delete this road
+                </button>
+              </section>
+            )}
+          </>
         )}
 
         {railTab === 'junctions' && (
@@ -1531,6 +1711,15 @@ export default function MapEditor() {
               setNetworkNodes(nodeList);
               setNetworkSegments(segments);
             }}
+            roads={roads}
+            selectedRoadNodeId={selectedRoadNodeId}
+            selectedSegmentId={selectedSegmentId}
+            roadDraftFrom={roadDraftFrom}
+            onRoadClick={(position, snap) => drawRoadTo(position, snap)}
+            onSelectRoadNode={selectRoadNode}
+            onSelectSegment={selectSegment}
+            onJoinRoadNodes={joinRoadNodes}
+            onCancelRoadDraft={cancelRoadDraft}
             junctionOverrides={junctionOverrides}
             defaultCornerRadiusMeters={defaultCornerRadiusMeters}
             trimAtJunctions={trimAtJunctions}
