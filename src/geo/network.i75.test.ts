@@ -83,6 +83,27 @@ describe('the I-75 interchange as a graph', () => {
     }
   });
 
+  it('costs almost nothing to build', () => {
+    // Measured on this project: detection 68 ms, the network 7 ms, a cold derive 1905 ms.
+    // The graph is a third of a percent of the work, because resolveCenterline is memoised
+    // on reference identity and everything here is arithmetic on lines already tessellated.
+    //
+    // The remaining 1830 ms is band generation and the polygon booleans that cut junction
+    // holes out of them, which is the next thing to replace and the reason this layer had
+    // to exist first. A segment knows its own two ends, so trimming it is a subtraction
+    // rather than a boolean.
+    //
+    // An absolute bound rather than a share of the derive: the derive is meant to get much
+    // faster, and a ratio would tighten as it did. Generous enough to survive a loaded
+    // machine, tight enough to catch an accidental quadratic.
+    const started = performance.now();
+    for (let i = 0; i < 5; i++) {
+      envelopesFor(buildNetwork(project.streets, junctions, plane));
+    }
+    const each = (performance.now() - started) / 5;
+    expect(each).toBeLessThan(200);
+  });
+
   it('builds a simple ring for every junction that owns ground', () => {
     for (const node of network.nodes) {
       const envelope = envelopes.get(node.id)!;
