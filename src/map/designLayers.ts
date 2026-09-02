@@ -5,6 +5,8 @@ import type { DerivedProject, JunctionOverride } from '../geo/derived';
 import type { JunctionGeometry } from '../geo/intersection';
 import { midpoint } from '../geo/measure';
 import { mergeParts } from '../geo/merge';
+import { bundlesOf } from '../geo/network';
+import type { NodeForm } from '../geo/network';
 import { closeRing, resolveCenterline, resolveRing } from '../geo/curve';
 import { LANDCOVERS } from '../library/landcover';
 import type { CurvatureWarning } from '../geo/curvature';
@@ -39,6 +41,38 @@ export interface JunctionSummary {
   corners: JunctionGeometry['corners'];
   legs: JunctionGeometry['legs'];
   warnings: string[];
+}
+
+/**
+ * One place where road ends meet, as the network sees it.
+ *
+ * Distinct from JunctionSummary, which describes a junction that has been given geometry.
+ * A node exists wherever roads end together, including the many places that carve nothing —
+ * a road's own terminus, a bend, a fork. Those are exactly the places you cannot select or
+ * reason about today, and several of them are where the freeway examples go wrong.
+ */
+export interface NetworkNodeSummary {
+  id: string;
+  position: [number, number];
+  form: NodeForm;
+  /** How many segment ends meet here. */
+  endCount: number;
+  /** Distinct streets involved. */
+  streetCount: number;
+  /** How many distinct directions leave here — a fork of five ramps is one. */
+  bundleCount: number;
+  /** Set when this node corresponds to a detected junction. */
+  junctionKey?: string;
+}
+
+export interface NetworkSegmentSummary {
+  id: string;
+  streetId: string;
+  fromNodeId: string;
+  toNodeId: string;
+  fromStation: number;
+  toStation: number;
+  lengthMeters: number;
 }
 
 export interface DesignData {
@@ -78,6 +112,12 @@ export interface DesignData {
   warnings: { streetId: string; streetName: string; warnings: CurvatureWarning[] }[];
   junctions: JunctionSummary[];
   junctionWarnings: string[];
+  /** One point per node in the network, whether or not it carves anything. */
+  networkNodes: FeatureCollection;
+  /** Where one segment ends and the next begins, drawn across the road. */
+  networkCuts: FeatureCollection;
+  networkNodeList: NetworkNodeSummary[];
+  networkSegments: NetworkSegmentSummary[];
 }
 
 const empty = (): FeatureCollection => ({ type: 'FeatureCollection', features: [] });
@@ -328,6 +368,81 @@ export function buildDesignData(
     });
   });
 
+  // The network, as something you can see and click. Nodes are drawn everywhere roads
+  // meet — including the forks and termini that carve nothing and so have never had a
+  // handle of their own — and a tick is drawn across the road at each cut, so where one
+  // segment stops and the next starts is visible rather than inferred.
+  const networkNodes = empty();
+  const networkCuts = empty();
+  const networkNodeList: NetworkNodeSummary[] = [];
+
+  for (const node of derived.network.nodes) {
+    const envelope = derived.nodeEnvelopes.get(node.id);
+    if (!envelope) continue;
+    const streetCount = new Set(node.ends.map((e) => e.streetId)).size;
+    const summary: NetworkNodeSummary = {
+      id: node.id,
+      position: node.positionLngLat,
+      form: envelope.form,
+      endCount: node.ends.length,
+      streetCount,
+      bundleCount: bundlesOf(node.ends).length,
+      ...(node.junctionKey ? { junctionKey: node.junctionKey } : {}),
+    };
+    networkNodeList.push(summary);
+    networkNodes.features.push({
+      type: 'Feature',
+      id: `net:${node.id}`,
+      properties: {
+        nodeId: node.id,
+        form: envelope.form,
+        endCount: node.ends.length,
+        streetCount,
+        selected: node.junctionKey === options.selectedJunctionKey,
+      },
+      geometry: { type: 'Point', coordinates: node.positionLngLat },
+    });
+  }
+
+  for (const node of derived.network.nodes) {
+    if (node.ends.length < 2) continue;
+    for (const end of node.ends) {
+      // A tick across the road at the cut: half-width each side of the centreline, square
+      // to the direction the segment leaves in.
+      const centre = derived.plane.toPlane(node.positionLngLat);
+      const nx = -Math.sin(end.bearing);
+      const ny = Math.cos(end.bearing);
+      networkCuts.features.push({
+        type: 'Feature',
+        id: `cut:${end.segmentId}:${node.id}`,
+        properties: { nodeId: node.id, segmentId: end.segmentId, streetId: end.streetId },
+        geometry: {
+          type: 'LineString',
+          coordinates: [
+            derived.plane.toLngLat({
+              x: centre.x + nx * end.halfLeft,
+              y: centre.y + ny * end.halfLeft,
+            }),
+            derived.plane.toLngLat({
+              x: centre.x - nx * end.halfRight,
+              y: centre.y - ny * end.halfRight,
+            }),
+          ],
+        },
+      });
+    }
+  }
+
+  const networkSegments: NetworkSegmentSummary[] = derived.network.segments.map((segment) => ({
+    id: segment.id,
+    streetId: segment.streetId,
+    fromNodeId: segment.fromNodeId,
+    toNodeId: segment.toNodeId,
+    fromStation: segment.fromStation,
+    toStation: segment.toStation,
+    lengthMeters: segment.lengthMeters,
+  }));
+
   return {
     areas,
     bands,
@@ -347,6 +462,10 @@ export function buildDesignData(
     junctions,
     junctionWarnings: derived.junctionWarnings,
     offsetPairs: derived.offsetPairs,
+    networkNodes,
+    networkCuts,
+    networkNodeList,
+    networkSegments,
   };
 }
 

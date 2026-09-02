@@ -13,7 +13,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { basemapById, tileUrlsFor, unconfiguredReason } from './basemaps';
 import type { BasemapId, TileSourceOptions } from './basemaps';
 import { buildDesignData, clipEastOf, clipLinesEastOf } from './designLayers';
-import { LAYER_GROUPS } from './layerGroups';
+import { LAYER_GROUPS, groupVisibleByDefault } from './layerGroups';
 import type { LayerGroupId } from './layerGroups';
 import type { DesignData } from './designLayers';
 import type { JunctionOverride } from '../geo/derived';
@@ -118,6 +118,11 @@ interface Props {
     junctions: DesignData['junctions'],
     warnings: string[],
     offsetPairs: DesignData['offsetPairs'],
+  ) => void;
+  /** The graph underneath: every node where roads meet, and every segment between them. */
+  onNetwork?: (
+    nodes: DesignData['networkNodeList'],
+    segments: DesignData['networkSegments'],
   ) => void;
 
   // ---- junctions
@@ -284,6 +289,8 @@ const DESIGN_SOURCES = [
   'grade',
   'loose-ends',
   'snap',
+  'network-cuts',
+  'network-nodes',
 ] as const;
 
 /**
@@ -629,6 +636,54 @@ function addDesignLayers(map: MapLibreMap) {
     },
   });
 
+  // The network overlay: where one segment stops and the next starts, and the node that
+  // divides them. Off unless asked for — this is the wiring diagram, not the design — but
+  // when a junction looks wrong it is the only view that says why.
+  addLayerSafely(map, {
+    id: 'network-cut',
+    type: 'line',
+    source: 'network-cuts',
+    layout: { visibility: 'none' },
+    paint: {
+      'line-color': '#6FD3C7',
+      'line-width': 1.6,
+      'line-opacity': 0.8,
+      'line-dasharray': [2, 2],
+    },
+  });
+
+  addLayerSafely(map, {
+    id: 'network-node',
+    type: 'circle',
+    source: 'network-nodes',
+    layout: { visibility: 'none' },
+    paint: {
+      // Size says how much meets here; colour says what kind of place it is.
+      'circle-radius': [
+        'interpolate',
+        ['linear'],
+        ['get', 'endCount'],
+        1,
+        3.5,
+        6,
+        8,
+      ],
+      'circle-color': [
+        'match',
+        ['get', 'form'],
+        'junction',
+        '#F2C14E',
+        'merge',
+        '#6FD3C7',
+        'continuation',
+        '#7FB2E5',
+        'rgba(230,236,240,0.75)',
+      ],
+      'circle-stroke-width': 1.6,
+      'circle-stroke-color': 'rgba(10,14,16,0.85)',
+    },
+  });
+
   addLayerSafely(map, {
     id: 'junction-point',
     type: 'circle',
@@ -764,6 +819,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     onSelectJunction,
     onWarnings,
     onJunctions,
+    onNetwork,
     junctionOverrides,
     defaultCornerRadiusMeters,
     trimAtJunctions,
@@ -818,6 +874,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     onSelectJunction,
     onWarnings,
     onJunctions,
+    onNetwork,
     junctionOverrides,
     defaultCornerRadiusMeters,
     trimAtJunctions,
@@ -1071,7 +1128,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     const map = mapRef.current;
     if (!map || !ready) return;
     for (const group of LAYER_GROUPS) {
-      const visible = layerVisibility?.[group.id] ?? true;
+      const visible = layerVisibility?.[group.id] ?? groupVisibleByDefault(group.id);
       for (const id of group.layers) {
         if (!map.getLayer(id)) continue;
         try {
@@ -1116,6 +1173,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
       swipe: sw,
       onWarnings: warn,
       onJunctions: reportJunctions,
+      onNetwork: reportNetwork,
     } = latest.current;
 
     const data = buildDesignData(s, sel, {
@@ -1137,6 +1195,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     });
     warn?.(data.warnings);
     reportJunctions?.(data.junctions, data.junctionWarnings, data.offsetPairs);
+    reportNetwork?.(data.networkNodeList, data.networkSegments);
 
     if (sw === null) {
       setData(map, 'bands', data.bands);
@@ -1170,6 +1229,8 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     setData(map, 'grade', data.gradeLines);
     setData(map, 'loose-ends', pointsFC(latest.current.looseEnds ?? []));
     setData(map, 'stop-lines', data.stopLines);
+    setData(map, 'network-nodes', data.networkNodes);
+    setData(map, 'network-cuts', data.networkCuts);
 
     // queryRenderedFeatures only reports once tiles are built, so sample shortly after —
     // and only once the edits stop, or a drag would queue one probe per frame.

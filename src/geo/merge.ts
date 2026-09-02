@@ -1,6 +1,7 @@
 import * as polyclip from 'polyclip-ts';
 import type { LngLat, LocalPlane, PlanePoint } from './projection';
 import type { Junction, JunctionLeg } from './junctions';
+import type { NodeForm } from './network';
 import type { CornerGeometry, CrossingPart, JunctionGeometry, LegGeometry } from './intersection';
 import { GLYPHS } from './glyphs';
 import { stampGlyph } from './markings';
@@ -129,9 +130,22 @@ export function mergeParts(junction: Junction): MergeParts | null {
  * what anyone drew and making them say so every time would be a tax on the common case.
  * The override exists for the genuinely ambiguous band around thirty degrees.
  */
-export function classifyJunction(junction: Junction, mergeBelowDegrees = 40): JunctionForm {
+export function classifyJunction(
+  junction: Junction,
+  mergeBelowDegrees = 40,
+  networkForm?: NodeForm,
+): JunctionForm {
   if (junction.legs.length < 3) return 'continuation';
-  if (isBraid(junction, mergeBelowDegrees)) return 'braid';
+
+  // The network reads the fan case straight off the ends that meet — it groups them into
+  // bundles of roads heading the same way, and a node whose ends all fall into one bundle,
+  // or two facing each other, has nothing crossing anything. That is the same judgement
+  // isBraid makes by sweeping every pair of legs, arrived at from the geometry the surface
+  // is actually built from rather than from an angle threshold. Where the network has an
+  // opinion it wins; isBraid stays as the fallback for callers without one.
+  const braid = networkForm ? networkForm === 'merge' : isBraid(junction, mergeBelowDegrees);
+  if (braid && !mergeParts(junction)) return 'braid';
+
   const parts = mergeParts(junction);
   if (!parts) return 'intersection';
   if (parts.angleDegrees < MIN_MERGE_DEGREES) return 'intersection';

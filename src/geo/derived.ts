@@ -18,11 +18,13 @@ import type { CurveSettings } from './curve';
 import type { Junction } from './junctions';
 import { DEFAULT_CORNER_RADIUS_METRES, junctionGeometry } from './intersection';
 import { classifyJunction, mergeGeometry } from './merge';
+import { buildNetwork, envelopesFor } from './network';
 import { gradeSegments, gradeSpans, levelAt, sliceLine } from './grade';
 import { bandsForTransition, sectionSpans } from './lanes';
 import { lineLengthMeters } from './measure';
 import { sectionExtent } from '../model/section';
 import type { JunctionForm } from './merge';
+import type { Network, NodeEnvelope, NodeForm } from './network';
 import type {
   CornerTreatment,
   CrosswalkSpec,
@@ -94,6 +96,17 @@ export interface DerivedProject {
    */
   offsetPairs: OffsetPair[];
   plane: LocalPlane;
+  /**
+   * The graph underneath: nodes, the segments between them, and which ends meet where.
+   *
+   * Exposed rather than kept private because it answers questions nothing else can. Which
+   * stretch of road is this? What else meets at this end of it? How many lanes arrive here?
+   * The street list cannot answer any of those, and every one of them is something you need
+   * to know before you can design a junction.
+   */
+  network: Network;
+  /** Each node's form and geometry, keyed by node id. */
+  nodeEnvelopes: Map<string, NodeEnvelope>;
   warnings: { streetId: string; streetName: string; warnings: CurvatureWarning[] }[];
   junctionWarnings: string[];
 }
@@ -933,12 +946,31 @@ export function deriveProject(
     ? junctions.map((junction) => withFlares(junction, overrides?.[junction.key]))
     : junctions;
 
+  // The graph underneath: nodes, the segments between them, and which ends meet where.
+  //
+  // Built from the same junctions that were just detected, so nothing about detection —
+  // levels, grade separation, placed nodes, clustering — changes. What it adds is
+  // structure. A junction knows it has five legs; a node knows those legs are five roads
+  // that END here, which is the difference between a fork and a crossroads and is not
+  // recoverable from the leg list alone.
+  //
+  // Cheap: resolveCenterline is memoised on reference identity, so this walks lines that
+  // are already tessellated and does arithmetic on them.
+  const network = buildNetwork(streets, junctions, plane);
+  const nodeEnvelopes = envelopesFor(network, { corridorDegrees: mergeBelowDegrees });
+  const nodeForms = new Map<string, NodeForm>();
+  for (const [nodeId, envelope] of nodeEnvelopes) {
+    const node = network.nodeById.get(nodeId);
+    if (node?.junctionKey) nodeForms.set(node.junctionKey, envelope.form);
+  }
+
   // Form is decided on the FLARED legs, not the raw ones: adding a turn pocket changes
   // the widths a merge is measured against, and reading the form from geometry the user
   // can no longer see would be its own kind of lie.
   const forms = flared.map<JunctionForm>(
     (junction) =>
-      overrides?.[junction.key]?.form ?? classifyJunction(junction, mergeBelowDegrees),
+      overrides?.[junction.key]?.form ??
+      classifyJunction(junction, mergeBelowDegrees, nodeForms.get(junction.key)),
   );
 
   const entries = trimAtJunctions
@@ -1299,6 +1331,8 @@ export function deriveProject(
     gradeLines,
     offsetPairs,
     plane,
+    network,
+    nodeEnvelopes,
     warnings,
     junctionWarnings: [...new Set([...geometry.flatMap((g) => g.warnings), ...offsetWarnings])],
   };

@@ -14,7 +14,12 @@ import { TEMPLATES, TEMPLATE_CATEGORIES, instantiateTemplate } from '../library/
 import { basemapById } from '../map/basemaps';
 import MapCanvas from '../map/MapCanvas';
 import type { EntityKind, MapHandle } from '../map/MapCanvas';
-import type { DesignData, JunctionSummary } from '../map/designLayers';
+import type {
+  DesignData,
+  JunctionSummary,
+  NetworkNodeSummary,
+  NetworkSegmentSummary,
+} from '../map/designLayers';
 import { describeWarnings } from '../geo/curvature';
 import { lineLengthMeters } from '../geo/measure';
 import { DEFAULT_CURVE, resolveCenterline, tightestRadius } from '../geo/curve';
@@ -75,6 +80,27 @@ const CURVE_MODES: { id: CurveMode; label: string; hint: string }[] = [
  * no way to tell what was down there without going to look.
  */
 type RailTab = 'project' | 'streets' | 'land' | 'junctions' | 'sections';
+
+/**
+ * What is at this end of a segment, in the words someone would use for it.
+ *
+ * The node forms have precise names inside the geometry — terminus, continuation, merge,
+ * junction — and precise names are the wrong thing to put in a sidebar. What you want to
+ * know is whether the road stops, carries on, joins something, or crosses something.
+ */
+function describeNode(node: NetworkNodeSummary | null): string {
+  if (!node) return 'unknown';
+  switch (node.form) {
+    case 'terminus':
+      return 'ends';
+    case 'continuation':
+      return 'carries on';
+    case 'merge':
+      return node.streetCount > 2 ? `fork of ${node.streetCount}` : 'joins';
+    case 'junction':
+      return `crosses ${node.streetCount - 1}`;
+  }
+}
 
 const RAIL_TABS: { id: RailTab; label: string; icon: string; hint: string }[] = [
   { id: 'project', label: 'Project', icon: '◲', hint: 'Name it, save it, open one' },
@@ -258,6 +284,8 @@ export default function MapEditor() {
   });
   const [measure, setMeasure] = useState<{ points: number; metres: number } | null>(null);
   const [junctions, setJunctions] = useState<JunctionSummary[]>([]);
+  const [networkNodes, setNetworkNodes] = useState<NetworkNodeSummary[]>([]);
+  const [networkSegments, setNetworkSegments] = useState<NetworkSegmentSummary[]>([]);
   const [offsetPairs, setOffsetPairs] = useState<DesignData['offsetPairs']>([]);
   const [renderStats, setRenderStats] = useState<{
     bands: number;
@@ -345,6 +373,27 @@ export default function MapEditor() {
       }))
       .sort((a, b) => a.stationMeters - b.stationMeters);
   }, [street, junctions, streetNames]);
+
+  /**
+   * This street, broken into the stretches between the places it actually meets something.
+   *
+   * The view a road-building game gives you for free and this editor never had. A street is
+   * one long polyline to draw and drag, but it is several roads to design: four lanes up to
+   * the off-ramp, three after it. Until you can see where one stretch ends and the next
+   * begins, "add a lane from here" has no *here* to attach to.
+   */
+  const segmentsAlong = useMemo(() => {
+    if (!street) return [];
+    const byNode = new Map(networkNodes.map((node) => [node.id, node]));
+    return networkSegments
+      .filter((segment) => segment.streetId === street.id)
+      .sort((a, b) => a.fromStation - b.fromStation)
+      .map((segment) => ({
+        ...segment,
+        from: byNode.get(segment.fromNodeId) ?? null,
+        to: byNode.get(segment.toNodeId) ?? null,
+      }));
+  }, [street, networkNodes, networkSegments]);
 
   /** The section a newly drawn street gets — also the fallback for a bare line import. */
   const drawingSection = useMemo(() => {
@@ -1478,6 +1527,10 @@ export default function MapEditor() {
               setJunctions(list);
               setOffsetPairs(pairs);
             }}
+            onNetwork={(nodeList, segments) => {
+              setNetworkNodes(nodeList);
+              setNetworkSegments(segments);
+            }}
             junctionOverrides={junctionOverrides}
             defaultCornerRadiusMeters={defaultCornerRadiusMeters}
             trimAtJunctions={trimAtJunctions}
@@ -2022,6 +2075,43 @@ export default function MapEditor() {
                 </p>
               )}
             </section>
+
+            {segmentsAlong.length > 0 && (
+              <section className="panel">
+                <header className="panel-head">
+                  <span className="label">Segments</span>
+                  <span className="label mono">{segmentsAlong.length}</span>
+                </header>
+                <p className="hint" style={{ marginTop: 0 }}>
+                  One street, drawn as one line, but this many stretches of road — split
+                  wherever it meets something. Turn on the Network layer to see the nodes on
+                  the map.
+                </p>
+                <ul className="grade-list">
+                  {segmentsAlong.map((segment, index) => (
+                    <li key={segment.id}>
+                      <span className="grade-where">
+                        <span>
+                          {index + 1}. {describeNode(segment.from)} &rarr;{' '}
+                          {describeNode(segment.to)}
+                        </span>
+                        <span className="mono">
+                          {formatWidth(segment.fromStation, units, {
+                            decimals: 0,
+                            withUnit: false,
+                          })}
+                          &ndash;
+                          {formatWidth(segment.toStation, units, {
+                            decimals: 0,
+                            withUnit: true,
+                          })}
+                        </span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
 
             <section className="panel">
               <header className="panel-head">

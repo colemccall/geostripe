@@ -58,14 +58,33 @@ export const LAYER_GROUPS = [
     hint: 'Centerlines, vertices and stop lines — the parts that are not on the ground.',
     layers: ['centerline-line', 'vertex-point', 'midpoint-point', 'stop-line'],
   },
+  {
+    id: 'network',
+    label: 'Network',
+    hint: 'Every node where roads meet, and the cut between one segment and the next.',
+    layers: ['network-cut', 'network-node'],
+  },
 ] as const;
+
+/**
+ * Groups that start switched off.
+ *
+ * The network overlay is the wiring diagram, not the design: it draws a dot at every place
+ * roads meet, including the ones that carve nothing, which is exactly what you want when a
+ * junction looks wrong and exactly what you do not want the rest of the time.
+ */
+const DEFAULT_OFF: ReadonlySet<string> = new Set(['network']);
 
 export type LayerGroupId = (typeof LAYER_GROUPS)[number]['id'];
 
-/** Everything visible by default. Turning a group off is always a deliberate act. */
+/** Whether a group starts on. Absent from saved settings means this, not simply "on". */
+export function groupVisibleByDefault(id: LayerGroupId): boolean {
+  return !DEFAULT_OFF.has(id);
+}
+
+/** The design visible by default; diagnostics off. Changing a group is a deliberate act. */
 export function allLayersVisible(): Record<LayerGroupId, boolean> {
-  return Object.fromEntries(LAYER_GROUPS.map((group) => [group.id, true])) as Record<
-    LayerGroupId,
-    boolean
-  >;
+  return Object.fromEntries(
+    LAYER_GROUPS.map((group) => [group.id, !DEFAULT_OFF.has(group.id)]),
+  ) as Record<LayerGroupId, boolean>;
 }
