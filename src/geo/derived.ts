@@ -18,7 +18,8 @@ import type { CurveSettings } from './curve';
 import type { Junction } from './junctions';
 import { DEFAULT_CORNER_RADIUS_METRES, junctionGeometry } from './intersection';
 import { classifyJunction, mergeGeometry } from './merge';
-import { gradeSegments, gradeSpans, sliceLine } from './grade';
+import { gradeSegments, gradeSpans, levelAt, sliceLine } from './grade';
+import { bandsForTransition, sectionSpans } from './lanes';
 import { lineLengthMeters } from './measure';
 import { sectionExtent } from '../model/section';
 import type { JunctionForm } from './merge';
@@ -232,31 +233,19 @@ export interface DeriveOptions {
  * the start of the next, so the seam across the carriageway closes exactly and no sliver
  * appears between them.
  */
-function bandsForGrade(
+function bandsForProfile(
   street: Street,
   line: readonly LngLat[],
 ): { bands: BandFeature[]; warnings: CurvatureWarning[] } {
-  const segments = gradeSegments(street.grade, lineLengthMeters(line));
-  if (segments.length === 0) {
-    const flat = bandsForStreet(street.id, line, street.section);
-    return {
-      bands: flat.bands.map((band) => withLevel(band, street.level ?? 0)),
-      warnings: flat.warnings,
-    };
-  }
-
+  const length = lineLengthMeters(line);
   const bands: BandFeature[] = [];
   const warnings: CurvatureWarning[] = [];
 
-  for (const segment of segments) {
-    const piece = sliceLine(line, segment.fromMeters, segment.toMeters);
-    if (piece.length < 2) continue;
-    const result = bandsForStreet(street.id, piece, street.section);
-    for (const band of result.bands) bands.push(withLevel(band, segment.level));
-    // Curvature is a property of the alignment, not of a piece of it. Vertex indices are
-    // per-piece here, so they cannot be compared across segments — the angle and the
-    // run-out identify a repeat well enough to stop the same bend being reported four times.
-    for (const warning of result.warnings) {
+  const note = (found: readonly CurvatureWarning[]) => {
+    // Curvature belongs to the alignment, not to a piece of it. Vertex indices are
+    // per-piece here so they cannot be compared across slices; the angle and the run-out
+    // identify a repeat well enough to stop one bend being reported four times.
+    for (const warning of found) {
       const seen = warnings.some(
         (w) =>
           Math.abs(w.turnDegrees - warning.turnDegrees) < 0.01 &&
@@ -264,7 +253,64 @@ function bandsForGrade(
       );
       if (!seen) warnings.push(warning);
     }
+  };
+
+  /** Band one stretch at one section, cut further wherever the grade changes under it. */
+  const holding = (from: number, to: number, section: CrossSection) => {
+    const grades = gradeSegments(street.grade, length).filter(
+      (segment) => segment.toMeters > from + 0.5 && segment.fromMeters < to - 0.5,
+    );
+    const pieces = grades.length
+      ? grades.map((segment) => ({
+          from: Math.max(from, segment.fromMeters),
+          to: Math.min(to, segment.toMeters),
+          level: segment.level,
+        }))
+      : [{ from, to, level: street.level ?? 0 }];
+
+    for (const piece of pieces) {
+      const slice = sliceLine(line, piece.from, piece.to);
+      if (slice.length < 2) continue;
+      const result = bandsForStreet(street.id, slice, section);
+      for (const band of result.bands) bands.push(withLevel(band, piece.level));
+      note(result.warnings);
+    }
+  };
+
+  const spans = sectionSpans(street.section, street.sectionChanges, length);
+
+  // Nothing changes along this street: one section, and the grade slicing on its own.
+  if (spans.length === 0) {
+    holding(0, length, street.section);
+    return { bands, warnings };
   }
+
+  spans.forEach((span, index) => {
+    if (!span.transition) {
+      holding(span.fromMeters, span.toMeters, span.section);
+      return;
+    }
+
+    // A taper is one piece. Subdividing it by grade as well would mean interpolating the
+    // section to each sub-range, and a taper is tens of metres — short enough that taking
+    // the level at its middle is exact to within the width of the line.
+    const slice = sliceLine(line, span.fromMeters, span.toMeters);
+    if (slice.length < 2) return;
+    const level = levelAt(
+      street.grade,
+      (span.fromMeters + span.toMeters) / 2,
+      street.level ?? 0,
+    );
+    for (const band of bandsForTransition(
+      street.id,
+      slice,
+      span.transition.from,
+      span.transition.to,
+      index * 100,
+    )) {
+      bands.push(withLevel(band, level));
+    }
+  });
 
   return { bands, warnings };
 }
@@ -279,6 +325,7 @@ interface RawEntry {
   centerline: Street['centerline'];
   curve: CurveSettings | undefined;
   grade: Street['grade'];
+  sectionChanges: Street['sectionChanges'];
   section: CrossSection;
   bands: BandFeature[];
   markings: Feature[];
@@ -297,17 +344,19 @@ function rawFor(street: Street): RawEntry {
     hit.centerline === street.centerline &&
     hit.curve === street.curve &&
     hit.grade === street.grade &&
+    hit.sectionChanges === street.sectionChanges &&
     hit.section === street.section
   ) {
     return hit;
   }
 
   const line = resolveCenterline(street);
-  const result = bandsForGrade(street, line);
+  const result = bandsForProfile(street, line);
   const entry: RawEntry = {
     centerline: street.centerline,
     curve: street.curve,
     grade: street.grade,
+    sectionChanges: street.sectionChanges,
     section: street.section,
     bands: result.bands,
     markings: stripesForStreet(street.id, line, street.section),

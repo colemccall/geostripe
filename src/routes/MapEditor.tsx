@@ -228,6 +228,8 @@ export default function MapEditor() {
     setStreetLevel,
     setStreetGrade,
     gradeSeparateAt,
+    changeLanesAt,
+    removeSectionChange,
     buildInterchange,
     toggleSharpVertex,
     addArea,
@@ -670,10 +672,18 @@ export default function MapEditor() {
               <button
                 type="button"
                 className="btn btn-ghost"
+                title="Two eight-lane mainlines and eight ramps — the freeway case"
+                onClick={() => loadDemo('i75')}
+              >
+                I-75 example
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
                 title="Ten streets in downtown Cincinnati, with the intersections already designed"
                 onClick={() => loadDemo('cincinnati')}
               >
-                Load example
+                Downtown example
               </button>
               <button type="button" className="btn btn-ghost" onClick={clearStreets}>
                 Clear all
@@ -1916,9 +1926,91 @@ export default function MapEditor() {
                             </button>
                           ))}
                         </div>
+
+                        {/* Lanes from here on. A ramp taking traffic away means fewer lanes
+                            afterwards than before — one road with two widths — so the change
+                            belongs at the point where the traffic leaves. */}
+                        <div
+                          className="segmented grade-pick"
+                          role="group"
+                          aria-label="Lanes from here"
+                        >
+                          <button
+                            type="button"
+                            title="One fewer lane from here on, tapering out"
+                            onClick={() => {
+                              if (changeLanesAt(street.id, c.stationMeters, -1)) {
+                                setNotice({
+                                  kind: 'success',
+                                  title: `A lane drops out after ${c.label}`,
+                                  details: [
+                                    'The lanes that carry on stay exactly where they were \u2014 only the one that leaves moves.',
+                                  ],
+                                });
+                              }
+                            }}
+                          >
+                            − 1 lane
+                          </button>
+                          <button
+                            type="button"
+                            title="One more lane from here on"
+                            onClick={() => {
+                              if (changeLanesAt(street.id, c.stationMeters, 1)) {
+                                setNotice({
+                                  kind: 'success',
+                                  title: `A lane opens up after ${c.label}`,
+                                  details: ['It widens outward; nothing already there moves.'],
+                                });
+                              }
+                            }}
+                          >
+                            + 1 lane
+                          </button>
+                        </div>
                       </li>
                     ))}
                   </ul>
+
+                  {(street.sectionChanges ?? []).length > 0 && (
+                    <>
+                      <span className="label" style={{ marginTop: 10, display: 'block' }}>
+                        Lane changes on this street
+                      </span>
+                      <ul className="grade-list">
+                        {(street.sectionChanges ?? []).map((change) => (
+                          <li key={change.stationMeters}>
+                            <span className="grade-where">
+                              <span>
+                                {
+                                  change.section.components.filter(
+                                    (component) => PRIMITIVES[component.componentType].isRoadway,
+                                  ).length
+                                }{' '}
+                                lanes from here
+                              </span>
+                              <span className="mono">
+                                {formatWidth(change.stationMeters, units, {
+                                  decimals: 0,
+                                  withUnit: true,
+                                })}{' '}
+                                along
+                              </span>
+                            </span>
+                            <button
+                              type="button"
+                              className="icon-btn is-danger"
+                              title="Take this change off"
+                              aria-label="Remove lane change"
+                              onClick={() => removeSectionChange(street.id, change.stationMeters)}
+                            >
+                              &#128465;
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
                 </div>
               )}
 

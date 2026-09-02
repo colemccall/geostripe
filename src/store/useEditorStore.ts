@@ -4,10 +4,18 @@ import { PRIMITIVES } from '../library/primitives';
 import { TEMPLATES, instantiateTemplate } from '../library/templates';
 import type { Area, CrossSection, JunctionNode, SectionComponent, Street } from '../model/types';
 import { newId } from '../model/types';
-import { autoAnchorOffset, geometricCentreOffset, totalWidth } from '../model/section';
+import { autoAnchorOffset, geometricCentreOffset, resolveAnchorOffset, totalWidth } from '../model/section';
 import { applyConnections, planConnections } from '../geo/connect';
-import { createCincinnatiProject } from '../demo/cincinnati';
+import { createCincinnatiProject, createI75Project } from '../demo/cincinnati';
 import { overpassProfile } from '../geo/grade';
+import {
+  DEFAULT_TAPER_METRES,
+  sameSection,
+  sectionAt,
+  withComponentAdded,
+  withComponentRemoved,
+} from '../geo/lanes';
+import type { SectionChange } from '../geo/lanes';
 import { planInterchange } from '../geo/interchange';
 import type { TemplateDef } from '../library/templates';
 import type { InterchangeOptions } from '../geo/interchange';
@@ -325,7 +333,7 @@ interface EditorState extends Snapshot {
   removeStreet: (streetId: string) => void;
   clearStreets: () => void;
   /** Load a worked example. 'cincinnati' is the ten-street baseline; 'park' the two-street one. */
-  loadDemo: (which?: 'cincinnati' | 'park') => void;
+  loadDemo: (which?: 'i75' | 'cincinnati' | 'park') => void;
 
   /** Create a street from a freshly drawn centerline. Returns its id. */
   addStreet: (
@@ -345,6 +353,24 @@ interface EditorState extends Snapshot {
    * a flyover something you can build an interchange out of rather than a floating road.
    */
   setStreetGrade: (streetId: string, grade: GradePoint[] | null) => void;
+  /**
+   * Change how many lanes a street has, from a station onward.
+   *
+   * `delta` is lanes added (positive) or dropped (negative) on one side. The section after
+   * the change is built from the one in force before it, so every component that carries
+   * on keeps its id — which is what lets the taper draw the continuing lanes moving rather
+   * than one road ending and another starting.
+   *
+   * Returns whether anything changed.
+   */
+  changeLanesAt: (
+    streetId: string,
+    stationMeters: number,
+    delta: number,
+    options?: { side?: 'left' | 'right'; taperMeters?: number },
+  ) => boolean;
+  /** Take a section change back off a street. */
+  removeSectionChange: (streetId: string, stationMeters: number) => void;
   /**
    * Turn one crossing into a grade-separated interchange.
    *
@@ -962,7 +988,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       set({ selectedStreetId: null, selectedComponentId: null, selectedAreaId: null });
     },
 
-    loadDemo: (which = 'cincinnati') => {
+    loadDemo: (which = 'i75') => {
       if (which === 'park') {
         const streets = createDemoStreets();
         commit({ streets, junctionOverrides: {} });
@@ -970,11 +996,16 @@ export const useEditorStore = create<EditorState>((set, get) => {
         return;
       }
 
-      const demo = createCincinnatiProject();
+      const demo = which === 'cincinnati' ? createCincinnatiProject() : createI75Project();
       // The overrides come with it: the intersections in this one are already designed,
       // and loading the streets without them would show a worked example with its work
       // stripped out.
-      commit({ streets: demo.streets, junctionOverrides: demo.junctionOverrides, areas: [], nodes: [] });
+      commit({
+        streets: demo.streets,
+        junctionOverrides: demo.junctionOverrides,
+        areas: demo.areas,
+        nodes: [],
+      });
       set({
         projectName: demo.name,
         selectedStreetId: demo.streets[0]?.id ?? null,
@@ -1085,6 +1116,86 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
       return { ramps: ramps.length, warnings: plan.warnings };
     },
+
+    changeLanesAt: (streetId, stationMeters, delta, options = {}) => {
+      const street = get().streets.find((s) => s.id === streetId);
+      if (!street || delta === 0) return false;
+
+      const length = lineLengthMeters(resolveCenterline(street));
+      if (stationMeters <= 0 || stationMeters >= length) return false;
+
+      const before = sectionAt(street.section, street.sectionChanges, stationMeters);
+      const side = options.side ?? 'right';
+      let after = cloneSection(before, before.name);
+      // cloneSection gives fresh ids, which would make every component look new. The whole
+      // taper depends on the ones that carry on being recognisably the same, so the copy
+      // keeps the originals.
+      after = {
+        ...after,
+        anchorOffsetMeters: resolveAnchorOffset(before),
+        components: before.components.map((c) => ({ ...c })),
+      };
+
+      /** The lane to copy when adding, and the one to drop when removing. */
+      const laneIndices = after.components
+        .map((c, i) => (PRIMITIVES[c.componentType].isRoadway ? i : -1))
+        .filter((i) => i >= 0);
+      if (laneIndices.length === 0) return false;
+
+      for (let n = 0; n < Math.abs(delta); n++) {
+        const roadway = after.components
+          .map((c, i) => ({ c, i }))
+          .filter(({ c }) => PRIMITIVES[c.componentType].isRoadway);
+        if (roadway.length === 0) break;
+
+        const edge = side === 'left' ? roadway[0]! : roadway[roadway.length - 1]!;
+        if (delta > 0) {
+          after = withComponentAdded(
+            after,
+            { ...edge.c, id: newId('cmp') },
+            side === 'left' ? edge.i : edge.i + 1,
+          );
+        } else {
+          if (roadway.length === 1) break;
+          after = withComponentRemoved(after, edge.c.id);
+        }
+      }
+
+      if (sameSection(before, after)) return false;
+
+      const change: SectionChange = {
+        stationMeters,
+        section: after,
+        taperMeters: options.taperMeters ?? DEFAULT_TAPER_METRES,
+      };
+
+      const existing = (street.sectionChanges ?? []).filter(
+        (c) => Math.abs(c.stationMeters - stationMeters) > 1,
+      );
+
+      commit({
+        streets: editStreet(streetId, (s) => ({
+          ...s,
+          sectionChanges: [...existing, change].sort(
+            (a, b) => a.stationMeters - b.stationMeters,
+          ),
+        })),
+      });
+      return true;
+    },
+
+    removeSectionChange: (streetId, stationMeters) =>
+      commit({
+        streets: editStreet(streetId, (s) => {
+          const kept = (s.sectionChanges ?? []).filter(
+            (c) => Math.abs(c.stationMeters - stationMeters) > 1,
+          );
+          const next: Street = { ...s };
+          if (kept.length === 0) delete next.sectionChanges;
+          else next.sectionChanges = kept;
+          return next;
+        }),
+      }),
 
     gradeSeparateAt: (streetId, stationMeters, direction, options = {}) => {
       const street = get().streets.find((s) => s.id === streetId);

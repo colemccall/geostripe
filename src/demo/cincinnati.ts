@@ -1,8 +1,9 @@
 import cincinnati from './cincinnati.geojson?raw';
+import i75 from './i75.geojson?raw';
 import { parseProject } from '../model/project';
 import { TEMPLATES, instantiateTemplate } from '../library/templates';
 import type { JunctionOverride } from '../geo/derived';
-import type { Street } from '../model/types';
+import type { Area, Street } from '../model/types';
 
 /**
  * Downtown Cincinnati — the baseline this editor is tuned against.
@@ -26,28 +27,45 @@ import type { Street } from '../model/types';
 
 export interface DemoProject {
   streets: Street[];
+  areas: Area[];
   junctionOverrides: Record<string, JunctionOverride>;
   name: string;
 }
 
-export function createCincinnatiProject(): DemoProject {
-  // The fallback section is only used for a feature that arrives with no components of its
-  // own, which this file has none of. It is required by the importer's contract.
+/**
+ * The I-75 alternative: two eight-lane mainlines and eight ramps.
+ *
+ * The freeway case, and the reason the cross-section had to be allowed to vary along a
+ * street. These are interstates that cannot simply be joined at a node — where a ramp
+ * leaves, the mainline carries fewer lanes afterwards than before, and that is one road
+ * with one alignment and two widths rather than two roads meeting.
+ */
+export function createI75Project(): DemoProject {
+  return load(i75, 'I-75 alternative');
+}
+
+function load(text: string, fallbackName: string): DemoProject {
   const fallback = instantiateTemplate(TEMPLATES[1]!);
-  const parsed = parseProject(cincinnati, {
+  const parsed = parseProject(text, {
     sectionName: fallback.name,
     components: fallback.components,
   });
 
   if (!parsed.ok) {
-    // Bundled at build time, so this cannot be a bad upload — it is a broken build, and
-    // an empty project says so more usefully than a crash on first paint.
-    return { streets: [], junctionOverrides: {}, name: 'Downtown Cincinnati' };
+    // Bundled at build time, so this cannot be a bad upload — it is a broken build, and an
+    // empty project says so more usefully than a crash on first paint.
+    return { streets: [], areas: [], junctionOverrides: {}, name: fallbackName };
   }
 
   return {
     streets: parsed.streets,
+    areas: parsed.areas,
     junctionOverrides: parsed.junctionOverrides,
-    name: 'Downtown Cincinnati',
+    name: fallbackName,
   };
 }
+
+export function createCincinnatiProject(): DemoProject {
+  return load(cincinnati, 'Downtown Cincinnati');
+}
+

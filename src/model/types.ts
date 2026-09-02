@@ -1,6 +1,7 @@
 import type { ComponentType, Direction } from '../library/primitives';
 import type { CurveSettings } from '../geo/curve';
 import type { GradePoint } from '../geo/grade';
+import type { SectionChange } from '../geo/lanes';
 import type { GlyphId } from '../geo/glyphs';
 import type { StripeStyle } from '../geo/markings';
 import type { LandcoverType } from '../library/landcover';
@@ -98,7 +99,22 @@ export interface Street {
    * at `level`.
    */
   grade?: GradePoint[];
+  /**
+   * The cross-section from station zero.
+   *
+   * For a street whose lanes change along its length — a freeway dropping one into a ramp
+   * — this is the first of several; see `sectionChanges`.
+   */
   section: CrossSection;
+  /**
+   * Where the cross-section changes, along the street's own length.
+   *
+   * What a single `section` cannot say. Four lanes run up to an interchange, one peels off,
+   * three carry on: one road, one alignment, three different widths. Without this the only
+   * way to draw it is to cut the highway into separate streets that meet end to end, which
+   * invents a junction between them and makes you drag two centrelines to move one road.
+   */
+  sectionChanges?: SectionChange[];
   /** Measured curb-to-curb of the real street, for the fit check. */
   existingWidthMeters?: number;
   visible: boolean;

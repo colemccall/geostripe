@@ -11,6 +11,7 @@ import { MOVEMENTS } from '../geo/markings';
 import { closeRing, resolveCenterline, resolveRing } from '../geo/curve';
 import type { CurveSettings } from '../geo/curve';
 import type { GradePoint } from '../geo/grade';
+import type { SectionChange } from '../geo/lanes';
 import { LANDCOVER_TYPES } from '../library/landcover';
 
 /**
@@ -53,6 +54,19 @@ const curveSchema = z.object({
   sharpVertices: z.array(z.number().int().min(0).max(9999)).max(4096).optional(),
 });
 
+/**
+ * A component inside a section change, which unlike an ordinary one keeps its id.
+ *
+ * Everywhere else a component id is session identity and is dropped on save: nothing refers
+ * to one across a file. Here something does. Matching a change against the section before
+ * it — which lanes carried on, which one peeled off into the ramp — is done on ids, so an
+ * id lost in a round trip turns every taper into "all of it ends and all of it begins",
+ * and a lane drop stops looking like a lane drop.
+ */
+const changeComponentSchema = componentSchema.extend({
+  id: z.string().min(1).max(120),
+});
+
 const streetPropertiesSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   curve: curveSchema.optional(),
@@ -79,6 +93,24 @@ const streetPropertiesSchema = z.object({
   sectionName: z.string().min(1).max(120).optional(),
   anchorOffsetMeters: z.number().finite().nullable().optional(),
   components: z.array(componentSchema).min(1).max(64),
+  /**
+   * Where the cross-section changes along the street.
+   *
+   * Each entry carries a whole stack, because that is what the geometry needs and because
+   * a diff against the previous one would be unreadable by hand — and being readable by
+   * hand is most of the reason this file is GeoJSON.
+   */
+  sectionChanges: z
+    .array(
+      z.object({
+        stationMeters: z.number().finite().min(0).max(100000),
+        taperMeters: z.number().finite().min(1).max(2000),
+        anchorOffsetMeters: z.number().finite().nullable().optional(),
+        components: z.array(changeComponentSchema).min(1).max(64),
+      }),
+    )
+    .max(32)
+    .optional(),
 });
 
 const polygonSchema = z.object({
@@ -257,6 +289,32 @@ export function toProjectGeoJSON(
         // the bands, so a curved street stays as editable after a round-trip as before it.
         ...(street.curve && street.curve.mode !== 'straight' ? { curve: street.curve } : {}),
         ...(street.level ? { level: street.level } : {}),
+        ...(street.sectionChanges && street.sectionChanges.length > 0
+          ? {
+              sectionChanges: street.sectionChanges.map((change) => ({
+                stationMeters: round(change.stationMeters),
+                taperMeters: round(change.taperMeters),
+                anchorOffsetMeters:
+                  change.section.anchorOffsetMeters === null
+                    ? null
+                    : round(change.section.anchorOffsetMeters),
+                components: change.section.components.map((c) => ({
+                  componentType: c.componentType,
+                  widthMeters: round(c.widthMeters),
+                  direction: c.direction,
+                  // The id travels, unlike an ordinary section's. Matching a change against
+                  // the section before it is done on ids — that is what says which lanes
+                  // carried on and which one peeled off — so losing them on a round trip
+                  // would turn every taper into "all of it ends, all of it begins".
+                  id: c.id,
+                  ...(c.colorOverride ? { colorOverride: c.colorOverride } : {}),
+                  ...(c.glyph ? { glyph: c.glyph } : {}),
+                  ...(c.glyphSpacingMeters ? { glyphSpacingMeters: c.glyphSpacingMeters } : {}),
+                  ...(c.stripeLeft ? { stripeLeft: c.stripeLeft } : {}),
+                })),
+              })),
+            }
+          : {}),
         ...(street.grade && street.grade.length > 1
           ? {
               grade: street.grade.map((p) => ({
@@ -385,6 +443,7 @@ function makeStreet(
   curve?: CurveSettings,
   level?: number,
   grade?: GradePoint[],
+  sectionChanges?: SectionChange[],
 ): Street {
   return {
     id,
@@ -394,6 +453,7 @@ function makeStreet(
     ...(curve ? { curve } : {}),
     ...(level ? { level } : {}),
     ...(grade && grade.length > 1 ? { grade } : {}),
+    ...(sectionChanges && sectionChanges.length > 0 ? { sectionChanges } : {}),
     ...(existingWidthMeters !== undefined ? { existingWidthMeters } : {}),
     section: {
       id: newId('sec'),
@@ -594,6 +654,19 @@ export function parseProject(text: string, defaults: ImportDefaults): ProjectPar
         data.curve,
         data.level,
         data.grade,
+        data.sectionChanges?.map((change, index) => ({
+          stationMeters: change.stationMeters,
+          taperMeters: change.taperMeters,
+          section: {
+            id: newId('sec'),
+            name: `${name} — change ${index + 1}`,
+            anchorOffsetMeters: change.anchorOffsetMeters ?? null,
+            components: change.components.map<SectionComponent>((c) => ({
+              ...c,
+              direction: c.direction ?? 'none',
+            })),
+          },
+        })),
       ),
     );
   });
