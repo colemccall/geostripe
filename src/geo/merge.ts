@@ -73,7 +73,7 @@ function rayHitsLine(
   return { t, point: add(p, scale(d, t)) };
 }
 
-export type JunctionForm = 'intersection' | 'merge' | 'continuation';
+export type JunctionForm = 'intersection' | 'merge' | 'continuation' | 'braid';
 
 /** How a junction breaks down into the street that ends and the street that continues. */
 export interface MergeParts {
@@ -131,10 +131,63 @@ export function mergeParts(junction: Junction): MergeParts | null {
  */
 export function classifyJunction(junction: Junction, mergeBelowDegrees = 40): JunctionForm {
   if (junction.legs.length < 3) return 'continuation';
+  if (isBraid(junction, mergeBelowDegrees)) return 'braid';
   const parts = mergeParts(junction);
   if (!parts) return 'intersection';
   if (parts.angleDegrees < MIN_MERGE_DEGREES) return 'intersection';
   return parts.angleDegrees < mergeBelowDegrees ? 'merge' : 'intersection';
+}
+
+/**
+ * Several roads arriving along the same line — a freeway splitting, not a crossroads.
+ *
+ * `mergeParts` only recognises the textbook case: one road ending on another that carries
+ * straight on, exactly two streets. A freeway does something it has no name for. Four ramps
+ * and a mainline all end at one point, tangentially, and the traffic fans out across them —
+ * a collector-distributor split, a ramp braid, the fork where an interstate divides.
+ *
+ * Boxing that is actively wrong. An intersection cuts every leg back to a shared rectangle
+ * and fills it with asphalt, which on a forty-metre freeway gouges a hole through the
+ * carriageway and draws kerb returns between lanes that never stop. The roads here do not
+ * meet at an angle; they run into each other, and the surface is continuous.
+ *
+ * Two tests, and the second is what separates a fan from a bad crossroads.
+ *
+ * Angular: every pair of legs has to be within `mergeBelowDegrees` of parallel or
+ * anti-parallel, so nothing turns across anything.
+ *
+ * And the roads have to END here rather than pass through. Three streets crossing at seven
+ * degrees are all shallow to each other, but each one carries straight on out the far side
+ * — traffic on one really does cross the path of traffic on another, and that is an
+ * intersection however unpleasant. A fan is roads terminating together and separating: the
+ * mainline may run through, but the ramps stop.
+ */
+function isBraid(junction: Junction, mergeBelowDegrees: number): boolean {
+  const legs = junction.legs;
+  if (legs.length < 3) return false;
+
+  // At least three distinct streets, or two roads meeting shallowly is an ordinary merge
+  // and gets the taper and gore that are already built for it.
+  const byStreet = new Map<string, number>();
+  for (const leg of legs) byStreet.set(leg.streetId, (byStreet.get(leg.streetId) ?? 0) + 1);
+  if (byStreet.size < 3) return false;
+
+  // At most one road carries straight through. Any more and they are crossing each other,
+  // not fanning out from each other.
+  const throughCount = [...byStreet.values()].filter((count) => count >= 2).length;
+  if (throughCount > 1) return false;
+
+  for (let i = 0; i < legs.length; i++) {
+    for (let j = i + 1; j < legs.length; j++) {
+      // Anti-parallel counts as aligned: two legs of the same road through a junction point
+      // opposite ways, and so do an arriving ramp and the road it runs into.
+      const between = angleBetween(legs[i]!.bearing, legs[j]!.bearing);
+      const off = Math.min(between, Math.PI - between);
+      if ((off * 180) / Math.PI > mergeBelowDegrees) return false;
+    }
+  }
+
+  return true;
 }
 
 // --------------------------------------------------------------------------- geometry

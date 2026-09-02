@@ -446,7 +446,15 @@ interface EditorState extends Snapshot {
   redo: () => void;
 }
 
-const initialStreets = createDemoStreets();
+/**
+ * What is on screen when the app opens.
+ *
+ * The real I-75 project, not a two-street sketch. An editor that opens on something
+ * invented teaches nothing about what it can do; opening on a freeway interchange with
+ * eight ramps puts the hard case in front of you immediately, which is the case worth
+ * looking at.
+ */
+const initialProject = createI75Project();
 
 /**
  * Copy a section with fresh component ids.
@@ -565,17 +573,17 @@ export const useEditorStore = create<EditorState>((set, get) => {
   ) => editSection(target, (section) => ({ ...section, components: fn(section.components) }));
 
   return {
-    projectName: 'Untitled project',
+    projectName: initialProject.name,
     units: 'ft',
     basemapId: 'usgsNaip',
     customTileUrl: '',
     waybackRelease: DEFAULT_VINTAGE,
     arcgisApiKey: '',
 
-    streets: initialStreets,
-    areas: [],
+    streets: initialProject.streets,
+    areas: initialProject.areas,
     draftSection: instantiateTemplate(TEMPLATES[1]!),
-    junctionOverrides: {},
+    junctionOverrides: initialProject.junctionOverrides,
     nodes: [],
     selectedNodeId: null,
     junctionMode: 'auto',
@@ -599,7 +607,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     imageryOpacity: 1,
     railOpen: true,
 
-    selectedStreetId: initialStreets[0]?.id ?? null,
+    selectedStreetId: null,
     selectedAreaId: null,
     drawLandcover: 'grass',
     selectedComponentId: null,

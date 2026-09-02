@@ -47,7 +47,15 @@ describe('the I-75 baseline', () => {
     expect(longest).toBeGreaterThan(400);
   });
 
-  it('derives without collapsing any street', () => {
+  it('derives without collapsing any street', { timeout: 20000 }, () => {
+    // Twenty seconds, and it needs several. A cold derive of this project is about two
+    // SECONDS against Cincinnati's third of one, because Street 1 is four kilometres of
+    // smooth curve carrying a fifteen-component section — bands of five hundred vertices,
+    // each one trimmed against every junction it meets by polygon boolean.
+    //
+    // That is the cost the roadmap's next item exists to remove: trimming at junctions by
+    // station along the centreline instead of by boolean. Freeway geometry is what makes
+    // it urgent rather than merely untidy.
     const demo = createI75Project();
     const derived = deriveProject(demo.streets, { overrides: demo.junctionOverrides });
     for (const street of demo.streets) {

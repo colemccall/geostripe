@@ -269,7 +269,12 @@ function bandsForProfile(
       : [{ from, to, level: street.level ?? 0 }];
 
     for (const piece of pieces) {
-      const slice = sliceLine(line, piece.from, piece.to);
+      // The whole line is the overwhelmingly common case — a street with neither a grade
+      // profile nor a lane change — and slicing it would rebuild the array and re-measure
+      // every vertex to arrive back at what was passed in. Cheap per street, but it runs
+      // for every street on every derive, which is a third of the cost of an edit.
+      const whole = piece.from <= 0 && piece.to >= length - 1e-6;
+      const slice = whole ? line : sliceLine(line, piece.from, piece.to);
       if (slice.length < 2) continue;
       const result = bandsForStreet(street.id, slice, section);
       for (const band of result.bands) bands.push(withLevel(band, piece.level));
@@ -416,6 +421,34 @@ function geometryFor(
   const signature = signatureOf(junction, override, defaultRadius, form);
   const hit = geometryCache.get(junction.key);
   if (hit && hit.signature === signature) return hit;
+
+  // A braid carves nothing. Several roads running into each other along the same line —
+  // a freeway splitting into collector lanes, a ramp fan — have a continuous surface and
+  // no turning movements across each other. Cutting them back to a shared box gouges a
+  // hole through a forty-metre carriageway and draws kerb returns between lanes that never
+  // stop, which is the single worst thing this tool renders. Letting the carriageways run
+  // through and overlap is not a compromise here: they are the same asphalt.
+  if (form === 'braid') {
+    const entry: GeometryEntry = {
+      signature,
+      geometry: {
+        key: junction.key,
+        centre: junction.position,
+        paved: [],
+        roadwayCut: [],
+        footprint: [],
+        crossings: [],
+        daylightZones: [],
+        legs: [],
+        corners: [],
+        warnings: [
+          `${junction.legs.length} roads run into each other here along much the same line. Drawn as a continuous surface rather than an intersection — nothing turns across anything, so there is no box to build. Set the form by hand if one of these really does cross the others.`,
+        ],
+      },
+    };
+    geometryCache.set(junction.key, entry);
+    return entry;
+  }
 
   if (form === 'merge') {
     const merged = mergeGeometry(junction, plane, { yieldLine: override?.yieldLine });
