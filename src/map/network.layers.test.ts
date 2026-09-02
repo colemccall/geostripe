@@ -93,6 +93,38 @@ describe('the network overlay', () => {
   });
 });
 
+describe('a street that changes its own cross-section', () => {
+  it('is cut there too, so the change has a segment boundary to sit on', () => {
+    // The distinction the user asked for and the street model could not express: four lanes
+    // up to the off-ramp, three after it. One alignment, two roads. Without a cut there is
+    // nowhere for "from here on" to attach to.
+    const road = street('Widening', [at(-200, 0), at(200, 0)]);
+    const narrower = {
+      ...road.section,
+      components: road.section.components.slice(0, 1),
+    };
+    const withChange: Street = {
+      ...road,
+      sectionChanges: [{ stationMeters: 200, section: narrower, taperMeters: 45 }],
+    };
+
+    const plain = buildDesignData([road], null);
+    const changed = buildDesignData([withChange], null);
+
+    expect(plain.networkSegments).toHaveLength(1);
+    expect(changed.networkSegments).toHaveLength(2);
+
+    const boundary = changed.networkSegments
+      .map((segment) => segment.toStation)
+      .find((station) => Math.abs(station - 200) < 1);
+    expect(boundary, 'no segment boundary at the lane change').toBeDefined();
+
+    // And the node there is a continuation, not an intersection: the road carries on.
+    const middle = changed.networkNodeList.find((node) => node.endCount === 2);
+    expect(middle?.form).toBe('continuation');
+  });
+});
+
 describe('the network overlay on the I-75 interchange', () => {
   const project = createI75Project();
   const data = buildDesignData(project.streets, null, {

@@ -956,7 +956,16 @@ export function deriveProject(
   //
   // Cheap: resolveCenterline is memoised on reference identity, so this walks lines that
   // are already tessellated and does arithmetic on them.
-  const network = buildNetwork(streets, junctions, plane);
+  // A street is also cut where its own cross-section changes. Four lanes up to the
+  // off-ramp and three after it is one alignment and two roads, and the segment list is
+  // the only place that distinction has ever been visible.
+  const extraCuts: Record<string, number[]> = {};
+  for (const street of visible) {
+    const changes = street.sectionChanges ?? [];
+    if (changes.length > 0) extraCuts[street.id] = changes.map((c) => c.stationMeters);
+  }
+
+  const network = buildNetwork(streets, junctions, plane, { extraCuts });
   const nodeEnvelopes = envelopesFor(network, { corridorDegrees: mergeBelowDegrees });
   const nodeForms = new Map<string, NodeForm>();
   for (const [nodeId, envelope] of nodeEnvelopes) {
