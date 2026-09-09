@@ -2596,12 +2596,13 @@ button {
 }
 
 /* The inspector exists only while something is selected: no empty column the rest
-   of the time, and nothing to dismiss. */
+   of the time, and nothing to dismiss. It is sized by what is in it rather than
+   stretched to the window, so inspecting a road is a small card and not a wall. */
 .hud-inspector {
   top: 12px;
   right: 12px;
-  bottom: 96px;
   width: 320px;
+  max-height: calc(100% - 120px);
   padding: 12px;
   overflow-y: auto;
 }
@@ -3001,4 +3002,21 @@ button {
 
 .inspector-asset {
   border-color: var(--accent);
+}
+
+.hb-hint {
+  padding: 0 6px;
+  font: 400 11px var(--font-ui);
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+.link-btn {
+  padding: 0;
+  font: inherit;
+  color: var(--focus);
+  text-decoration: underline;
+  background: none;
+  border: 0;
+  cursor: pointer;
 }

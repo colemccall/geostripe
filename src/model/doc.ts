@@ -36,6 +36,20 @@ export interface Node {
   name?: string;
   position: LngLat;
   /**
+   * How high this place is: 0 at ground, +1 an overpass, -1 a tunnel.
+   *
+   * On the NODE rather than on the road, which is the way a road-building game models it and
+   * is a genuine correctness fix rather than a preference. Height on the segment lets the
+   * document state a contradiction — two roads meeting at one point while disagreeing about
+   * how high that point is — and the only thing to do with a contradiction is suppress
+   * something. Here it cannot be written down: everything meeting at a node is at the node's
+   * height, by construction.
+   *
+   * A road between nodes of different heights is therefore a ramp, and slopes. Which of the
+   * two ends it is drawn above is a rendering question, not a modelling one.
+   */
+  elevation?: number;
+  /**
    * Kerb radius here, in metres, overriding what the roads arriving ask for.
    *
    * On the node rather than per corner because a corner has no identity that survives
@@ -66,16 +80,6 @@ export interface Segment {
   /** Interior shape points, WGS84. Empty for a straight road. */
   shape: LngLat[];
   curve?: CurveSettings;
-  /**
-   * Grade separation: 0 at grade, +1 an overpass, -1 a tunnel, and so on.
-   *
-   * Per segment rather than per road, which is the point. A road that climbs, crosses and
-   * comes back down is three segments at three levels — the same way you build one in a
-   * road-building game, and the same way one is actually built. There is no separate
-   * profile to keep in step with the alignment, because the alignment is already cut into
-   * the pieces that differ.
-   */
-  level?: number;
   /** Drawn against the from-to direction, which flips one-way markings and lane order. */
   reversed?: boolean;
   visible: boolean;
@@ -233,6 +237,27 @@ export function splitSegment(
     },
     nodeId,
     segmentIds: [first.id, second.id],
+  };
+}
+
+/** How high a road runs, taken from its ends. A ramp is drawn above the ground it climbs from. */
+export function segmentElevation(segment: Segment, nodes: ReadonlyMap<string, Node>): number {
+  const from = nodes.get(segment.fromNodeId)?.elevation ?? 0;
+  const to = nodes.get(segment.toNodeId)?.elevation ?? 0;
+  return Math.abs(from) >= Math.abs(to) ? from : to;
+}
+
+/** Raise or lower a place. Every road that meets there follows, which is the point. */
+export function setElevation(doc: Doc, nodeId: string, elevation: number): Doc {
+  return {
+    ...doc,
+    nodes: doc.nodes.map((node) => {
+      if (node.id !== nodeId) return node;
+      const next = { ...node };
+      if (elevation === 0) delete next.elevation;
+      else next.elevation = elevation;
+      return next;
+    }),
   };
 }
 

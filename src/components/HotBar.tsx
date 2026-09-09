@@ -30,6 +30,7 @@ interface Props {
 const TOOL_ICONS: { id: Tool; icon: string; label: string; key: string }[] = [
   { id: 'select', icon: '➤', label: 'Select', key: 'V' },
   { id: 'build', icon: '━', label: 'Roads', key: 'B' },
+  { id: 'upgrade', icon: '⟳', label: 'Upgrade', key: 'U' },
   { id: 'area', icon: '▰', label: 'Ground', key: 'G' },
   { id: 'bulldoze', icon: '✖', label: 'Bulldoze', key: 'X' },
 ];
@@ -201,6 +202,13 @@ export default function HotBar({ units }: Props) {
             </button>
           ))}
         </div>
+
+        {tool === 'upgrade' && (
+          <>
+            <span className="hb-sep" />
+            <span className="hb-hint">Click a road to make it the armed type</span>
+          </>
+        )}
 
         {tool === 'build' && (
           <>

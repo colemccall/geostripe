@@ -73,6 +73,41 @@ function tessellateBezier(points: readonly PlanePoint[], toleranceMeters: number
   return out;
 }
 
+/**
+ * Cut a bezier in two at `t`, exactly.
+ *
+ * De Casteljau does this for free: the intermediate points it builds on the way to
+ * evaluating the curve ARE the control points of the two halves — the first point of each
+ * level for the left half, the last of each level for the right. So a road split at a
+ * crossing keeps its shape on both sides rather than being re-fitted to it.
+ *
+ * That exactness is what makes automatic splitting safe to do. A road that visibly moved
+ * when another one crossed it would be worse than not splitting at all.
+ */
+export function splitBezierAt(
+  points: readonly PlanePoint[],
+  t: number,
+): { left: PlanePoint[]; right: PlanePoint[] } {
+  const left: PlanePoint[] = [];
+  const right: PlanePoint[] = [];
+  let current = points.map((p) => ({ x: p.x, y: p.y }));
+
+  while (current.length > 0) {
+    left.push(current[0]!);
+    right.unshift(current[current.length - 1]!);
+    if (current.length === 1) break;
+    const next: PlanePoint[] = [];
+    for (let i = 0; i < current.length - 1; i++) {
+      const a = current[i]!;
+      const b = current[i + 1]!;
+      next.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+    }
+    current = next;
+  }
+
+  return { left, right };
+}
+
 /** A point on the bezier, by repeated linear interpolation. Any degree, no special cases. */
 function deCasteljau(points: readonly PlanePoint[], t: number): PlanePoint {
   let current = points.map((p) => ({ x: p.x, y: p.y }));

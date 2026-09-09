@@ -7,7 +7,6 @@ import type { Asset, AssetFamily, LineAsset } from '../model/asset';
 import {
   addArea,
   addNode,
-  addSegment,
   emptyDoc,
   mergeNodes,
   moveNode,
@@ -17,7 +16,9 @@ import {
   splitPointFor,
   splitSegment,
 } from '../model/doc';
+import { setElevation } from '../model/doc';
 import type { Doc, Segment, Snap } from '../model/doc';
+import { layRoad } from '../model/build';
 import { newId } from '../model/types';
 import type { SectionComponent } from '../model/types';
 import { autoAnchorOffset, geometricCentreOffset, totalWidth } from '../model/section';
@@ -58,7 +59,7 @@ const HISTORY_LIMIT = 100;
  * a tool to place intersections the detector had missed, and one to measure a road so the
  * fit check had a number.
  */
-export type Tool = 'select' | 'build' | 'area' | 'bulldoze';
+export type Tool = 'select' | 'build' | 'upgrade' | 'area' | 'bulldoze';
 
 /**
  * How the road being laid gets its shape.
@@ -130,7 +131,12 @@ export interface EditorState extends Snapshot {
    */
   buildHandles: LngLat[];
   buildMode: BuildMode;
-  /** Level the build tool lays at — Page Up and Page Down, as in the games. */
+  /**
+   * Height the build tool works at — Page Up and Page Down, as in the games.
+   *
+   * It is the height NEW NODES get. Landing on a node that already exists uses that node's
+   * height instead, because the node is the place and the place has one height.
+   */
   buildLevel: number;
   curve: CurveSettings;
   /** Kerb radius for a node whose roads ask for nothing. */
@@ -192,7 +198,8 @@ export interface EditorState extends Snapshot {
   joinNodes: (keepId: string, absorbId: string) => void;
   splitAt: (segmentId: string, position: LngLat) => string | null;
   setSegmentAsset: (segmentId: string, assetId: string) => void;
-  setSegmentLevel: (segmentId: string, level: number) => void;
+  setNodeElevation: (nodeId: string, elevation: number) => void;
+  upgradeSegment: (segmentId: string) => void;
   reverseSegment: (segmentId: string) => void;
   setSegmentCurve: (segmentId: string, curve: CurveSettings) => void;
   bulldoze: (target: { segmentId?: string; nodeId?: string; areaId?: string }) => void;
@@ -418,7 +425,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
           return split ? { doc: split.doc, nodeId: split.nodeId } : null;
         }
         const added = addNode(source, position);
-        return { doc: added.doc, nodeId: added.nodeId };
+        // A node made while building at height carries that height. One landed on keeps its
+        // own, because the place already has one and a road cannot disagree with it.
+        return {
+          doc: buildLevel ? setElevation(added.doc, added.nodeId, buildLevel) : added.doc,
+          nodeId: added.nodeId,
+        };
       };
 
       if (!buildFromNodeId) {
@@ -445,23 +457,22 @@ export const useEditorStore = create<EditorState>((set, get) => {
         return;
       }
 
-      const built = addSegment(end.doc, {
+      // Lay it through whatever is in the way rather than over it: a road drawn across
+      // another splits both and shares a node, with no click needed at the crossing.
+      const laid = layRoad(end.doc, {
         assetId: activeLineAssetId,
         fromNodeId: buildFromNodeId,
         toNodeId: end.nodeId,
-        shape: buildHandles,
-        curve:
-          buildMode === 'straight'
-            ? undefined
-            : { mode: 'bezier', radiusMeters: get().curve.radiusMeters },
-        level: buildLevel || undefined,
+        handles: buildHandles,
+        curved: buildMode !== 'straight',
+        elevation: buildLevel,
       });
 
-      commit({ doc: built.doc });
+      commit({ doc: laid.doc });
       set({
         buildFromNodeId: end.nodeId,
         buildHandles: [],
-        selectedSegmentId: built.segmentId,
+        selectedSegmentId: laid.segmentIds[laid.segmentIds.length - 1] ?? null,
       });
       noteRecent(activeLineAssetId);
     },
@@ -572,13 +583,24 @@ export const useEditorStore = create<EditorState>((set, get) => {
       noteRecent(assetId);
     },
 
-    setSegmentLevel: (segmentId, level) =>
-      editSegment(segmentId, (s) => {
-        const next = { ...s };
-        if (level === 0) delete next.level;
-        else next.level = level;
-        return next;
-      }),
+    setNodeElevation: (nodeId, elevation) => commit({ doc: setElevation(get().doc, nodeId, elevation) }),
+
+    /**
+     * Retype a road to whatever is armed, which is the upgrade tool.
+     *
+     * The move a game gives you for "this street should have been an arterial", and it is
+     * one click because a road is an instance of its asset rather than a copy of one.
+     */
+    upgradeSegment: (segmentId) => {
+      const { activeLineAssetId } = get();
+      const segment = get().doc.segments.find((s) => s.id === segmentId);
+      if (!segment || segment.assetId === activeLineAssetId) return;
+      editSegment(segmentId, (s) => ({ ...s, assetId: activeLineAssetId }));
+      // Show what was just changed. Leaving an older selection on screen while a different
+      // road visibly changes is the panel describing something you are not looking at.
+      set({ selectedSegmentId: segmentId, selectedNodeId: null, selectedAreaId: null });
+      noteRecent(activeLineAssetId);
+    },
 
     reverseSegment: (segmentId) =>
       editSegment(segmentId, (s) => {

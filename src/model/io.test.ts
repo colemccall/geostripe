@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { parseProject, serializeProject, toProjectGeoJSON } from './io';
-import { addNode, addSegment, emptyDoc } from './doc';
+import { addNode, addSegment, emptyDoc, setElevation } from './doc';
 import type { Doc } from './doc';
 import { builtInAssets, defaultLineAssetId } from '../library/assets';
 import type { LineAsset } from './asset';
@@ -23,6 +23,8 @@ function project(): { doc: Doc; assets: ReturnType<typeof builtInAssets> } {
   doc = b.doc;
   const c = addNode(doc, [-84.51, 39.11]);
   doc = c.doc;
+  // Height is a property of the place now, so a bridge is a raised junction.
+  doc = setElevation(doc, c.nodeId, 1);
 
   doc = addSegment(doc, {
     assetId,
@@ -36,7 +38,6 @@ function project(): { doc: Doc; assets: ReturnType<typeof builtInAssets> } {
     fromNodeId: b.nodeId,
     toNodeId: c.nodeId,
     shape: [],
-    level: 1,
   }).doc;
 
   return { doc, assets };
@@ -65,10 +66,45 @@ describe('round trip', () => {
     expect(curved?.shape).toHaveLength(1);
   });
 
-  it('keeps a segment at its level, which is how bridges survive a save', () => {
+  it('keeps a junction at its height, which is how bridges survive a save', () => {
     const { doc, assets } = project();
     const back = parseProject(serializeProject(doc, assets, { name: 'Test' }), builtInAssets());
-    expect(back.doc.segments.some((s) => s.level === 1)).toBe(true);
+    expect(back.doc.nodes.some((n) => n.elevation === 1)).toBe(true);
+  });
+
+  it('lifts a height written on a road onto the places it meets', () => {
+    // Files written before height moved onto the node say it per road. Both ends of that
+    // road have to come back raised, or a saved bridge reopens on the ground.
+    const legacy = {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [-84.52, 39.1] },
+          properties: { streetcity: 'node', id: 'n1' },
+        },
+        {
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [-84.51, 39.1] },
+          properties: { streetcity: 'node', id: 'n2' },
+        },
+        {
+          type: 'Feature',
+          geometry: { type: 'LineString', coordinates: [[-84.52, 39.1], [-84.51, 39.1]] },
+          properties: {
+            streetcity: 'segment',
+            id: 's1',
+            assetId: 'x',
+            fromNodeId: 'n1',
+            toNodeId: 'n2',
+            level: 1,
+          },
+        },
+      ],
+    };
+
+    const back = parseProject(JSON.stringify(legacy), builtInAssets());
+    expect(back.doc.nodes.every((n) => n.elevation === 1)).toBe(true);
   });
 
   it('carries the palette, so the roads still know what they are made of', () => {

@@ -365,6 +365,14 @@ export function MapCanvas({ className }: MapCanvasProps) {
         return;
       }
 
+      // Retype a road to whatever is armed. The click that would have selected it instead
+      // changes it, which is what a game's upgrade tool does.
+      if (state.tool === 'upgrade') {
+        const hit = pick(map, event);
+        if (hit.segmentId) state.upgradeSegment(hit.segmentId);
+        return;
+      }
+
       if (state.tool === 'bulldoze') {
         if (snap?.kind === 'node') {
           state.bulldoze({ nodeId: snap.nodeId });
@@ -569,7 +577,13 @@ export function MapCanvas({ className }: MapCanvasProps) {
     if (!map || !ready) return;
     const canvas = map.getCanvas();
     canvas.style.cursor =
-      tool === 'build' || tool === 'area' ? 'crosshair' : tool === 'bulldoze' ? 'not-allowed' : '';
+      tool === 'build' || tool === 'area'
+        ? 'crosshair'
+        : tool === 'bulldoze'
+          ? 'not-allowed'
+          : tool === 'upgrade'
+            ? 'cell'
+            : '';
     // Double click places a point in the shape tools; zooming would fight it.
     if (tool === 'area') map.doubleClickZoom.disable();
     else map.doubleClickZoom.enable();

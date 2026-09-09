@@ -30,11 +30,22 @@ LineString emitted eight times over, each copy carrying the width and sideways o
 band. MapLibre does the offsetting and the joins on the GPU, at metre-exact scale, every
 frame. Nothing is turned into a polygon to be looked at.
 
-**Nothing is detected and nothing is cut out of anything.** Two roads are joined when they
-share a node, and not otherwise. A junction is not subtracted from the roads that meet it —
-the roads run into the node, and the junction's paved ground is drawn *on top of* them. The
-stacking order does the work a polygon boolean used to do, which is both faster and the
+**Nothing is cut out of anything.** A junction is not subtracted from the roads that meet
+it — the roads run into the node, and the junction's paved ground is drawn *on top of* them.
+The stacking order does the work a polygon boolean used to do, which is both faster and the
 reason a fork is drawn as a fork rather than as a hole.
+
+**A road drawn across another splits both.** No click at the crossing, the way a
+road-building game does it. This is not the old detector returning: the crossing point is
+computed from the two lines and lies exactly on both, which is the difference between "these
+two lines cross" — a fact — and "these two roads were probably meant to meet", which is what
+the old model guessed at. Roads at different heights pass each other untouched.
+
+**Height belongs to the node, not the road.** A place has one height, so everything meeting
+there is at that height by construction, and a road whose two ends differ is a ramp between
+them. Putting height on the road lets the document state a contradiction — one point at two
+heights — and the only thing to do with a contradiction is suppress something. There used to
+be a rule for that. There is no longer anything for it to suppress.
 
 **A stretch of road that differs is a different road.** There is no mechanism for varying a
 cross-section along a street, because there does not need to be one: split the segment fifty
@@ -78,7 +89,8 @@ something is selected.
 | Tool | What it does |
 | --- | --- |
 | **Select** | Click a road, junction or ground shape. Drag a node to move it and everything attached follows; drag a handle to reshape one road. |
-| **Roads** | Click to lay the armed asset. Landing on a node joins there; landing on a road splits it; landing on open ground makes a new node. The end of one road is the start of the next, so a run of blocks is one gesture. |
+| **Roads** | Click to lay the armed asset. Landing on a node joins there; landing on a road splits it; landing on open ground makes a new node — and running *across* a road splits both without any click at the crossing. The end of one road is the start of the next, so a run of blocks is one gesture. |
+| **Upgrade** | Arm a road type and click an existing road to make it that type. One click, because a road is an instance of its asset rather than a copy of one. |
 | **Ground** | Click a shape for a park, plaza or water. Double-click or Enter closes it. |
 | **Bulldoze** | Click to remove. |
 
@@ -99,7 +111,7 @@ amber for a node you would join and teal for a road you would split.
 | Key | |
 | --- | --- |
 | `1` `2` `3` | Straight / Curved / Freeform |
-| `Page Up` / `Page Down` | Raise or lower what you are about to build — bridges and tunnels |
+| `Page Up` / `Page Down` | Raise or lower what you are about to build. It sets the height NEW junctions get; landing on one that exists uses its height, because the place already has one |
 | `Shift` while building | Snap to 15° |
 | `Backspace` | Step back one click — drops the last handle, then lets go of the start |
 | `Esc` | Abandon the road in progress |
@@ -148,6 +160,7 @@ build runs correctly at any base path or domain.
 src/
   model/                  The document. Everything here is authored; nothing is inferred.
     doc.ts                Nodes, segments, areas — and the edits: split, join, merge, move
+    build.ts              Laying a road through whatever it crosses, splitting both
     asset.ts              What the palette holds: a line asset, or a ground material
     section.ts            Cross-section arithmetic — widths, anchor, boundary offsets
     io.ts                 GeoJSON in and out, plus conversion from the old street model
@@ -248,7 +261,7 @@ the renderer:
 
 ## Testing
 
-614 tests. The ones worth knowing about:
+623 tests. The ones worth knowing about:
 
 - **`map/paint.test.ts`** — that a 3.6 m lane measures 3.6 m at every zoom, at 39°N and
   69°N. Widths are no longer computed into polygons; they are an expression MapLibre
@@ -259,6 +272,10 @@ the renderer:
   and the map renders as bare imagery with the design silently missing.
 - **`map/worker.guard.test.ts`** — a source-level guard on the worker URL, for a failure
   that has happened twice and is silent in the same way.
+- **`model/build.test.ts`** — that a road drawn across another splits both and shares one
+  node; that three crossings in one stroke produce ten roads; that a curved road split at a
+  crossing keeps its exact shape on both sides; and that a road at a different height passes
+  over untouched.
 - **`model/io.test.ts`** — the round trip, and the conversion, run against the real
   Cincinnati project.
 - **`library/dimensions.test.ts`** — every primitive and preset rendered and measured back
@@ -311,8 +328,11 @@ Recorded so they are not rediscovered as bugs.
   rest apart, which is honest, but there is no gesture for saying "these two are the same
   place" afterwards. The model has `mergeNodes` and undo covers it; only the UI is missing.
   Forty-seven ends in the I-75 example are waiting on it.
-- **Two stacked flyovers share a draw deck.** Levels are authored freely and clamped to
+- **Two stacked flyovers share a draw deck.** Heights are authored freely and clamped to
   under / at grade / over for drawing order, because MapLibre layers are created once.
+- **A ramp is drawn flat, on the deck of its higher end.** The model knows it climbs — its
+  two nodes differ — but the plan view has no way to show a slope, so it is drawn above what
+  it climbs from rather than fading between the two.
 - **A lane-spanning pavement symbol is rasterised at a 3.3 m reference width** and scaled,
   rather than rebuilt per lane.
 - **No taper where two different assets meet end to end.** The joint is a step, which is

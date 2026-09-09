@@ -14,7 +14,7 @@ import { metresPerDegreeLat, metresPerDegreeLng } from '../geo/projection';
 import { LANDCOVERS } from '../library/landcover';
 import { PRIMITIVES } from '../library/primitives';
 import { boundaryOffsets, componentStarts, resolveAnchorOffset, sectionExtent } from '../model/section';
-import { endsAt, nodeMap, segmentControlPoints } from '../model/doc';
+import { endsAt, nodeMap, segmentControlPoints, segmentElevation } from '../model/doc';
 import type { Doc, Node, Segment } from '../model/doc';
 import { isLineAsset } from '../model/asset';
 import type { Asset, LineAsset } from '../model/asset';
@@ -168,6 +168,8 @@ interface Resolved {
   segment: Segment;
   asset: LineAsset;
   line: LngLat[];
+  /** Taken from the segment's nodes, because height is a property of the place. */
+  elevation: number;
 }
 
 /** The line a segment is drawn along: its start node, its shape, its end node. */
@@ -188,7 +190,7 @@ function resolveSegments(doc: Doc, assets: ReadonlyMap<string, Asset>): Resolved
     );
     if (line.length < 2) continue;
 
-    out.push({ segment, asset, line });
+    out.push({ segment, asset, line, elevation: segmentElevation(segment, nodes) });
   }
 
   return out;
@@ -216,7 +218,7 @@ function bandOffsets(asset: LineAsset, reversed: boolean): { offset: number; wid
 function bandFeatures(resolved: readonly Resolved[]): Feature<LineString>[] {
   const out: Feature<LineString>[] = [];
 
-  for (const { segment, asset, line } of resolved) {
+  for (const { segment, asset, line, elevation } of resolved) {
     const geometry: LineString = { type: 'LineString', coordinates: line };
     const bands = bandOffsets(asset, segment.reversed === true);
 
@@ -234,7 +236,7 @@ function bandFeatures(resolved: readonly Resolved[]): Feature<LineString>[] {
           widthM: band.width,
           offsetM: band.offset,
           color: component.colorOverride ?? primitive.color,
-          deck: deckOf(segment.level),
+          deck: deckOf(elevation),
           // Raised bands last within a segment, so a kerb reads above the asphalt beside it.
           raised: primitive.isRaised ? 1 : 0,
         },
@@ -281,12 +283,12 @@ const DASHED: ReadonlySet<StripeStyle> = new Set<StripeStyle>([
 function stripeFeatures(resolved: readonly Resolved[]): Feature<LineString>[] {
   const out: Feature<LineString>[] = [];
 
-  for (const { segment, asset, line } of resolved) {
+  for (const { segment, asset, line, elevation } of resolved) {
     if (asset.components.length < 2) continue;
     const geometry: LineString = { type: 'LineString', coordinates: line };
     const offsets = boundaryOffsets(asset);
     const sign = segment.reversed === true ? -1 : 1;
-    const deck = deckOf(segment.level);
+    const deck = deckOf(elevation);
 
     for (let i = 1; i < asset.components.length; i++) {
       const before = asset.components[i - 1]!;
@@ -342,9 +344,9 @@ function stripeFeatures(resolved: readonly Resolved[]): Feature<LineString>[] {
 function stampFeatures(resolved: readonly Resolved[]): Feature<Point>[] {
   const out: Feature<Point>[] = [];
 
-  for (const { segment, asset, line } of resolved) {
+  for (const { segment, asset, line, elevation } of resolved) {
     const bands = bandOffsets(asset, segment.reversed === true);
-    const deck = deckOf(segment.level);
+    const deck = deckOf(elevation);
 
     asset.components.forEach((component, i) => {
       if (component.glyph === 'none') return;
@@ -447,6 +449,7 @@ function arrivalFor(
   resolved: Resolved,
   end: 'from' | 'to',
   plane: LocalPlane,
+  elevation: number,
 ): Arrival | null {
   const { segment, asset, line } = resolved;
   const outward = end === 'from' ? line : [...line].reverse();
@@ -476,7 +479,9 @@ function arrivalFor(
     halfRight: flip ? extent.left : extent.right,
     pavedLeft: flip ? paved.right : paved.left,
     pavedRight: flip ? paved.left : paved.right,
-    level: segment.level ?? 0,
+    // The height AT THIS NODE, not the road's own. A ramp climbing to a bridge still meets
+    // the street at its low end, and taking the road's higher end here would say it does not.
+    level: elevation,
   };
 }
 
@@ -530,7 +535,7 @@ function plateFeatures(
     for (const { segment, end } of ends) {
       const item = byId.get(segment.id);
       if (!item) continue;
-      const arrival = arrivalFor(item, end, plane);
+      const arrival = arrivalFor(item, end, plane, node.elevation ?? 0);
       if (arrival) {
         arrivals.push(arrival);
         involved.push(item);
@@ -546,7 +551,7 @@ function plateFeatures(
     );
     if (!plates) continue;
 
-    const deck = deckOf(plates.level);
+    const deck = deckOf(node.elevation ?? 0);
     out.push({
       type: 'Feature',
       geometry: { type: 'Polygon', coordinates: [closeRing(plates.footprint)] },
@@ -688,14 +693,14 @@ export function paintPreview(
   assetId: string,
   controls: readonly LngLat[],
   curved: boolean,
-  level: number,
+  elevation: number,
 ): FeatureCollection<LineString> {
   if (controls.length < 2) return empty<LineString>();
 
   const doc: Doc = {
     nodes: [
-      { id: 'preview-a', position: controls[0]! },
-      { id: 'preview-b', position: controls[controls.length - 1]! },
+      { id: 'preview-a', position: controls[0]!, elevation },
+      { id: 'preview-b', position: controls[controls.length - 1]!, elevation },
     ],
     segments: [
       {
@@ -705,7 +710,6 @@ export function paintPreview(
         toNodeId: 'preview-b',
         shape: controls.slice(1, -1) as LngLat[],
         curve: curved ? { mode: 'bezier', radiusMeters: 12 } : undefined,
-        level: level || undefined,
         visible: true,
       },
     ],

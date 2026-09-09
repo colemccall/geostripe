@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DECKS, deckOf, metresToPixels, paintDoc, pixelsPerMetre, projectCentre } from './paint';
-import { addNode, addSegment, emptyDoc } from '../model/doc';
+import { addNode, addSegment, emptyDoc, setElevation } from '../model/doc';
 import type { Doc } from '../model/doc';
 import { assetMap, builtInAssets, defaultLineAssetId } from '../library/assets';
 import type { Asset, LineAsset } from '../model/asset';
@@ -255,20 +255,33 @@ describe('markings', () => {
 });
 
 describe('grade separation', () => {
-  it('builds no junction where the roads are at different levels', () => {
+  it('raises every road that meets a junction when the junction is raised', () => {
     const { doc, assets } = twoRoads();
-    // Raise the road running north out of the crossing: it now flies over rather than
-    // meeting, which is the whole point of a level.
-    const raised: Doc = {
-      ...doc,
-      segments: doc.segments.map((s, i) => (i === 2 ? { ...s, level: 1 } : s)),
-    };
+    const centre = doc.segments[0]!.toNodeId;
+    const raised = setElevation(doc, centre, 1);
+    const sources = paintDoc(raised, assets, { defaultRadiusMeters: 6 });
 
-    const before = paintDoc(doc, assets, { defaultRadiusMeters: 6 });
-    const after = paintDoc(raised, assets, { defaultRadiusMeters: 6 });
+    // Height is a property of the place, so lifting it lifts everything that meets there.
+    // Nothing can be left behind on the ground, because no road carries a height of its own.
+    const decks = new Set(
+      sources.bands.features
+        .filter((f) => f.properties!.segmentId !== undefined)
+        .map((f) => f.properties!.deck),
+    );
+    expect(decks.has(1)).toBe(true);
+  });
 
-    expect(before.plates.features.length).toBeGreaterThan(0);
-    expect(after.plates.features).toHaveLength(0);
+  it('still builds the junction, because everything there is at one height', () => {
+    const { doc, assets } = twoRoads();
+    const centre = doc.segments[0]!.toNodeId;
+    const raised = setElevation(doc, centre, 1);
+    const sources = paintDoc(raised, assets, { defaultRadiusMeters: 6 });
+
+    // The old model needed a rule suppressing junctions between roads at different levels,
+    // because it could express that contradiction. This one cannot, so the rule is gone and
+    // the junction survives being lifted.
+    expect(sources.plates.features.length).toBeGreaterThan(0);
+    expect(sources.plates.features.every((f) => f.properties!.deck === 1)).toBe(true);
   });
 
   it('builds no junction where every road is heading the same way', () => {
@@ -299,10 +312,9 @@ describe('decks', () => {
 
   it('orders bands by deck, so a tunnel is drawn under the ground above it', () => {
     const { doc, assets } = twoRoads();
-    const raised: Doc = {
-      ...doc,
-      segments: doc.segments.map((s, i) => ({ ...s, level: i === 0 ? 1 : i === 1 ? -1 : 0 })),
-    };
+    let raised: Doc = doc;
+    raised = setElevation(raised, doc.segments[0]!.fromNodeId, 1);
+    raised = setElevation(raised, doc.segments[2]!.toNodeId, -1);
     const sources = paintDoc(raised, assets, { defaultRadiusMeters: 6 });
     const decks = sources.bands.features.map((f) => f.properties!.deck as number);
 
