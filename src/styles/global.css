@@ -3020,3 +3020,24 @@ button {
   border: 0;
   cursor: pointer;
 }
+
+.inspector-loose {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: color-mix(in srgb, var(--warn-fill) 18%, transparent);
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+}
+
+.inspector-loose button {
+  align-self: flex-start;
+  padding: 5px 10px;
+  font: 500 12px var(--font-ui);
+  color: var(--accent-ink);
+  background: var(--accent-fill);
+  border: 1px solid var(--accent);
+  border-radius: 7px;
+  cursor: pointer;
+}

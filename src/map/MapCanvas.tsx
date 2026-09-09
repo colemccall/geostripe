@@ -17,8 +17,9 @@ import { renderAllGlyphs } from './glyphImages';
 import type { PaintSources } from './paint';
 import { useEditorStore } from '../store/useEditorStore';
 import { assetMap } from '../library/assets';
-import { splitPointFor } from '../model/doc';
+import { joinCandidate, splitPointFor } from '../model/doc';
 import type { Snap } from '../model/doc';
+import { directionGuidesAt, guideLine, snapToGuides } from '../geo/snapping';
 import type { LngLat } from '../geo/projection';
 import { LAYER_GROUPS } from './layerGroups';
 import type { LayerGroupId } from './layerGroups';
@@ -54,6 +55,14 @@ const SNAP_PX = 14;
 
 /** Angle snapping increments while Shift is held. */
 const SNAP_ANGLE_DEGREES = 15;
+
+/**
+ * How near a node has to be dropped on another to merge with it, in metres.
+ *
+ * Tighter than the reach used to SUGGEST a join, because dropping is an action and being
+ * wrong about it costs an undo, while suggesting is only ever an offer.
+ */
+const MERGE_DROP_METRES = 12;
 
 function buildStyle(basemapId: BasemapId, options: TileSourceOptions): StyleSpecification {
   const basemap = basemapById(basemapId);
@@ -443,6 +452,16 @@ export function MapCanvas({ className }: MapCanvasProps) {
         const point: LngLat = [event.lngLat.lng, event.lngLat.lat];
         if (drag.current.kind === 'node') {
           state.moveNodeLive(drag.current.nodeId, point);
+          // Ring what letting go would merge into, so a join is never a surprise.
+          const target = joinCandidate(
+            useEditorStore.getState().doc,
+            drag.current.nodeId,
+            MERGE_DROP_METRES,
+          );
+          const at = target
+            ? useEditorStore.getState().doc.nodes.find((n) => n.id === target.nodeId)?.position
+            : null;
+          showSnap(map, at ? { kind: 'node', nodeId: target!.nodeId } : undefined, at ?? null);
         } else {
           state.moveShapePointLive(drag.current.segmentId, drag.current.index, point);
         }
@@ -453,14 +472,37 @@ export function MapCanvas({ className }: MapCanvasProps) {
       // invisible is snapping you have to trust rather than see, which is what made the
       // build tool feel like guesswork.
       const snap = state.tool === 'build' ? snapAt(event) : undefined;
-      showSnap(map, snap, snap ? resolvePoint(event, snap) : null);
+      if (state.tool !== 'build' || !state.buildFromNodeId) {
+        showSnap(map, snap, snap ? resolvePoint(event, snap) : null);
+      }
 
       if (state.tool === 'build') {
         const from = state.doc.nodes.find((n) => n.id === state.buildFromNodeId);
         if (from) {
-          const cursor = snap
+          // Landing on something wins: an explicit target beats a direction.
+          let cursor = snap
             ? resolvePoint(event, snap)
             : snapAngle(event, state.buildHandles, from.position);
+          let guide: LngLat[] = [];
+          let guideKind = '';
+
+          // Otherwise pull onto what the junction implies — carry straight on, or turn
+          // square. Alt lets go of it, the way it lets go of everything else.
+          if (!snap && !event.originalEvent.altKey && !event.originalEvent.shiftKey) {
+            const anchor = state.buildHandles.length
+              ? state.buildHandles[state.buildHandles.length - 1]!
+              : from.position;
+            const guides =
+              state.buildHandles.length === 0 ? directionGuidesAt(state.doc, from.id) : [];
+            const pulled = snapToGuides(anchor, cursor, guides);
+            if (pulled) {
+              cursor = pulled.point;
+              guide = guideLine(anchor, pulled.point);
+              guideKind = pulled.guide.kind;
+            }
+          }
+
+          showGuide(map, guide, guideKind, snap, snap ? cursor : null);
           const controls = [from.position, ...state.buildHandles, cursor];
           setData(
             map,
@@ -485,10 +527,20 @@ export function MapCanvas({ className }: MapCanvasProps) {
     };
 
     const onMouseUp = () => {
-      if (!drag.current) return;
+      const dragged = drag.current;
+      if (!dragged) return;
       drag.current = null;
-      useEditorStore.getState().endGesture();
+      const state = useEditorStore.getState();
+      state.endGesture();
       map.dragPan.enable();
+      showSnap(map, undefined, null);
+
+      // Dropping a node onto another merges them, which is how two roads drawn separately
+      // become connected. The model always had the operation; there was no way to ask for it.
+      if (dragged.kind === 'node') {
+        const target = joinCandidate(state.doc, dragged.nodeId, MERGE_DROP_METRES);
+        if (target) state.joinNodes(target.nodeId, dragged.nodeId);
+      }
     };
 
     map.on('click', onClick);
@@ -709,6 +761,34 @@ function showSnap(map: MapLibreMap, snap: Snap | undefined, at: LngLat | null) {
       },
     ],
   });
+}
+
+/** The guide line and the snap ring together: both say where the next click lands. */
+function showGuide(
+  map: MapLibreMap,
+  guide: readonly LngLat[],
+  kind: string,
+  snap: Snap | undefined,
+  at: LngLat | null,
+) {
+  const features: FeatureCollection['features'] = [];
+
+  if (guide.length === 2) {
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: guide as LngLat[] },
+      properties: { kind },
+    });
+  }
+  if (snap && at) {
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: at },
+      properties: { kind: snap.kind },
+    });
+  }
+
+  setData(map, 'snap', { type: 'FeatureCollection', features });
 }
 
 /** The rubber band and its points, as one collection. */

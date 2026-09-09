@@ -89,6 +89,8 @@ describe('the design style is one MapLibre will accept', () => {
   it('draws the snap ring last, so what the next click will hit is never hidden', () => {
     const ids = designLayers(LAT).map((l) => l.id);
     expect(ids[ids.length - 1]).toBe('snap-ring');
+    // The guide is a hint about direction and sits under the ring, which is a target.
+    expect(ids.indexOf('snap-guide')).toBeLessThan(ids.indexOf('snap-ring'));
     // Handles sit just under it: a node has to stay grabbable through everything built.
     expect(ids.indexOf('handle-point')).toBeGreaterThan(ids.indexOf('plate-1'));
   });

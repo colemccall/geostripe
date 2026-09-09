@@ -292,6 +292,57 @@ export function removeNode(doc: Doc, nodeId: string): Doc {
 }
 
 /**
+ * How far a loose end will reach to find something to join to, in metres.
+ *
+ * Generous, because this is not a detector deciding on its own that two roads meet — it is
+ * offering a candidate for a join the user then makes. The old model's mistake was doing
+ * this silently and calling the result a junction; suggesting it and letting somebody agree
+ * is a different act, and can afford to look further.
+ */
+export const JOIN_REACH_METRES = 30;
+
+/**
+ * The nearest node a loose end could sensibly be joined to.
+ *
+ * Only ends are offered — a node with two or more roads is a place that already works, and
+ * dragging it into its neighbour is nearly always a slip rather than an intention.
+ */
+export function joinCandidate(
+  doc: Doc,
+  nodeId: string,
+  reachMetres = JOIN_REACH_METRES,
+): { nodeId: string; metres: number } | null {
+  const node = doc.nodes.find((n) => n.id === nodeId);
+  if (!node) return null;
+
+  const scale = Math.cos((node.position[1] * Math.PI) / 180);
+  const metresPerDegree = 111132;
+  let best: { nodeId: string; metres: number } | null = null;
+
+  for (const other of doc.nodes) {
+    if (other.id === nodeId) continue;
+    // Two places at different heights are not the same place, whatever the plan view says.
+    if ((other.elevation ?? 0) !== (node.elevation ?? 0)) continue;
+
+    const dx = (other.position[0] - node.position[0]) * scale * metresPerDegree;
+    const dy = (other.position[1] - node.position[1]) * metresPerDegree;
+    const metres = Math.hypot(dx, dy);
+    if (metres > reachMetres) continue;
+    if (!best || metres < best.metres) best = { nodeId: other.id, metres };
+  }
+
+  return best;
+}
+
+/** Every node with exactly one road, which is a road that stops rather than a place. */
+export function looseEnds(doc: Doc): Set<string> {
+  const counts = degrees(doc);
+  const out = new Set<string>();
+  for (const [id, count] of counts) if (count === 1) out.add(id);
+  return out;
+}
+
+/**
  * Merge one node into another, joining everything that met at either.
  *
  * How two roads drawn separately become connected. The derived model could never do this

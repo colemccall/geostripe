@@ -1,7 +1,7 @@
 import { useEditorStore } from '../store/useEditorStore';
 import { isLineAsset } from '../model/asset';
 import type { LineAsset } from '../model/asset';
-import { endsAt } from '../model/doc';
+import { endsAt, joinCandidate } from '../model/doc';
 import { totalWidth } from '../model/section';
 import { displayToMetres, formatWidth, metresToDisplay } from '../lib/units';
 import type { DisplayUnits } from '../lib/units';
@@ -151,6 +151,8 @@ export default function Inspector({ units }: Props) {
             {node.radiusMeters === undefined && ' Radius comes from the roads that arrive.'}
           </p>
 
+          <LooseEnd nodeId={node.id} units={units} />
+
           <div className="inspector-actions">
             {node.radiusMeters !== undefined && (
               <button type="button" onClick={() => store.setNodeRadius(node.id, undefined)}>
@@ -260,6 +262,40 @@ export default function Inspector({ units }: Props) {
           )}
         </section>
       )}
+    </div>
+  );
+}
+
+/**
+ * A road that stops next to another road, and the offer to join them.
+ *
+ * The old model did this silently, with a tolerance that scaled to the widest street
+ * involved, and called ends seventeen metres apart a junction. Offering the join instead of
+ * making it is the whole difference: the distance is stated, and somebody agrees to it.
+ *
+ * Dragging the node onto its neighbour does the same thing, and is quicker. This exists
+ * because a project converted from the old format can arrive with dozens of these, and
+ * hunting for them by dragging is not a way to spend an afternoon.
+ */
+function LooseEnd({ nodeId, units }: { nodeId: string; units: DisplayUnits }) {
+  const doc = useEditorStore((s) => s.doc);
+  const store = useEditorStore.getState();
+
+  const roads = endsAt(nodeId, doc.segments).length;
+  if (roads !== 1) return null;
+
+  const candidate = joinCandidate(doc, nodeId);
+  if (!candidate) return null;
+
+  return (
+    <div className="inspector-loose">
+      <p className="inspector-note">
+        This road stops {formatWidth(candidate.metres, units, { withUnit: true })} from
+        another end. Nothing is joined until you say so.
+      </p>
+      <button type="button" onClick={() => store.joinNodes(candidate.nodeId, nodeId)}>
+        Join them
+      </button>
     </div>
   );
 }

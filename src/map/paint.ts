@@ -14,7 +14,7 @@ import { metresPerDegreeLat, metresPerDegreeLng } from '../geo/projection';
 import { LANDCOVERS } from '../library/landcover';
 import { PRIMITIVES } from '../library/primitives';
 import { boundaryOffsets, componentStarts, resolveAnchorOffset, sectionExtent } from '../model/section';
-import { endsAt, nodeMap, segmentControlPoints, segmentElevation } from '../model/doc';
+import { endsAt, joinCandidate, nodeMap, segmentControlPoints, segmentElevation } from '../model/doc';
 import type { Doc, Node, Segment } from '../model/doc';
 import { isLineAsset } from '../model/asset';
 import type { Asset, LineAsset } from '../model/asset';
@@ -608,16 +608,25 @@ function handleFeatures(doc: Doc, options: PaintOptions): Feature<Point>[] {
     degree.set(segment.toNodeId, (degree.get(segment.toNodeId) ?? 0) + 1);
   }
 
-  const out: Feature<Point>[] = doc.nodes.map((node) => ({
-    type: 'Feature',
-    geometry: { type: 'Point', coordinates: node.position },
-    properties: {
-      nodeId: node.id,
-      kind: 'node',
-      degree: degree.get(node.id) ?? 0,
-      selected: node.id === options.selectedNodeId ? 1 : 0,
-    },
-  }));
+  const out: Feature<Point>[] = doc.nodes.map((node) => {
+    const count = degree.get(node.id) ?? 0;
+    // A road that stops next to another road is usually a road that was meant to reach it.
+    // Flagged rather than joined: the old model made that decision silently and was wrong
+    // about it, so this only says "there is something here" and waits to be told.
+    const loose = count === 1 && joinCandidate(doc, node.id) !== null;
+
+    return {
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: node.position },
+      properties: {
+        nodeId: node.id,
+        kind: 'node',
+        degree: count,
+        loose: loose ? 1 : 0,
+        selected: node.id === options.selectedNodeId ? 1 : 0,
+      },
+    };
+  });
 
   // Shape points belong to the selected road only. Every bend in the project drawn at once
   // is a field of dots you cannot click through to the design underneath.
@@ -866,8 +875,30 @@ export function designLayers(latDeg: number): LayerSpecification[] {
         '#FFFFFF',
         '#1B1F27',
       ],
-      'circle-stroke-width': 1.5,
-      'circle-stroke-color': '#FFFFFF',
+      // A loose end near something joinable is ringed, so the places worth a second look
+      // are visible without hunting for them.
+      'circle-stroke-width': ['case', ['==', ['get', 'loose'], 1], 3, 1.5],
+      'circle-stroke-color': [
+        'case',
+        ['==', ['get', 'loose'], 1],
+        '#E4823C',
+        '#FFFFFF',
+      ],
+    },
+  });
+
+  // The direction the road has been pulled onto, drawn past the cursor on both sides so it
+  // reads as a relationship rather than as part of the road.
+  layers.push({
+    id: 'snap-guide',
+    type: 'line',
+    source: 'snap',
+    filter: ['==', ['geometry-type'], 'LineString'],
+    paint: {
+      'line-color': ['case', ['==', ['get', 'kind'], 'continue'], '#3FB5AA', '#F2C14E'],
+      'line-width': 1.5,
+      'line-dasharray': [4, 3],
+      'line-opacity': 0.9,
     },
   });
 
@@ -876,6 +907,7 @@ export function designLayers(latDeg: number): LayerSpecification[] {
     id: 'snap-ring',
     type: 'circle',
     source: 'snap',
+    filter: ['==', ['geometry-type'], 'Point'],
     paint: {
       'circle-radius': 9,
       'circle-color': 'rgba(0,0,0,0)',

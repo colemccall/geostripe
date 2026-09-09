@@ -88,7 +88,7 @@ something is selected.
 
 | Tool | What it does |
 | --- | --- |
-| **Select** | Click a road, junction or ground shape. Drag a node to move it and everything attached follows; drag a handle to reshape one road. |
+| **Select** | Click a road, junction or ground shape. Drag a node to move it and everything attached follows; drag a handle to reshape one road. **Drop a node onto another and they merge**, which is how two roads drawn separately become connected. |
 | **Roads** | Click to lay the armed asset. Landing on a node joins there; landing on a road splits it; landing on open ground makes a new node — and running *across* a road splits both without any click at the crossing. The end of one road is the start of the next, so a run of blocks is one gesture. |
 | **Upgrade** | Arm a road type and click an existing road to make it that type. One click, because a road is an instance of its asset rather than a copy of one. |
 | **Ground** | Click a shape for a park, plaza or water. Double-click or Enter closes it. |
@@ -108,11 +108,24 @@ previewed at its **real width**, with its bands, by the same renderer that draws
 finished thing — and whatever the next click will attach to is ringed as you pass it, in
 amber for a node you would join and teal for a road you would split.
 
+Leaving a junction, the road is pulled onto the directions that junction already implies —
+**carry straight on through a road, or turn square off it** — with a dashed guide showing
+which. The guides come from the roads actually there rather than from a global grid, because
+a real downtown grid is rarely aligned to north and a fixed angular snap therefore helps
+with nothing. Hold `Alt` to ignore them.
+
+A road that stops within 30 m of another end is **ringed in orange**. Nothing is joined
+until you say so: select it and the inspector states the distance and offers the join, or
+just drag it onto its neighbour. The old model made that decision on its own, with a
+tolerance that scaled to the widest street involved, and called ends seventeen metres apart
+a junction — offering it instead is the whole difference.
+
 | Key | |
 | --- | --- |
 | `1` `2` `3` | Straight / Curved / Freeform |
 | `Page Up` / `Page Down` | Raise or lower what you are about to build. It sets the height NEW junctions get; landing on one that exists uses its height, because the place already has one |
-| `Shift` while building | Snap to 15° |
+| `Shift` while building | Snap to 15° instead of to the junction's own directions |
+| `Alt` while building | Ignore snapping entirely |
 | `Backspace` | Step back one click — drops the last handle, then lets go of the start |
 | `Esc` | Abandon the road in progress |
 | `Delete` | Remove what is selected |
@@ -170,6 +183,7 @@ src/
     projection.ts         Local metric tangent plane — the cos(latitude) fix
     curve.ts              Control points -> the line everything is drawn along
     junction.ts           The ground a junction owns: where the kerbs meet, rounded
+    snapping.ts           The directions a junction implies, and pulling the cursor onto them
     bands.ts              Band polygons. Export only — the map never calls this
     offset.ts             Polyline offsetting, for the same
     markings.ts           Which stripe belongs on which boundary
@@ -261,7 +275,7 @@ the renderer:
 
 ## Testing
 
-623 tests. The ones worth knowing about:
+634 tests. The ones worth knowing about:
 
 - **`map/paint.test.ts`** — that a 3.6 m lane measures 3.6 m at every zoom, at 39°N and
   69°N. Widths are no longer computed into polygons; they are an expression MapLibre
@@ -272,6 +286,9 @@ the renderer:
   and the map renders as bare imagery with the design silently missing.
 - **`map/worker.guard.test.ts`** — a source-level guard on the worker URL, for a failure
   that has happened twice and is silent in the same way.
+- **`geo/snapping.test.ts`** — that the guides are carry-on plus the two square turns; that
+  snapping changes direction without changing how far out the cursor is; and that it lets go
+  once the cursor is clearly off, because 45° is a direction somebody meant.
 - **`model/build.test.ts`** — that a road drawn across another splits both and shares one
   node; that three crossings in one stroke produce ten roads; that a curved road split at a
   crossing keeps its exact shape on both sides; and that a road at a different height passes
@@ -324,10 +341,6 @@ Recorded because these are the calls that would otherwise be quietly re-litigate
 
 Recorded so they are not rediscovered as bugs.
 
-- **No way to join two nodes by hand.** The importer welds ends within 1.5 m and leaves the
-  rest apart, which is honest, but there is no gesture for saying "these two are the same
-  place" afterwards. The model has `mergeNodes` and undo covers it; only the UI is missing.
-  Forty-seven ends in the I-75 example are waiting on it.
 - **Two stacked flyovers share a draw deck.** Heights are authored freely and clamped to
   under / at grade / over for drawing order, because MapLibre layers are created once.
 - **A ramp is drawn flat, on the deck of its higher end.** The model knows it climbs — its
