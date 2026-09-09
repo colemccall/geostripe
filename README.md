@@ -205,17 +205,28 @@ which is the thing the old model had no way to say.
 The two projects the editor ships with, in `src/demo/`, have been converted on disk and are
 stored in the native format, so opening one costs a parse rather than a conversion.
 
-One thing to know about the I-75 file: every street in it is at grade, and it carries no
-grade profile, so the ramps that cross the mainline convert into genuine at-grade crossings
-and are drawn as such. Setting those crossings to **Bridge** is what turns them back into
-the flyovers they are — and that is also the demonstration that levels do real work, since
-the junction disappears the moment the two roads stop being on the same deck.
+The I-75 example is the one worth opening first, because it exercises everything at once.
+Twenty-six drawn streets convert into **119 roads across 96 nodes**, and the eight distinct
+cross-sections in the file become eight assets — a 39 m freeway, a 13 m ramp, and six
+surface street types — each shared by every road that carried it. Forty-nine of those nodes
+are junctions.
+
+Two things about it are worth knowing, and both are properties of the data rather than of
+the renderer:
+
+- Every street in it is at grade with no grade profile, so ramps that cross the mainline
+  convert into genuine at-grade crossings and are drawn as such. Setting one to **Bridge**
+  is what turns it back into the flyover it is, and is the clearest demonstration that
+  levels do real work: the junction disappears the moment the two roads stop sharing a deck.
+- Forty-seven ends are unjoined, because the weld is strict. Those are the places the old
+  detector was guessing about, and there is currently no gesture for joining two nodes by
+  hand — see the gaps below.
 
 ---
 
 ## Testing
 
-606 tests. The ones worth knowing about:
+613 tests. The ones worth knowing about:
 
 - **`map/paint.test.ts`** — that a 3.6 m lane measures 3.6 m at every zoom, at 39°N and
   69°N. Widths are no longer computed into polygons; they are an expression MapLibre
@@ -267,6 +278,24 @@ Recorded because these are the calls that would otherwise be quietly re-litigate
 - **Latitude is baked into the metre scale** from the project's centre, because a MapLibre
   expression cannot know `cos(latitude)`. Correct over a project, wrong over a continent —
   and a design spanning enough latitude for that to matter is not a design of a street.
+
+---
+
+## Known gaps
+
+Recorded so they are not rediscovered as bugs.
+
+- **No way to join two nodes by hand.** The importer welds ends within 1.5 m and leaves the
+  rest apart, which is honest, but there is no gesture for saying "these two are the same
+  place" afterwards. The model has `mergeNodes` and undo covers it; only the UI is missing.
+  Forty-seven ends in the I-75 example are waiting on it.
+- **Two stacked flyovers share a draw deck.** Levels are authored freely and clamped to
+  under / at grade / over for drawing order, because MapLibre layers are created once.
+- **A lane-spanning pavement symbol is rasterised at a 3.3 m reference width** and scaled,
+  rather than rebuilt per lane.
+- **No taper where two different assets meet end to end.** The joint is a step, which is
+  honest about a lane drop but is not what a real transition looks like.
+- **The Map Editor chunk is ~1 MB** in one piece, uncompressed.
 
 ---
 
