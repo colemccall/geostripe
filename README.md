@@ -69,17 +69,39 @@ npm run dev        # http://localhost:5173/geostripe/
 
 ## Using it
 
+Everything lives in a hotbar along the bottom of the map, the way a city-builder's build
+menu does. Picking a family opens a drawer of assets upward; picking one arms the tool and
+closes the drawer again, so the map has the window for the whole of the time you are
+actually building. Nothing takes a permanent column, and the inspector only exists while
+something is selected.
+
 | Tool | What it does |
 | --- | --- |
-| **Select** | Click a road, junction or ground shape. Drag a node to move it and everything attached follows; drag a bend to reshape one road. |
-| **Build** | Click to place the active asset, node to node. Landing on a node joins there; landing on a road splits it; landing on open ground makes a new node. The end of one road is the start of the next, so a run of blocks is one gesture. |
+| **Select** | Click a road, junction or ground shape. Drag a node to move it and everything attached follows; drag a handle to reshape one road. |
+| **Roads** | Click to lay the armed asset. Landing on a node joins there; landing on a road splits it; landing on open ground makes a new node. The end of one road is the start of the next, so a run of blocks is one gesture. |
 | **Ground** | Click a shape for a park, plaza or water. Double-click or Enter closes it. |
 | **Bulldoze** | Click to remove. |
 
+The road tool has the three modes the games have, and the difference between them is what a
+click in the MIDDLE of a road means:
+
+| Mode | Clicks | |
+| --- | --- | --- |
+| **Straight** | start, end | No middle. |
+| **Curved** | start, handle, end | The handle is a bezier control — the road bends *toward* it and leaves the start tangent to it, rather than passing through it. |
+| **Freeform** | start, two handles, end | The same, with a cubic. |
+
+A handle is not a node and never appears in the document. The road under construction is
+previewed at its **real width**, with its bands, by the same renderer that draws the
+finished thing — and whatever the next click will attach to is ringed as you pass it, in
+amber for a node you would join and teal for a road you would split.
+
 | Key | |
 | --- | --- |
+| `1` `2` `3` | Straight / Curved / Freeform |
 | `Page Up` / `Page Down` | Raise or lower what you are about to build — bridges and tunnels |
 | `Shift` while building | Snap to 15° |
+| `Backspace` | Step back one click — drops the last handle, then lets go of the start |
 | `Esc` | Abandon the road in progress |
 | `Delete` | Remove what is selected |
 | `Ctrl` + `Z` / `Shift` + `Ctrl` + `Z` | Undo / redo |
@@ -152,7 +174,7 @@ src/
     templates.ts          157 cross-section presets; systematic families are generated
     landcover.ts          Ground materials
   components/
-    AssetPalette.tsx      Pick what to build with
+    HotBar.tsx            The build menu: tools, road modes, families, the asset drawer
     Inspector.tsx         What is selected, and the asset editor
     CrossSectionSvg.tsx   The section elevation
     ComponentStack.tsx    The editable band stack
@@ -226,7 +248,7 @@ the renderer:
 
 ## Testing
 
-613 tests. The ones worth knowing about:
+614 tests. The ones worth knowing about:
 
 - **`map/paint.test.ts`** — that a 3.6 m lane measures 3.6 m at every zoom, at 39°N and
   69°N. Widths are no longer computed into polygons; they are an expression MapLibre

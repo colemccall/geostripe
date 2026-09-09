@@ -673,6 +673,48 @@ export function paintDoc(
   };
 }
 
+/**
+ * The road under construction, painted with the real renderer.
+ *
+ * Not a dashed line standing in for a road. It is the same band stack the finished road
+ * gets, built from a throwaway document holding one segment, so the preview is the thing
+ * itself at the width it will really be. A tool that previews a hairline and then lays a
+ * forty-metre freeway is a tool you have to learn to compensate for.
+ *
+ * Cheap enough to run on every pointer move because it paints one segment, not the project.
+ */
+export function paintPreview(
+  assets: ReadonlyMap<string, Asset>,
+  assetId: string,
+  controls: readonly LngLat[],
+  curved: boolean,
+  level: number,
+): FeatureCollection<LineString> {
+  if (controls.length < 2) return empty<LineString>();
+
+  const doc: Doc = {
+    nodes: [
+      { id: 'preview-a', position: controls[0]! },
+      { id: 'preview-b', position: controls[controls.length - 1]! },
+    ],
+    segments: [
+      {
+        id: 'preview-s',
+        assetId,
+        fromNodeId: 'preview-a',
+        toNodeId: 'preview-b',
+        shape: controls.slice(1, -1) as LngLat[],
+        curve: curved ? { mode: 'bezier', radiusMeters: 12 } : undefined,
+        level: level || undefined,
+        visible: true,
+      },
+    ],
+    areas: [],
+  };
+
+  return { type: 'FeatureCollection', features: bandFeatures(resolveSegments(doc, assets)) };
+}
+
 export const emptySources = (): PaintSources => ({
   bands: empty<LineString>(),
   stripes: empty<LineString>(),
@@ -771,6 +813,21 @@ export function designLayers(latDeg: number): LayerSpecification[] {
     });
   }
 
+  // The road under construction, over everything built but under the handles. Translucent,
+  // because it is a proposal rather than a thing that exists.
+  layers.push({
+    id: 'preview-band',
+    type: 'line',
+    source: 'preview',
+    layout: { 'line-cap': 'butt', 'line-join': 'round' },
+    paint: {
+      'line-color': ['get', 'color'],
+      'line-width': width,
+      'line-offset': offset,
+      'line-opacity': 0.65,
+    },
+  });
+
   layers.push({
     id: 'guide-line',
     type: 'line',
@@ -810,8 +867,26 @@ export function designLayers(latDeg: number): LayerSpecification[] {
     },
   });
 
+  // What the next click will attach to. Drawn last so it is never hidden by the design.
+  layers.push({
+    id: 'snap-ring',
+    type: 'circle',
+    source: 'snap',
+    paint: {
+      'circle-radius': 9,
+      'circle-color': 'rgba(0,0,0,0)',
+      'circle-stroke-width': 2.5,
+      'circle-stroke-color': [
+        'case',
+        ['==', ['get', 'kind'], 'node'],
+        '#F2C14E',
+        '#3FB5AA',
+      ],
+    },
+  });
+
   return layers;
 }
 
-export const SOURCE_IDS = ['areas', 'bands', 'stripes', 'stamps', 'plates', 'guides', 'handles'] as const;
+export const SOURCE_IDS = ['areas', 'bands', 'stripes', 'stamps', 'plates', 'preview', 'guides', 'handles', 'snap'] as const;
 export type SourceId = (typeof SOURCE_IDS)[number];

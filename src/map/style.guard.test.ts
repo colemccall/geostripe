@@ -27,6 +27,8 @@ function styleWith(layers: unknown[]) {
       bands: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
       stripes: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
       stamps: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
+      preview: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
+      snap: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
       plates: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
       guides: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
       handles: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
@@ -42,7 +44,7 @@ describe('the design style is one MapLibre will accept', () => {
   });
 
   it('names every source it draws from', () => {
-    const sources = new Set(['areas', 'bands', 'stripes', 'stamps', 'plates', 'guides', 'handles']);
+    const sources = new Set(['areas', 'bands', 'stripes', 'stamps', 'plates', 'preview', 'guides', 'handles', 'snap']);
     for (const layer of designLayers(LAT)) {
       if ('source' in layer) expect(sources.has(layer.source as string)).toBe(true);
     }
@@ -84,9 +86,19 @@ describe('the design style is one MapLibre will accept', () => {
     }
   });
 
-  it('draws the handles last, so a node is always grabbable', () => {
+  it('draws the snap ring last, so what the next click will hit is never hidden', () => {
     const ids = designLayers(LAT).map((l) => l.id);
-    expect(ids[ids.length - 1]).toBe('handle-point');
+    expect(ids[ids.length - 1]).toBe('snap-ring');
+    // Handles sit just under it: a node has to stay grabbable through everything built.
+    expect(ids.indexOf('handle-point')).toBeGreaterThan(ids.indexOf('plate-1'));
+  });
+
+  it('draws the road under construction over the design but under the handles', () => {
+    const ids = designLayers(LAT).map((l) => l.id);
+    // A preview hidden behind the roads it is being threaded between is no preview at all,
+    // and one drawn over the handles would cover the node you are aiming at.
+    expect(ids.indexOf('preview-band')).toBeGreaterThan(ids.indexOf('plate-1'));
+    expect(ids.indexOf('preview-band')).toBeLessThan(ids.indexOf('handle-point'));
   });
 
   it('puts the ground under every road', () => {

@@ -26,7 +26,7 @@ import type { LngLat, PlanePoint } from './projection';
  * curve through a bend and still turn a hard corner at a junction.
  */
 
-export type CurveMode = 'straight' | 'rounded' | 'smooth';
+export type CurveMode = 'straight' | 'rounded' | 'smooth' | 'bezier';
 
 export interface CurveSettings {
   mode: CurveMode;
@@ -37,6 +37,56 @@ export interface CurveSettings {
 }
 
 export const DEFAULT_CURVE: CurveSettings = { mode: 'straight', radiusMeters: 12 };
+
+/**
+ * A road drawn the way a city-building game draws one: start, a handle, an end.
+ *
+ * `bezier` treats the interior control points as BEZIER HANDLES rather than as points the
+ * line passes through, which is the difference between the two kinds of curve tool and the
+ * reason this needed its own mode rather than reusing `smooth`.
+ *
+ * Dragging a handle in a game does not move the road onto the handle — it pulls the road
+ * toward it, and the road stays tangent to the line you dragged. That tangency is the whole
+ * feel of the tool: it is what makes a ramp leave the mainline pointing the right way
+ * instead of kinking off it. A Catmull-Rom through the same three points would pass through
+ * the middle one and arrive at the ends at whatever angle the arithmetic produced.
+ *
+ * One handle gives a quadratic, two give a cubic, which happens to be exactly the two curve
+ * modes the games offer.
+ */
+function tessellateBezier(points: readonly PlanePoint[], toleranceMeters: number): PlanePoint[] {
+  if (points.length < 3) return [...points];
+
+  // Chord length is a cheap upper bound on the curve's length, and the segment count that
+  // holds a bezier within a given sagitta grows with it. Cheaper and steadier than the
+  // adaptive subdivision the error bound would strictly require.
+  let chord = 0;
+  for (let i = 1; i < points.length; i++) {
+    chord += Math.hypot(points[i]!.x - points[i - 1]!.x, points[i]!.y - points[i - 1]!.y);
+  }
+  const steps = Math.max(8, Math.min(256, Math.ceil(Math.sqrt(chord / Math.max(toleranceMeters, 1e-6)))));
+
+  const out: PlanePoint[] = [];
+  for (let i = 0; i <= steps; i++) {
+    out.push(deCasteljau(points, i / steps));
+  }
+  return out;
+}
+
+/** A point on the bezier, by repeated linear interpolation. Any degree, no special cases. */
+function deCasteljau(points: readonly PlanePoint[], t: number): PlanePoint {
+  let current = points.map((p) => ({ x: p.x, y: p.y }));
+  while (current.length > 1) {
+    const next: PlanePoint[] = [];
+    for (let i = 0; i < current.length - 1; i++) {
+      const a = current[i]!;
+      const b = current[i + 1]!;
+      next.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+    }
+    current = next;
+  }
+  return current[0]!;
+}
 
 /**
  * How far the drawn line may stray from the true curve, in metres.
@@ -259,6 +309,11 @@ export function tessellate(
 
   const plane = localPlane(originFor(points));
   const planar = points.map((p) => plane.toPlane(p));
+
+  if (settings.mode === 'bezier') {
+    return tessellateBezier(planar, SAGITTA_TOLERANCE_METRES).map((p) => plane.toLngLat(p));
+  }
+
   const sharp = new Set(settings.sharpVertices ?? []);
 
   if (settings.mode === 'smooth') {
@@ -328,6 +383,11 @@ export function tessellateRing(
 
   const plane = localPlane(originFor(points));
   const planar = points.map((p) => plane.toPlane(p));
+
+  if (settings.mode === 'bezier') {
+    return tessellateBezier(planar, SAGITTA_TOLERANCE_METRES).map((p) => plane.toLngLat(p));
+  }
+
   const sharp = new Set(settings.sharpVertices ?? []);
   const n = planar.length;
   const back = (i: number) => planar[(i - 1 + n) % n]!;

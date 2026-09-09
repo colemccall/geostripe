@@ -12,7 +12,7 @@ import type { FeatureCollection } from 'geojson';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { basemapById, tileUrlsFor } from './basemaps';
 import type { BasemapId, TileSourceOptions } from './basemaps';
-import { designLayers, emptySources, paintDoc, projectCentre } from './paint';
+import { designLayers, emptySources, paintDoc, paintPreview, projectCentre } from './paint';
 import { renderAllGlyphs } from './glyphImages';
 import type { PaintSources } from './paint';
 import { useEditorStore } from '../store/useEditorStore';
@@ -87,6 +87,9 @@ function buildStyle(basemapId: BasemapId, options: TileSourceOptions): StyleSpec
   } as StyleSpecification;
 }
 
+/** Sources the preview and the snap ring own, which are not part of a paint of the document. */
+const LIVE_SOURCES = ['preview', 'snap'] as const;
+
 const SOURCE_KEYS: (keyof PaintSources)[] = [
   'areas',
   'bands',
@@ -128,7 +131,7 @@ function addDesign(map: MapLibreMap, latDeg: number) {
     }
   }
 
-  for (const id of [...SOURCE_KEYS, DRAFT_SOURCE]) {
+  for (const id of [...SOURCE_KEYS, ...LIVE_SOURCES, DRAFT_SOURCE]) {
     if (!map.getSource(id)) {
       map.addSource(id, { type: 'geojson', data: emptyFC() });
     }
@@ -186,7 +189,7 @@ export function MapCanvas({ className }: MapCanvasProps) {
   const showAllCenterlines = useEditorStore((s) => s.showAllCenterlines);
   const defaultRadiusMeters = useEditorStore((s) => s.defaultRadiusMeters);
   const buildFromNodeId = useEditorStore((s) => s.buildFromNodeId);
-  const buildShape = useEditorStore((s) => s.buildShape);
+  const buildHandles = useEditorStore((s) => s.buildHandles);
   const basemapId = useEditorStore((s) => s.basemapId);
   const customTileUrl = useEditorStore((s) => s.customTileUrl);
   const waybackRelease = useEditorStore((s) => s.waybackRelease);
@@ -211,6 +214,15 @@ export function MapCanvas({ className }: MapCanvasProps) {
   >(null);
 
   const areaRing = useRef<LngLat[]>([]);
+
+  /**
+   * The palette, indexed, for the preview to paint with.
+   *
+   * A ref because the preview runs on every pointer move and rebuilding a map of a hundred
+   * and eighty assets at pointer rate is real work for no reason. Refreshed whenever the
+   * palette actually changes.
+   */
+  const assetMapRef = useRef(assetMap(assets));
 
   /**
    * The most recent paint, kept so the style can be refilled without waiting for the
@@ -429,16 +441,37 @@ export function MapCanvas({ className }: MapCanvasProps) {
         return;
       }
 
-      if (state.tool === 'build' && state.buildFromNodeId) {
+      // What the next click would attach to, shown before it is spent. Snapping that is
+      // invisible is snapping you have to trust rather than see, which is what made the
+      // build tool feel like guesswork.
+      const snap = state.tool === 'build' ? snapAt(event) : undefined;
+      showSnap(map, snap, snap ? resolvePoint(event, snap) : null);
+
+      if (state.tool === 'build') {
         const from = state.doc.nodes.find((n) => n.id === state.buildFromNodeId);
         if (from) {
-          drawDraft(
+          const cursor = snap
+            ? resolvePoint(event, snap)
+            : snapAngle(event, state.buildHandles, from.position);
+          const controls = [from.position, ...state.buildHandles, cursor];
+          setData(
             map,
-            [from.position, ...state.buildShape, snapAngle(event, state.buildShape, from.position)],
-            null,
+            'preview',
+            paintPreview(
+              assetMapRef.current,
+              state.activeLineAssetId,
+              controls,
+              state.buildMode !== 'straight',
+              state.buildLevel,
+            ) as FeatureCollection,
           );
+        } else {
+          setData(map, 'preview', emptyFC());
         }
-      } else if (state.tool === 'area' && areaRing.current.length > 0) {
+        return;
+      }
+
+      if (state.tool === 'area' && areaRing.current.length > 0) {
         drawDraft(map, [...areaRing.current, [event.lngLat.lng, event.lngLat.lat]], null);
       }
     };
@@ -499,8 +532,22 @@ export function MapCanvas({ className }: MapCanvasProps) {
         return;
       }
 
+      if (event.key === 'Backspace' && state.tool === 'build') {
+        state.undoLastPoint();
+        event.preventDefault();
+        return;
+      }
+
       if (event.key === 'Delete' || event.key === 'Backspace') {
         if (state.tool === 'select') state.deleteSelection();
+        return;
+      }
+
+      // Road modes, on the number row, the way a game does it.
+      if (state.tool === 'build' && ['1', '2', '3'].includes(event.key)) {
+        state.setBuildMode(
+          event.key === '1' ? 'straight' : event.key === '2' ? 'curved' : 'freeform',
+        );
         return;
       }
 
@@ -559,7 +606,8 @@ export function MapCanvas({ className }: MapCanvasProps) {
     const map = mapRef.current;
     if (!map || !ready) return;
 
-    const sources = paintDoc(doc, assetMap(assets), {
+    assetMapRef.current = assetMap(assets);
+    const sources = paintDoc(doc, assetMapRef.current, {
       selectedSegmentId,
       selectedNodeId,
       selectedAreaId,
@@ -580,17 +628,14 @@ export function MapCanvas({ className }: MapCanvasProps) {
     showAllCenterlines,
   ]);
 
-  // The rubber band follows the document too — finishing a road has to clear it.
+  // Clear the preview when the road in progress ends, whether it was finished or abandoned.
+  // The preview itself is driven by the pointer, so there is nothing to redraw here.
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !ready) return;
-    if (!buildFromNodeId) {
-      drawDraft(map, [], null);
-      return;
-    }
-    const from = doc.nodes.find((n) => n.id === buildFromNodeId);
-    if (from) drawDraft(map, [from.position, ...buildShape], null);
-  }, [buildFromNodeId, buildShape, doc, ready]);
+    if (!map || !ready || buildFromNodeId) return;
+    setData(map, 'preview', emptyFC());
+    setData(map, 'snap', emptyFC());
+  }, [buildFromNodeId, buildHandles, ready]);
 
   // ------------------------------------------------------------- layer visibility
 
@@ -626,6 +671,30 @@ function pick(map: MapLibreMap, event: MapMouseEvent): {
     if (onArea?.properties?.areaId) return { areaId: String(onArea.properties.areaId) };
   }
   return {};
+}
+
+/**
+ * Ring whatever the next click would attach to.
+ *
+ * Two colours, because the two answers mean different things: landing on a node JOINS there,
+ * landing on a road SPLITS it. Those have different consequences and the tool should say
+ * which one is about to happen.
+ */
+function showSnap(map: MapLibreMap, snap: Snap | undefined, at: LngLat | null) {
+  if (!snap || !at) {
+    setData(map, 'snap', emptyFC());
+    return;
+  }
+  setData(map, 'snap', {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: at },
+        properties: { kind: snap.kind },
+      },
+    ],
+  });
 }
 
 /** The rubber band and its points, as one collection. */
