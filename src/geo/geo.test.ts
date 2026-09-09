@@ -5,8 +5,7 @@ import type { ComponentType } from '../library/primitives';
 import { dedupe, localPlane, metresPerDegreeLat, metresPerDegreeLng, originFor } from './projection';
 import type { LngLat } from './projection';
 import { offsetPolyline, polylineLength } from './offset';
-import { findOverruns } from './curvature';
-import { bandsForStreet } from './banding';
+import { bandsForSegment } from './bands';
 
 /**
  * The gate for the geometry engine.
@@ -147,7 +146,7 @@ describe('band width is correct in every direction', () => {
   for (const [name, bearing] of cases) {
     it(`${name}: a 3.0 m lane measures 3.0 m`, () => {
       const line = straightLine(CINCY, bearing, 200);
-      const { bands } = bandsForStreet('s', line, oneLane());
+      const bands = bandsForSegment(line, oneLane());
       expect(bands).toHaveLength(1);
       const width = measureBandWidth(bands[0]!.geometry as Polygon, line);
       // @turf/lineOffset would give 2.33 m north-south here — 22% out, 44x this tolerance.
@@ -158,7 +157,7 @@ describe('band width is correct in every direction', () => {
   it('gives the same width whichever way the street runs', () => {
     const widths = cases.map(([, bearing]) => {
       const line = straightLine(CINCY, bearing, 200);
-      const { bands } = bandsForStreet('s', line, oneLane());
+      const bands = bandsForSegment(line, oneLane());
       return measureBandWidth(bands[0]!.geometry as Polygon, line);
     });
     const spread = Math.max(...widths) - Math.min(...widths);
@@ -169,7 +168,7 @@ describe('band width is correct in every direction', () => {
     // cos(69.6) ~ 0.35, so an uncorrected offset would be nearly a third of the width.
     const tromso: LngLat = [18.955, 69.649];
     const line = straightLine(tromso, 0, 200);
-    const { bands } = bandsForStreet('s', line, oneLane());
+    const bands = bandsForSegment(line, oneLane());
     expect(relativeError(measureBandWidth(bands[0]!.geometry as Polygon, line), 3.0)).toBeLessThan(0.01);
   });
 });
@@ -185,10 +184,10 @@ describe('multi-band sections', () => {
     ]);
 
   it('emits one band per component, in order', () => {
-    const { bands } = bandsForStreet('s', straightLine(CINCY, 30, 300), fourLane());
+    const bands = bandsForSegment(straightLine(CINCY, 30, 300), fourLane());
     expect(bands).toHaveLength(5);
-    bands.forEach((b, i) => expect(b.properties.componentIndex).toBe(i));
-    expect(bands.map((b) => b.properties.componentType)).toEqual([
+    bands.forEach((b, i) => expect(b.properties!.componentIndex).toBe(i));
+    expect(bands.map((b) => b.properties!.componentType)).toEqual([
       'sidewalk',
       'travelLane',
       'turnLane',
@@ -199,17 +198,15 @@ describe('multi-band sections', () => {
 
   it('each band measures its own width', () => {
     const line = straightLine(CINCY, 30, 300);
-    const { bands } = bandsForStreet('s', line, fourLane());
+    const bands = bandsForSegment(line, fourLane());
     for (const band of bands) {
       const width = measureBandWidth(band.geometry as Polygon, line);
-      expect(relativeError(width, band.properties.widthMeters)).toBeLessThan(0.005);
+      expect(relativeError(width, band.properties!.widthMeters)).toBeLessThan(0.005);
     }
   });
 
   it('neighbouring bands share their boundary exactly — no slivers, no overlap', () => {
-    const { bands } = bandsForStreet('s', straightLine(CINCY, 30, 300), fourLane(), {
-      skipCleanup: true,
-    });
+    const bands = bandsForSegment(straightLine(CINCY, 30, 300), fourLane());
     for (let i = 0; i < bands.length - 1; i++) {
       const a = (bands[i]!.geometry as Polygon).coordinates[0]!;
       const b = (bands[i + 1]!.geometry as Polygon).coordinates[0]!;
@@ -226,7 +223,7 @@ describe('multi-band sections', () => {
   it('total rendered width equals the sum of component widths', () => {
     const s = fourLane();
     const line = straightLine(CINCY, 77, 300);
-    const { bands } = bandsForStreet('s', line, s);
+    const bands = bandsForSegment(line, s);
     const total = bands.reduce(
       (sum, b) => sum + measureBandWidth(b.geometry as Polygon, line),
       0,
@@ -237,11 +234,11 @@ describe('multi-band sections', () => {
 
   it('moving the anchor translates the section without changing any width', () => {
     const line = straightLine(CINCY, 30, 300);
-    const auto = bandsForStreet('s', line, fourLane());
-    const pinned = bandsForStreet('s', line, { ...fourLane(), anchorOffsetMeters: 0 });
-    auto.bands.forEach((b, i) => {
+    const auto = bandsForSegment(line, fourLane());
+    const pinned = bandsForSegment(line, { ...fourLane(), anchorOffsetMeters: 0 });
+    auto.forEach((b, i) => {
       const wa = measureBandWidth(b.geometry as Polygon, line);
-      const wb = measureBandWidth(pinned.bands[i]!.geometry as Polygon, line);
+      const wb = measureBandWidth(pinned[i]!.geometry as Polygon, line);
       expect(relativeError(wa, wb)).toBeLessThan(0.001);
     });
   });
@@ -294,71 +291,18 @@ describe('offsetting', () => {
   });
 });
 
-describe('curvature warnings', () => {
-  it('stays quiet on a straight line', () => {
-    expect(findOverruns([{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 200, y: 0 }], 10)).toEqual([]);
-  });
-
-  it('stays quiet on a gentle bend with room to run out', () => {
-    const pts = [
-      { x: 0, y: 0 },
-      { x: 200, y: 0 },
-      { x: 400, y: 20 },
-    ];
-    expect(findOverruns(pts, 5)).toEqual([]);
-  });
-
-  it('flags a hairpin that the offset cannot follow', () => {
-    const pts = [
-      { x: 0, y: 0 },
-      { x: 20, y: 0 },
-      { x: 0, y: 4 },
-    ];
-    const warnings = findOverruns(pts, 12);
-    expect(warnings.length).toBeGreaterThan(0);
-    expect(warnings[0]!.vertexIndex).toBe(1);
-    expect(warnings[0]!.requiredMeters).toBeGreaterThan(warnings[0]!.availableMeters);
-  });
-
-  it('still produces usable geometry through a hairpin, and warns', () => {
-    // A 15 m switchback under a 12.6 m section: the outer boundary sits 6.3 m out and
-    // needs ~27 m of run-out through a 153 degree turn, but only ~13 m is available.
-    // The cleanup pass must still return a usable polygon — the warning is what tells
-    // the user the shape is a repair rather than a faithful offset.
-    const atMetres = (east: number, north: number): LngLat => [
-      -84.5194 + east / 86492.6,
-      39.1096 + north / 111017.5,
-    ];
-    const line: LngLat[] = [atMetres(0, 0), atMetres(15, 0), atMetres(3, 6)];
-    const wide: CrossSection = section([
-      comp('sidewalk', 1.8),
-      comp('travelLane', 3.0),
-      comp('turnLane', 3.0),
-      comp('travelLane', 3.0),
-      comp('sidewalk', 1.8),
-    ]);
-
-    const { bands, warnings } = bandsForStreet('s', line, wide);
-    expect(bands).toHaveLength(5);
-    for (const band of bands) {
-      expect(band.geometry.coordinates.length).toBeGreaterThan(0);
-    }
-    expect(warnings.length).toBeGreaterThan(0);
-    expect(warnings[0]!.vertexIndex).toBe(1);
-  });
-});
 
 describe('degenerate input', () => {
   it('returns nothing for a one-point centerline instead of throwing', () => {
-    expect(bandsForStreet('s', [CINCY], oneLane()).bands).toEqual([]);
+    expect(bandsForSegment([CINCY], oneLane())).toEqual([]);
   });
 
   it('returns nothing for an empty section', () => {
-    expect(bandsForStreet('s', straightLine(CINCY, 0, 100), section([])).bands).toEqual([]);
+    expect(bandsForSegment(straightLine(CINCY, 0, 100), section([]))).toEqual([]);
   });
 
   it('ignores repeated points in the centerline', () => {
     const line: LngLat[] = [CINCY, CINCY, [CINCY[0], CINCY[1] + 0.002]];
-    expect(bandsForStreet('s', line, oneLane()).bands).toHaveLength(1);
+    expect(bandsForSegment(line, oneLane())).toHaveLength(1);
   });
 });

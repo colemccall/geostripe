@@ -1,252 +1,61 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AttributionControl,
+  GeoJSONSource,
   Map as MapLibreMap,
   NavigationControl,
   ScaleControl,
   setWorkerUrl,
 } from 'maplibre-gl';
-import type { MapMouseEvent, MapOptions } from 'maplibre-gl';
+import type { MapMouseEvent, PointLike, StyleSpecification } from 'maplibre-gl';
 import type { FeatureCollection } from 'geojson';
 import 'maplibre-gl/dist/maplibre-gl.css';
-
-import { basemapById, tileUrlsFor, unconfiguredReason } from './basemaps';
+import { basemapById, tileUrlsFor } from './basemaps';
 import type { BasemapId, TileSourceOptions } from './basemaps';
-import { buildDesignData, clipEastOf, clipLinesEastOf } from './designLayers';
-import { LAYER_GROUPS, groupVisibleByDefault } from './layerGroups';
-import { buildRoadGeometry } from '../geo/roadGeometry';
-import type { RoadGeometry } from '../geo/roadGeometry';
-import { splitPointFor } from '../model/road';
-import type { RoadNetworkDoc, RoadSnap } from '../model/road';
+import { designLayers, emptySources, paintDoc, projectCentre } from './paint';
+import { renderAllGlyphs } from './glyphImages';
+import type { PaintSources } from './paint';
+import { useEditorStore } from '../store/useEditorStore';
+import { assetMap } from '../library/assets';
+import { splitPointFor } from '../model/doc';
+import type { Snap } from '../model/doc';
+import type { LngLat } from '../geo/projection';
+import { LAYER_GROUPS } from './layerGroups';
 import type { LayerGroupId } from './layerGroups';
-import type { DesignData } from './designLayers';
-import type { JunctionOverride } from '../geo/derived';
-import { distanceMeters, lineLengthMeters } from '../geo/measure';
-import { snapPoint } from '../geo/snap';
-import type { SnapResult } from '../geo/snap';
-import { DEFAULT_CURVE, tessellate } from '../geo/curve';
-import type { CurveSettings } from '../geo/curve';
-import type { Area, JunctionNode, Street } from '../model/types';
-import type { Tool } from '../store/useEditorStore';
-import type { DisplayUnits } from '../lib/units';
+
 /**
- * Tell MapLibre where its worker actually is. Do not remove.
+ * Point MapLibre at its own worker, copied verbatim into public/ by a prebuild script.
  *
- * Left alone, MapLibre resolves the worker with
- * `new URL('./maplibre-gl-worker.mjs', import.meta.url)`, relative to whichever file it
- * is running from — which in a production build is the hashed chunk in /assets/, where
- * no such file exists. The request comes back as index.html.
- *
- * Two things make this hard to spot. The failure is silent, and it is partial: raster
+ * Without this MapLibre resolves the worker relative to its own chunk, asks for a file
+ * Rollup never emitted, and gets index.html back. The failure is silent and partial: raster
  * imagery keeps working because tiles load on the main thread, while every GeoJSON layer
- * stays invisible because those are parsed in the worker. It reads as a geometry bug.
- *
- * Vite's own worker bundling (`?worker&url`) does NOT fix it. That produces a bundle
- * MapLibre loads without complaint and which then never answers, leaving
- * `isSourceLoaded()` false forever. So instead scripts/sync-maplibre-worker.mjs copies
- * MapLibre's untouched files into public/maplibre/, where the worker's sibling import of
- * ./maplibre-gl-shared.mjs resolves normally.
- *
- * BASE_URL keeps this correct under both /geostripe/ and a custom domain root.
+ * stays invisible because those are parsed in the worker — so it reads as a geometry bug.
+ * Vite's own `?worker&url` bundling does not fix it; the bundle loads and then never
+ * answers. BASE_URL keeps it correct under a project path and a custom domain alike.
  */
 setWorkerUrl(`${import.meta.env.BASE_URL}maplibre/maplibre-gl-worker.mjs`);
 
-
 /**
- * MapLibre wrapper.
+ * The map, and every pointer gesture on it.
  *
- * The map instance is deliberately kept out of React state — it is a mutable, imperative
- * object with its own lifecycle, and re-rendering it causes tile thrash. React owns the
- * container; MapLibre owns everything inside it.
+ * The interaction model is a road-building game's, and the change from what came before is
+ * not cosmetic. Drawing used to mean tracing a whole street as a polyline, finishing it, and
+ * then hoping the junction detector agreed with where you had aimed. Here a click is
+ * unambiguous: it lands on a node, on a road, or on open ground, and each of those means
+ * exactly one thing. Nothing is inferred afterwards, so nothing can be inferred wrongly.
  *
- * Rotation is disabled on purpose. Plan-view street design has no use for a rotated
- * north, and holding the map north-up is what lets the before/after swipe clip against a
- * meridian rather than needing screen-space clipping MapLibre does not offer.
- *
- * Interaction state splits in two, deliberately:
- *
- *   - Anything a *frame* touches — the rubber-band point under the cursor, a vertex
- *     mid-drag — lives in refs and goes straight to the GeoJSON sources. Routing 60 Hz
- *     pointer moves through React state would re-render both rails to move one dot.
- *   - Anything that *outlives* the gesture — a committed vertex, a finished centerline —
- *     goes to the store, where undo can see it.
+ * What the map draws comes entirely from `paint.ts`, which turns the document into offset
+ * lines rather than polygons. This file's job is therefore small: keep the sources fed, and
+ * translate pointer events into document edits.
  */
 
-/** MapLibre 6 removed the default export and no longer re-exports StyleSpecification. */
-type MapStyle = NonNullable<MapOptions['style']>;
-
-type LngLat = [number, number];
-
-/** Streets and areas share the vertex-editing machinery; this says which one is meant. */
-export type EntityKind = 'street' | 'area';
-
-export interface MapView {
-  lng: number;
-  lat: number;
-  zoom: number;
-}
-
-/** Imperative operations the surrounding UI needs — toolbar buttons, mostly. */
-export interface MapHandle {
-  finishDraw: () => void;
-  cancelDraw: () => void;
-  undoDraftPoint: () => void;
-  clearMeasure: () => void;
-  zoomTo: (centerline: readonly LngLat[]) => void;
-  /** Step the zoom, for on-map buttons. MapLibre animates both. */
-  zoomBy: (delta: number) => void;
-  /** Frame everything drawn. Does nothing when there is nothing to frame. */
-  zoomToAll: () => void;
-}
-
-interface Props {
-  basemapId: BasemapId;
-  sourceOptions: TileSourceOptions;
-  units: DisplayUnits;
-  streets: readonly Street[];
-  selectedStreetId: string | null;
-  tool: Tool;
-  /** 0..1 across the viewport; null hides the divider and shows the full design. */
-  swipe: number | null;
-  center: LngLat;
-  zoom: number;
-  onViewChange?: (view: MapView) => void;
-  onSelectStreet?: (streetId: string) => void;
-  onSelectArea?: (areaId: string) => void;
-  onAreaComplete?: (ring: LngLat[]) => void;
-  areas?: readonly Area[];
-  selectedAreaId?: string | null;
-  onSelectJunction?: (key: string) => void;
-  onWarnings?: (warnings: DesignData['warnings']) => void;
-  onJunctions?: (
-    junctions: DesignData['junctions'],
-    warnings: string[],
-    offsetPairs: DesignData['offsetPairs'],
-  ) => void;
-  /** The graph underneath: every node where roads meet, and every segment between them. */
-  onNetwork?: (
-    nodes: DesignData['networkNodeList'],
-    segments: DesignData['networkSegments'],
-  ) => void;
-
-  // ---- road network
-  roads?: RoadNetworkDoc;
-  selectedRoadNodeId?: string | null;
-  selectedSegmentId?: string | null;
-  /** The node a road is being drawn from, if one is. */
-  roadDraftFrom?: string | null;
-  /** A click with the road tool: where, and what it landed on. */
-  onRoadClick?: (position: LngLat, snap?: RoadSnap) => void;
-  onSelectRoadNode?: (nodeId: string) => void;
-  onSelectSegment?: (segmentId: string) => void;
-  /** A node dragged onto another one. */
-  onJoinRoadNodes?: (keepId: string, absorbId: string) => void;
-  onMoveRoadNode?: (nodeId: string, position: LngLat) => void;
-  /** Stop drawing without undoing what has been placed. */
-  onCancelRoadDraft?: () => void;
-
-  // ---- junctions
-  junctionOverrides?: Readonly<Record<string, JunctionOverride>>;
-  defaultCornerRadiusMeters?: number;
-  trimAtJunctions?: boolean;
-  junctionMergeSlackMeters?: number;
-  mergeBelowDegrees?: number;
-  nodes?: readonly JunctionNode[];
-  junctionMode?: 'auto' | 'nodes';
-  /**
-   * Where street ends fail to meet what they were drawn to meet.
-   *
-   * Passed in rather than computed here: the same plan drives the Join button's count, and
-   * two independent calculations of "what is loose" would eventually disagree.
-   */
-  looseEnds?: readonly LngLat[];
-  /**
-   * What a plain click on a control point means.
-   *
-   * The modifiers below still work regardless, because holding Alt to delete one point is
-   * faster than switching modes and back. This exists so that not knowing about the
-   * modifiers costs you nothing.
-   */
-  pointAction?: 'move' | 'sharp' | 'remove';
-  selectedNodeId?: string | null;
-  onSelectNode?: (id: string | null) => void;
-  onPlaceNode?: (position: LngLat) => void;
-  onMoveNode?: (id: string, position: LngLat) => void;
-  /** Clicking bare ground, and Escape. Deselecting has to be as easy as selecting. */
-  onClearSelection?: () => void;
-  /** Delete or Backspace with something selected. */
-  onDeleteSelection?: () => void;
-  selectedJunctionKey?: string | null;
-  showAllCenterlines?: boolean;
-  /** Which groups of layers are drawn. Missing or true means visible. */
-  layerVisibility?: Partial<Record<LayerGroupId, boolean>>;
-  /** Imagery opacity, 0 to 1. Fading it back is how a design is checked against the trace. */
-  imageryOpacity?: number;
-
-  // ---- drawing
-  /** Committed draft vertices and their running length, for the toolbar readout. */
-  onDraftChange?: (points: LngLat[], metres: number) => void;
-  /**
-   * The drawn line, plus which of its points were placed as hard corners.
-   *
-   * Two lists rather than one, because a control point and its cornering are separate
-   * facts: the point is where the street goes, the flag is how it gets there. Keeping them
-   * apart is what lets a finished street be switched wholesale between straight and curved
-   * without losing which corners were deliberately kept sharp.
-   */
-  onDrawComplete?: (points: LngLat[], sharpVertices: number[]) => void;
-  /**
-   * How the NEXT point placed joins the last one.
-   *
-   * 'straight' pins it as a hard corner; 'curved' lets the arc run through it. Toggled
-   * while drawing, so one street can be straight down a block and swing round a bend
-   * without stopping and starting again.
-   */
-  segmentMode?: 'straight' | 'curved';
-  /** Corner radius for the curved segments of the line being drawn. */
-  drawRadiusMeters?: number;
-
-  // ---- centerline editing
-  onGestureStart?: () => void;
-  onGestureEnd?: () => void;
-  onVertexMove?: (kind: EntityKind, id: string, index: number, point: LngLat) => void;
-  onVertexInsert?: (kind: EntityKind, id: string, afterIndex: number, point: LngLat) => void;
-  onVertexDelete?: (kind: EntityKind, id: string, index: number) => void;
-  /** Shift-click a control point to pin or release it as a hard corner. */
-  onVertexSharp?: (kind: EntityKind, id: string, index: number) => void;
-
-  // ---- measuring
-  onMeasureChange?: (points: LngLat[], metres: number) => void;
-
-  /**
-   * How much geometry actually reached the map. Surfaced in the status bar because the
-   * difference between "no bands generated" and "bands generated but not drawn" is
-   * otherwise invisible, and both look like an empty map.
-   */
-  onRenderStats?: (stats: {
-    bands: number;
-    drawn: boolean;
-    rendered: number;
-    sourceLoaded: string;
-    layerCount: number;
-  }) => void;
-}
-
-const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] };
-
-/** Below this a stripe is thinner than the line drawn for it. */
-const MARKING_MIN_ZOOM = 15;
-
-/** Below this a pavement symbol is a few pixels of smudge. */
-const STAMP_MIN_ZOOM = 16;
-
-/** How near, in screen pixels, a click has to be to claim an existing junction. */
-const NODE_CLAIM_PX = 22;
-
-/** How close a click must land to a handle, in pixels, to count as hitting it. */
+/** How near, in screen pixels, a click has to be to snap to a node or a road. */
 const SNAP_PX = 14;
 
-function buildStyle(basemapId: BasemapId, options: TileSourceOptions): MapStyle {
+/** Angle snapping increments while Shift is held. */
+const SNAP_ANGLE_DEGREES = 15;
+
+function buildStyle(basemapId: BasemapId, options: TileSourceOptions): StyleSpecification {
   const basemap = basemapById(basemapId);
   const tiles = tileUrlsFor(basemapId, options);
 
@@ -269,1819 +78,600 @@ function buildStyle(basemapId: BasemapId, options: TileSourceOptions): MapStyle 
             id: 'basemap',
             type: 'raster',
             source: 'basemap',
-            paint: {
-              // No cross-fade between zoom levels. The fade keeps BOTH levels of tiles
-              // alive and composites them for its duration, so every zoom step briefly
-              // costs twice the texture work — on imagery, for an effect that mostly
-              // reads as the map being slow to sharpen up.
-              'raster-fade-duration': 0,
-            },
+            // No cross-fade: it keeps both zoom levels of tiles alive and composites them,
+            // which on imagery mostly reads as the map being slow to sharpen up.
+            paint: { 'raster-fade-duration': 0 },
           },
         ]
       : [],
-  };
+  } as StyleSpecification;
 }
 
-/** How near, in screen pixels, a drawn point has to be to snap to something. */
-const SNAP_DRAW_PX = 14;
-
-/** Angle snapping increments, when Shift is held. */
-const SNAP_ANGLE_DEGREES = 15;
-
-const DESIGN_SOURCES = [
+const SOURCE_KEYS: (keyof PaintSources)[] = [
   'areas',
-  'junction-footprint',
-  'junction-paved',
-  'junction-points',
-  'crossings',
-  'stop-lines',
   'bands',
-  'markings',
+  'stripes',
   'stamps',
-  'centerlines',
-  'midpoints',
-  'vertices',
-  'draft',
-  'draft-points',
-  'measure',
-  'measure-points',
-  'nodes',
-  'grade',
-  'loose-ends',
-  'snap',
-  'network-cuts',
-  'network-nodes',
-  'road-bands',
-  'road-surfaces',
-  'road-nodes',
-  'road-draft',
-] as const;
+  'plates',
+  'guides',
+  'handles',
+];
 
-/**
- * Add the design sources and layers. Idempotent — safe to call after every setStyle.
- *
- * Each layer is added independently so that one invalid paint property cannot abort the
- * rest. A thrown addLayer used to take the whole function down before any data was set,
- * which rendered as bare imagery with no error anywhere on screen.
- */
-function addLayerSafely(map: MapLibreMap, spec: Parameters<MapLibreMap['addLayer']>[0]) {
-  if (map.getLayer(spec.id)) return;
-  try {
-    map.addLayer(spec);
-  } catch (error) {
-    console.error(`[GeoStripe] could not add layer "${spec.id}":`, error);
-  }
-}
-
-function addDesignLayers(map: MapLibreMap) {
-  for (const id of DESIGN_SOURCES) {
-    if (!map.getSource(id)) map.addSource(id, { type: 'geojson', data: EMPTY });
-  }
-
-  // Land cover is the ground: below every part of the street design, above the imagery.
-  addLayerSafely(map, {
-    id: 'area-fill',
-    type: 'fill',
-    source: 'areas',
-    paint: { 'fill-color': ['get', 'color'], 'fill-opacity': ['get', 'opacity'] },
-  });
-
-  addLayerSafely(map, {
-    id: 'area-outline',
-    type: 'line',
-    source: 'areas',
-    paint: {
-      'line-color': ['case', ['get', 'selected'], '#F2C14E', 'rgba(0,0,0,0.45)'],
-      'line-width': ['case', ['get', 'selected'], 2, 0.8],
-    },
-  });
-
-  // Order is load-bearing. The footprint goes down first in footway colour and the paved
-  // area on top of it; streets are trimmed so roadway stops at the paved edge and footway
-  // at the footprint edge, which leaves precisely the corner showing as footway. The
-  // stacking order IS the boolean that carves the corner sidewalk.
-  addLayerSafely(map, {
-    id: 'junction-footprint-fill',
-    type: 'fill',
-    source: 'junction-footprint',
-    paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.82 },
-  });
-
-  addLayerSafely(map, {
-    id: 'junction-paved-fill',
-    type: 'fill',
-    source: 'junction-paved',
-    paint: {
-      'fill-color': ['get', 'color'],
-      // A touch more solid than the road running into it, so the intersection reads as its
-      // own surface rather than as a place where several streets happen to overlap.
-      'fill-opacity': ['case', ['get', 'selected'], 0.94, 0.88],
-    },
-  });
-
-  // The kerb line around the intersection.
-  //
-  // Without these an intersection was the same asphalt as the road at the same opacity
-  // with a hairline around it — so the one thing that gives a junction its shape, the curb
-  // return sweeping from one street into the next, was invisible. That is the shape being
-  // designed. Two lines: the outer edge of the whole intersection area, and the kerb itself
-  // where asphalt meets footway.
-  addLayerSafely(map, {
-    id: 'junction-footprint-outline',
-    type: 'line',
-    source: 'junction-footprint',
-    minzoom: 14,
-    paint: {
-      'line-color': ['case', ['get', 'selected'], '#F2C14E', 'rgba(20,26,28,0.35)'],
-      'line-width': ['case', ['get', 'selected'], 2.2, 0.9],
-      // Constant, not a `case`: line-dasharray is one of the paint properties MapLibre
-      // cannot drive from feature data, and an expression here fails the whole layer
-      // rather than falling back — which is how it silently takes the outline off the map.
-      'line-dasharray': [3, 2],
-    },
-  });
-
-  addLayerSafely(map, {
-    id: 'junction-paved-outline',
-    type: 'line',
-    source: 'junction-paved',
-    paint: {
-      // A real kerb reads as a light edge against dark asphalt, not a dark one. Matching
-      // that is what makes the curb return legible at a glance instead of on inspection.
-      'line-color': ['case', ['get', 'selected'], '#F2C14E', 'rgba(233,227,210,0.7)'],
-      'line-width': [
-        'interpolate', ['linear'], ['zoom'],
-        15, ['case', ['get', 'selected'], 1.8, 0.8],
-        19, ['case', ['get', 'selected'], 3.2, 1.8],
-      ],
-    },
-  });
-
-  addLayerSafely(map, {
-    id: 'band-fill',
-    type: 'fill',
-    source: 'bands',
-    paint: {
-      // Colour travels with the feature so a palette change needs no layer rebuild.
-      'fill-color': ['get', 'color'],
-      // Level is now per band rather than per street, because a street that climbs is
-      // banded in pieces. So the road itself fades into the ground as it descends and
-      // solidifies as it rises, instead of a deck outline being drawn over asphalt that
-      // still looks like it is lying on the earth.
-      //
-      // Interpolated rather than stepped: a ramp is a continuum, and stepping it would put
-      // a hard line across the carriageway at a station where nothing happens.
-      'fill-opacity': [
-        'interpolate', ['linear'], ['coalesce', ['get', 'level'], 0],
-        -1, 0.3,
-        -0.5, 0.42,
-        0, 0.86,
-        0.5, 0.93,
-        1, 0.97,
-      ],
-    },
-  });
-
-  // A structure casts a shadow and the ground does not. One line under the elevated
-  // pieces, offset nothing but drawn dark and soft, is the cheapest thing that reads as
-  // "this is above the other road" without pretending to be a 3D view.
-  addLayerSafely(map, {
-    id: 'band-lift',
-    type: 'line',
-    source: 'bands',
-    filter: ['>=', ['coalesce', ['get', 'level'], 0], 0.5],
-    layout: { 'line-join': 'round' },
-    paint: {
-      'line-color': 'rgba(6,10,12,0.5)',
-      'line-width': [
-        'interpolate', ['linear'], ['zoom'],
-        15, 1.5,
-        20, 5,
-      ],
-      'line-blur': 2.5,
-      'line-translate': [2, 3],
-    },
-  });
-
-  addLayerSafely(map, {
-    id: 'band-outline',
-    type: 'line',
-    source: 'bands',
-    paint: {
-      'line-color': 'rgba(0,0,0,0.55)',
-      // An overpass gets a heavier edge, which is what reads as a deck from above.
-      'line-width': ['case', ['>', ['coalesce', ['get', 'level'], 0], 0], 2.2, 0.6],
-    },
-  });
-
-  // Two layers rather than one with an expression: `line-dasharray` is not a data-driven
-  // property in MapLibre, and feeding it a `case` expression makes addLayer throw — which
-  // aborts the rest of this function and leaves the whole design layer empty. So the split
-  // is solid / dashed, the one thing that CANNOT travel on the feature, and colour and
-  // width travel on the feature so every stripe style is covered by these two.
-  // Zoom floors on the paint layers.
-  //
-  // A lane arrow is four and a half metres long. Below z16 that is three pixels — a smudge
-  // that costs a fill pass over hundreds of polygons to draw something nobody can read.
-  // Stripes go a level lower because a line keeps its pixel width and still reads as a
-  // road having lanes at all.
-  addLayerSafely(map, {
-    id: 'marking-solid',
-    type: 'line',
-    source: 'markings',
-    minzoom: MARKING_MIN_ZOOM,
-    filter: ['!=', ['get', 'dashed'], true],
-    paint: {
-      'line-color': ['get', 'color'],
-      'line-width': ['coalesce', ['get', 'lineWidth'], 1.2],
-      'line-opacity': 0.9,
-    },
-  });
-
-  addLayerSafely(map, {
-    id: 'marking-dashed',
-    type: 'line',
-    source: 'markings',
-    minzoom: MARKING_MIN_ZOOM,
-    filter: ['==', ['get', 'dashed'], true],
-    paint: {
-      'line-color': ['get', 'color'],
-      'line-width': ['coalesce', ['get', 'lineWidth'], 1.1],
-      'line-opacity': 0.85,
-      'line-dasharray': [3, 2.5],
-    },
-  });
-
-  // Where a street leaves the ground.
-  //
-  // Two layers off one source, because a deck and a ramp say different things. The deck is
-  // structure — a hard edge you could walk to and stop at — so it gets a solid casing at
-  // the section's own width. The ramp is ground rising to meet it, so it gets dashes that
-  // read as a climb rather than as a wall. Drawing both the same way loses exactly what
-  // somebody is looking for when they ask how the road gets back down.
-  addLayerSafely(map, {
-    id: 'grade-deck',
-    type: 'line',
-    source: 'grade',
-    filter: ['==', ['get', 'kind'], 'deck'],
-    layout: { 'line-cap': 'butt' },
-    paint: {
-      'line-color': ['case', ['<', ['get', 'direction'], 0], '#7FB2E5', '#E9E3D2'],
-      'line-width': [
-        'interpolate', ['exponential', 2], ['zoom'],
-        12, ['*', ['get', 'halfWidthMeters'], 0.02],
-        22, ['*', ['get', 'halfWidthMeters'], 20],
-      ],
-      'line-opacity': 0.4,
-    },
-  });
-
-  addLayerSafely(map, {
-    id: 'grade-deck-edge',
-    type: 'line',
-    source: 'grade',
-    filter: ['==', ['get', 'kind'], 'deck'],
-    paint: {
-      'line-color': ['case', ['<', ['get', 'direction'], 0], '#4E7FB0', '#B9AE90'],
-      'line-width': 1.6,
-      'line-gap-width': [
-        'interpolate', ['exponential', 2], ['zoom'],
-        12, ['*', ['get', 'halfWidthMeters'], 0.02],
-        22, ['*', ['get', 'halfWidthMeters'], 20],
-      ],
-    },
-  });
-
-  addLayerSafely(map, {
-    id: 'grade-ramp',
-    type: 'line',
-    source: 'grade',
-    filter: ['==', ['get', 'kind'], 'ramp'],
-    layout: { 'line-cap': 'butt' },
-    paint: {
-      'line-color': ['case', ['<', ['get', 'direction'], 0], '#7FB2E5', '#E9E3D2'],
-      'line-width': [
-        'interpolate', ['exponential', 2], ['zoom'],
-        12, ['*', ['get', 'halfWidthMeters'], 0.02],
-        22, ['*', ['get', 'halfWidthMeters'], 20],
-      ],
-      'line-opacity': 0.28,
-      'line-dasharray': [0.35, 0.35],
-    },
-  });
-
-  // Pavement symbols sit above the stripes and below the editing handles: they are paint
-  // on the road, and nothing that is paint should ever cover a control point.
-  addLayerSafely(map, {
-    id: 'stamp-fill',
-    type: 'fill',
-    source: 'stamps',
-    minzoom: STAMP_MIN_ZOOM,
-    paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.94 },
-  });
-
-  addLayerSafely(map, {
-    id: 'crossing-fill',
-    type: 'fill',
-    source: 'crossings',
-    paint: {
-      'fill-color': ['get', 'color'],
-      // A raised table is a surface, not paint, so it sits back a little.
-      'fill-opacity': ['case', ['==', ['get', 'kind'], 'table'], 0.7, 0.92],
-    },
-  });
-
-  addLayerSafely(map, {
-    id: 'centerline-line',
-    type: 'line',
-    source: 'centerlines',
-    paint: {
-      'line-color': '#F2C14E',
-      'line-width': ['case', ['get', 'selected'], 2, 1.2],
-      'line-opacity': ['case', ['get', 'selected'], 0.95, 0.5],
-      'line-dasharray': [2, 2],
-    },
-  });
-
-  // Hollow, and smaller than a real vertex, so "add one here" reads differently from
-  // "move this one".
-  addLayerSafely(map, {
-    id: 'midpoint-point',
-    type: 'circle',
-    source: 'midpoints',
-    paint: {
-      'circle-radius': 3.2,
-      'circle-color': 'rgba(20,24,26,0.55)',
-      'circle-stroke-color': '#F2C14E',
-      'circle-stroke-width': 1.4,
-    },
-  });
-
-  addLayerSafely(map, {
-    id: 'vertex-point',
-    type: 'circle',
-    source: 'vertices',
-    paint: {
-      // A pinned corner reads as hollow: the curve runs through the filled ones and
-      // stops at these.
-      'circle-radius': ['case', ['get', 'sharp'], 5, 4.5],
-      'circle-color': ['case', ['get', 'sharp'], '#14181A', '#F2C14E'],
-      'circle-stroke-color': ['case', ['get', 'sharp'], '#F2C14E', '#14181A'],
-      'circle-stroke-width': ['case', ['get', 'sharp'], 2.2, 1.6],
-    },
-  });
-
-  addLayerSafely(map, {
-    id: 'stop-line',
-    type: 'line',
-    source: 'stop-lines',
-    paint: { 'line-color': '#F5F2E8', 'line-width': 2.4, 'line-opacity': 0.9 },
-  });
-
-  // Placed intersections. Bigger than a vertex and drawn above the design, because they
-  // are the one handle you have to be able to hit without hunting for it.
-  addLayerSafely(map, {
-    id: 'node-point',
-    type: 'circle',
-    source: 'nodes',
-    paint: {
-      'circle-radius': ['case', ['get', 'selected'], 9, 7],
-      // A disabled node is hollow: it is still yours, it just makes no junction.
-      'circle-color': [
-        'case',
-        ['get', 'disabled'],
-        'rgba(0,0,0,0.25)',
-        ['get', 'selected'],
-        '#F2C14E',
-        '#7FB2E5',
-      ],
-      'circle-stroke-width': 2.2,
-      'circle-stroke-color': ['case', ['get', 'selected'], '#FFFFFF', 'rgba(10,14,16,0.85)'],
-    },
-  });
-
-  // The network overlay: where one segment stops and the next starts, and the node that
-  // divides them. Off unless asked for — this is the wiring diagram, not the design — but
-  // when a junction looks wrong it is the only view that says why.
-  addLayerSafely(map, {
-    id: 'network-cut',
-    type: 'line',
-    source: 'network-cuts',
-    layout: { visibility: 'none' },
-    paint: {
-      'line-color': '#6FD3C7',
-      'line-width': 1.6,
-      'line-opacity': 0.8,
-      'line-dasharray': [2, 2],
-    },
-  });
-
-  addLayerSafely(map, {
-    id: 'network-node',
-    type: 'circle',
-    source: 'network-nodes',
-    layout: { visibility: 'none' },
-    paint: {
-      // Size says how much meets here; colour says what kind of place it is.
-      'circle-radius': [
-        'interpolate',
-        ['linear'],
-        ['get', 'endCount'],
-        1,
-        3.5,
-        6,
-        8,
-      ],
-      'circle-color': [
-        'match',
-        ['get', 'form'],
-        'junction',
-        '#F2C14E',
-        'merge',
-        '#6FD3C7',
-        'continuation',
-        '#7FB2E5',
-        'rgba(230,236,240,0.75)',
-      ],
-      'circle-stroke-width': 1.6,
-      'circle-stroke-color': 'rgba(10,14,16,0.85)',
-    },
-  });
-
-  // ---- the road network
-  //
-  // Drawn from nodes and segments rather than from streets, so what is on screen is what
-  // the graph says: a road runs between two nodes and stops where the junction begins, and
-  // the junction is the ground between the stopped ends. Nothing here was cut out of
-  // anything, which is why there is no hole to leave behind.
-
-  addLayerSafely(map, {
-    id: 'road-surface-fill',
-    type: 'fill',
-    source: 'road-surfaces',
-    // The same asphalt as a travel lane: a junction is roadway, not a different material.
-    paint: { 'fill-color': '#4A5157', 'fill-opacity': 0.95 },
-  });
-
-  addLayerSafely(map, {
-    id: 'road-band-fill',
-    type: 'fill',
-    source: 'road-bands',
-    paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.95 },
-  });
-
-  addLayerSafely(map, {
-    id: 'road-band-outline',
-    type: 'line',
-    source: 'road-bands',
-    paint: { 'line-color': 'rgba(10,14,16,0.35)', 'line-width': 0.5 },
-  });
-
-  addLayerSafely(map, {
-    id: 'road-surface-outline',
-    type: 'line',
-    source: 'road-surfaces',
-    paint: { 'line-color': 'rgba(10,14,16,0.35)', 'line-width': 0.6 },
-  });
-
-  // The rubber band while a road is being drawn.
-  addLayerSafely(map, {
-    id: 'road-draft-line',
-    type: 'line',
-    source: 'road-draft',
-    paint: { 'line-color': '#6FD3C7', 'line-width': 2, 'line-dasharray': [1.5, 1.5] },
-  });
-
-  // Nodes last, above everything: they are the smallest target on the map and the one you
-  // have to be able to hit without hunting.
-  addLayerSafely(map, {
-    id: 'road-node-point',
-    type: 'circle',
-    source: 'road-nodes',
-    paint: {
-      'circle-radius': [
-        'case',
-        ['get', 'selected'],
-        8,
-        ['>=', ['get', 'endCount'], 3],
-        6,
-        4,
-      ],
-      // Colour says what kind of place it is; a road that simply ends is quietest.
-      'circle-color': [
-        'case',
-        ['get', 'selected'],
-        '#F2C14E',
-        [
-          'match',
-          ['get', 'form'],
-          'junction',
-          '#F2C14E',
-          'merge',
-          '#6FD3C7',
-          'continuation',
-          '#7FB2E5',
-          'rgba(230,236,240,0.8)',
-        ],
-      ],
-      'circle-stroke-width': 1.8,
-      'circle-stroke-color': 'rgba(10,14,16,0.85)',
-    },
-  });
-
-  addLayerSafely(map, {
-    id: 'junction-point',
-    type: 'circle',
-    source: 'junction-points',
-    paint: {
-      'circle-radius': ['case', ['get', 'selected'], 6, 4],
-      'circle-color': ['case', ['get', 'selected'], '#F2C14E', 'rgba(20,24,26,0.75)'],
-      'circle-stroke-color': '#F2C14E',
-      'circle-stroke-width': 1.6,
-    },
-  });
-
-  addLayerSafely(map, {
-    id: 'draft-line',
-    type: 'line',
-    source: 'draft',
-    paint: { 'line-color': '#6FD3C7', 'line-width': 2, 'line-dasharray': [1.5, 1.5] },
-  });
-
-  addLayerSafely(map, {
-    id: 'draft-vertex',
-    type: 'circle',
-    source: 'draft-points',
-    paint: {
-      'circle-radius': 4,
-      'circle-color': '#6FD3C7',
-      'circle-stroke-color': '#14181A',
-      'circle-stroke-width': 1.6,
-    },
-  });
-
-  addLayerSafely(map, {
-    id: 'measure-line',
-    type: 'line',
-    source: 'measure',
-    paint: { 'line-color': '#FF9E6D', 'line-width': 1.8, 'line-dasharray': [2, 1.5] },
-  });
-
-  // The snap indicator sits above everything: it is feedback about what the next click
-  // will do, so it must never be behind the thing it is pointing at.
-  addLayerSafely(map, {
-    id: 'snap-point',
-    type: 'circle',
-    source: 'snap',
-    paint: {
-      'circle-radius': 6,
-      'circle-color': 'rgba(0,0,0,0)',
-      'circle-stroke-width': 2,
-      'circle-stroke-color': ['case', ['==', ['get', 'kind'], 'angle'], '#7FB2E5', '#F2C14E'],
-    },
-  });
-
-  // Ends that do not meet what they were drawn to meet.
-  //
-  // A hollow warning ring rather than a filled dot, because this marks an ABSENCE — there
-  // is nothing here, which is the problem. Filled would read as another handle to grab.
-  addLayerSafely(map, {
-    id: 'loose-end',
-    type: 'circle',
-    source: 'loose-ends',
-    paint: {
-      'circle-radius': 8,
-      'circle-color': 'rgba(0,0,0,0)',
-      'circle-stroke-width': 2.4,
-      'circle-stroke-color': '#FF9E6D',
-      'circle-stroke-opacity': 0.9,
-    },
-  });
-
-  addLayerSafely(map, {
-    id: 'measure-vertex',
-    type: 'circle',
-    source: 'measure-points',
-    paint: {
-      'circle-radius': 4,
-      'circle-color': '#FF9E6D',
-      'circle-stroke-color': '#14181A',
-      'circle-stroke-width': 1.6,
-    },
-  });
-}
+/** The rubber band: what the road under construction would look like if you clicked now. */
+const DRAFT_SOURCE = 'draft';
 
 function setData(map: MapLibreMap, id: string, data: FeatureCollection) {
   const source = map.getSource(id);
-  if (source && 'setData' in source) {
-    (source as { setData: (d: FeatureCollection) => void }).setData(data);
+  if (source && 'setData' in source) (source as GeoJSONSource).setData(data);
+}
+
+const emptyFC = (): FeatureCollection => ({ type: 'FeatureCollection', features: [] });
+
+/** Feed every design source from one paint. */
+function pushSources(map: MapLibreMap, sources: PaintSources) {
+  for (const key of SOURCE_KEYS) setData(map, key, sources[key] as FeatureCollection);
+}
+
+/**
+ * Install the design sources and layers. Idempotent, so it is safe after every setStyle.
+ *
+ * Each layer goes in independently: one invalid paint property must not abort the rest, or
+ * a typo in a colour renders as bare imagery with no error anywhere on screen.
+ */
+function addDesign(map: MapLibreMap, latDeg: number) {
+  // Pavement symbols are images the symbol layer refers to by name. They have to be
+  // registered before the layer that uses them, and again after any setStyle, because a
+  // style change clears the image registry along with everything else.
+  for (const glyph of renderAllGlyphs()) {
+    if (!map.hasImage(glyph.id)) {
+      map.addImage(glyph.id, glyph.data, { pixelRatio: 1 });
+    }
+  }
+
+  for (const id of [...SOURCE_KEYS, DRAFT_SOURCE]) {
+    if (!map.getSource(id)) {
+      map.addSource(id, { type: 'geojson', data: emptyFC() });
+    }
+  }
+
+  for (const layer of designLayers(latDeg)) {
+    if (map.getLayer(layer.id)) continue;
+    try {
+      map.addLayer(layer);
+    } catch (error) {
+      console.error(`layer ${layer.id} failed`, error);
+    }
+  }
+
+  if (!map.getLayer('draft-line')) {
+    map.addLayer({
+      id: 'draft-line',
+      type: 'line',
+      source: DRAFT_SOURCE,
+      layout: { 'line-cap': 'round' },
+      paint: { 'line-color': '#4DA3FF', 'line-width': 2, 'line-dasharray': [2, 2] },
+    });
+  }
+  if (!map.getLayer('draft-point')) {
+    map.addLayer({
+      id: 'draft-point',
+      type: 'circle',
+      source: DRAFT_SOURCE,
+      filter: ['==', ['geometry-type'], 'Point'],
+      paint: {
+        'circle-radius': 5,
+        'circle-color': '#4DA3FF',
+        'circle-stroke-width': 1.5,
+        'circle-stroke-color': '#FFFFFF',
+      },
+    });
   }
 }
 
-function lineFC(points: readonly LngLat[]): FeatureCollection {
-  if (points.length < 2) return EMPTY;
-  return {
-    type: 'FeatureCollection',
-    features: [
-      {
-        type: 'Feature',
-        properties: {},
-        geometry: { type: 'LineString', coordinates: [...points] },
-      },
-    ],
-  };
+export interface MapCanvasProps {
+  className?: string;
 }
 
-function pointsFC(points: readonly LngLat[]): FeatureCollection {
-  return {
-    type: 'FeatureCollection',
-    features: points.map((p, index) => ({
-      type: 'Feature',
-      id: index,
-      properties: { index },
-      geometry: { type: 'Point', coordinates: p },
-    })),
-  };
-}
-
-const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
-  {
-    basemapId,
-    sourceOptions,
-    units,
-    streets,
-    selectedStreetId,
-    tool,
-    swipe,
-    center,
-    zoom,
-    onViewChange,
-    onSelectStreet,
-    onSelectArea,
-    onAreaComplete,
-    areas,
-    selectedAreaId,
-    onSelectJunction,
-    onWarnings,
-    onJunctions,
-    onNetwork,
-    roads,
-    selectedRoadNodeId,
-    selectedSegmentId,
-    roadDraftFrom,
-    onRoadClick,
-    onSelectRoadNode,
-    onSelectSegment,
-    onJoinRoadNodes,
-    onMoveRoadNode,
-    onCancelRoadDraft,
-    junctionOverrides,
-    defaultCornerRadiusMeters,
-    trimAtJunctions,
-    junctionMergeSlackMeters,
-    mergeBelowDegrees,
-    nodes,
-    junctionMode,
-    selectedNodeId,
-    onSelectNode,
-    onPlaceNode,
-    onMoveNode,
-    onClearSelection,
-    onDeleteSelection,
-    selectedJunctionKey,
-    showAllCenterlines,
-    layerVisibility,
-    imageryOpacity,
-    onDraftChange,
-    onDrawComplete,
-    looseEnds,
-    pointAction,
-    segmentMode,
-    drawRadiusMeters,
-    onGestureStart,
-    onGestureEnd,
-    onVertexMove,
-    onVertexInsert,
-    onVertexDelete,
-    onVertexSharp,
-    onMeasureChange,
-    onRenderStats,
-  },
-  ref,
-) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
+export function MapCanvas({ className }: MapCanvasProps) {
+  const container = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
-  const scaleRef = useRef<ScaleControl | null>(null);
   const [ready, setReady] = useState(false);
 
-  // Latest values without making them effect dependencies, so the map is never rebuilt.
-  const handlers = {
-    tool,
-    streets,
-    selectedStreetId,
-    swipe,
-    onViewChange,
-    onSelectStreet,
-    onSelectArea,
-    onAreaComplete,
-    areas,
-    selectedAreaId,
-    onSelectJunction,
-    onWarnings,
-    onJunctions,
-    onNetwork,
-    roads,
-    selectedRoadNodeId,
-    selectedSegmentId,
-    roadDraftFrom,
-    onRoadClick,
-    onSelectRoadNode,
-    onSelectSegment,
-    onJoinRoadNodes,
-    onMoveRoadNode,
-    onCancelRoadDraft,
-    junctionOverrides,
-    defaultCornerRadiusMeters,
-    trimAtJunctions,
-    junctionMergeSlackMeters,
-    mergeBelowDegrees,
-    nodes,
-    junctionMode,
-    selectedNodeId,
-    onSelectNode,
-    onPlaceNode,
-    onMoveNode,
-    onClearSelection,
-    onDeleteSelection,
-    selectedJunctionKey,
-    showAllCenterlines,
-    layerVisibility,
-    imageryOpacity,
-    onDraftChange,
-    onDrawComplete,
-    looseEnds,
-    pointAction,
-    segmentMode,
-    drawRadiusMeters,
-    onGestureStart,
-    onGestureEnd,
-    onVertexMove,
-    onVertexInsert,
-    onVertexDelete,
-    onVertexSharp,
-    onMeasureChange,
-    onRenderStats,
-  };
-  const latest = useRef(handlers);
-  latest.current = handlers;
-
-  // ---- gesture state. Refs, not state: these change once per animation frame.
-  const draftRef = useRef<LngLat[]>([]);
-  /** Which draft points were placed in straight mode, and so stay hard corners. */
-  const draftSharpRef = useRef<number[]>([]);
-  /**
-   * Where the detector currently thinks the junctions are.
-   *
-   * Node mode snaps to these. Placing an intersection is nearly always an act of taking
-   * ownership of one that is already there — and a node dropped two metres off the crossing
-   * does not claim it, it competes with it, and then two junctions fight over one piece of
-   * asphalt.
-   */
-  const junctionSpotsRef = useRef<LngLat[]>([]);
-  const hoverRef = useRef<LngLat | null>(null);
-  const measureRef = useRef<LngLat[]>([]);
-  /**
-   * The last road geometry built, for picking.
-   *
-   * Clicks need to know what is under the cursor in graph terms — this node, or partway
-   * along this road — and the answer comes from the same geometry that was drawn, so a
-   * click can never disagree with what is on screen.
-   */
-  const roadGeometryRef = useRef<RoadGeometry | null>(null);
-
-  const dragRef = useRef<{ kind: EntityKind; streetId: string; index: number } | null>(null);
-  const nodeDragRef = useRef<string | null>(null);
-  const statsTimer = useRef<number | null>(null);
-  const frameRef = useRef<number | null>(null);
-  const measureReportedAt = useRef(0);
+  const doc = useEditorStore((s) => s.doc);
+  const assets = useEditorStore((s) => s.assets);
+  const tool = useEditorStore((s) => s.tool);
+  const selectedSegmentId = useEditorStore((s) => s.selectedSegmentId);
+  const selectedNodeId = useEditorStore((s) => s.selectedNodeId);
+  const selectedAreaId = useEditorStore((s) => s.selectedAreaId);
+  const showAllCenterlines = useEditorStore((s) => s.showAllCenterlines);
+  const defaultRadiusMeters = useEditorStore((s) => s.defaultRadiusMeters);
+  const buildFromNodeId = useEditorStore((s) => s.buildFromNodeId);
+  const buildShape = useEditorStore((s) => s.buildShape);
+  const basemapId = useEditorStore((s) => s.basemapId);
+  const customTileUrl = useEditorStore((s) => s.customTileUrl);
+  const waybackRelease = useEditorStore((s) => s.waybackRelease);
+  const arcgisApiKey = useEditorStore((s) => s.arcgisApiKey);
+  const imageryOpacity = useEditorStore((s) => s.imageryOpacity);
+  const layerVisibility = useEditorStore((s) => s.layerVisibility);
 
   /**
-   * The junction near this point, if a click here should claim one.
+   * Live pointer position, for the rubber band.
    *
-   * Tolerance in screen pixels rather than metres so it feels the same at every zoom — a
-   * fixed ground distance is an easy target zoomed in and an impossible one zoomed out,
-   * which is exactly backwards.
+   * A ref rather than state: it changes on every mouse move, and re-rendering React at
+   * pointer rate to draw one dashed line is the kind of thing that makes an editor feel
+   * heavy for no reason. The map source is updated directly instead.
    */
-  const nearestJunction = (cursor: LngLat, map: MapLibreMap): LngLat | null => {
-    let best: { point: LngLat; px: number } | null = null;
-    const here = map.project(cursor);
+  const hover = useRef<LngLat | null>(null);
 
-    for (const spot of junctionSpotsRef.current) {
-      const there = map.project(spot);
-      const px = Math.hypot(here.x - there.x, here.y - there.y);
-      if (px > NODE_CLAIM_PX) continue;
-      if (!best || px < best.px) best = { point: spot, px };
-    }
+  /** What is being dragged, if anything. Refs for the same reason. */
+  const drag = useRef<
+    | { kind: 'node'; nodeId: string }
+    | { kind: 'shape'; segmentId: string; index: number }
+    | null
+  >(null);
 
-    return best?.point ?? null;
-  };
+  const areaRing = useRef<LngLat[]>([]);
 
-  const drawDraft = useCallback(() => {
-    const map = mapRef.current;
-    if (!map || !map.getSource('draft')) return;
-    const committed = draftRef.current;
-    const hover = hoverRef.current;
-    const open = hover && committed.length > 0 ? [...committed, hover] : committed;
-    // An area closes back to its first point while you draw it, so the shape you are
-    // about to get is the shape you can see.
-    const closed = latest.current.tool === 'area' && open.length > 2 ? [...open, open[0]!] : open;
+  /**
+   * The most recent paint, kept so the style can be refilled without waiting for the
+   * document to change.
+   *
+   * `setStyle` throws away every source and layer, so switching imagery re-adds them empty
+   * and the design would stay invisible until the next edit. The data has to be pushed
+   * again from here rather than re-derived, because nothing about the document changed.
+   */
+  const painted = useRef<PaintSources>(emptySources());
 
-    // Preview the ARC, not the control polygon. Drawing a bend and seeing a chain of
-    // straight lines means judging the result in your head, which is exactly what the
-    // curve feature exists to stop.
-    const settings = draftCurveSettings();
-    const rubber =
-      settings.mode === 'straight' || closed.length < 3
-        ? closed
-        : tessellate(closed, {
-            ...settings,
-            // The hovering point is the one under the cursor and has no flag yet; treat it
-            // as an endpoint, which is what it will be if the line finishes here.
-            sharpVertices: settings.sharpVertices,
-          });
-
-    setData(map, 'draft', lineFC(rubber));
-    setData(map, 'draft-points', pointsFC(committed));
-  }, []);
-
-  /** The curve the draft is being drawn with, from the current tool settings. */
-  const draftCurveSettings = (): CurveSettings => {
-    const mode = latest.current.segmentMode ?? 'straight';
-    return {
-      mode: mode === 'curved' ? 'rounded' : 'straight',
-      radiusMeters: latest.current.drawRadiusMeters ?? DEFAULT_CURVE.radiusMeters,
-      sharpVertices: [...draftSharpRef.current],
-    };
-  };
-
-  const drawMeasure = useCallback(() => {
-    const map = mapRef.current;
-    if (!map || !map.getSource('measure')) return;
-    const committed = measureRef.current;
-    const hover = hoverRef.current;
-    const rubber = hover && committed.length === 1 ? [...committed, hover] : committed;
-    setData(map, 'measure', lineFC(rubber));
-    setData(map, 'measure-points', pointsFC(committed));
-
-    // The line follows the cursor every frame; the React readout does not need to. A
-    // committed point always reports, so the final number is never a stale sample.
-    const now = performance.now();
-    if (committed.length >= 2 || now - measureReportedAt.current > 60) {
-      measureReportedAt.current = now;
-      latest.current.onMeasureChange?.(rubber, lineLengthMeters(rubber));
-    }
-  }, []);
-
-  const reportDraft = useCallback(() => {
-    latest.current.onDraftChange?.([...draftRef.current], lineLengthMeters(draftRef.current));
-  }, []);
-
-  const finishDraw = useCallback(() => {
-    const points = draftRef.current;
-    const sharp = draftSharpRef.current;
-    const forArea = latest.current.tool === 'area';
-    draftRef.current = [];
-    draftSharpRef.current = [];
-    hoverRef.current = null;
-    drawDraft();
-    reportDraft();
-
-    if (forArea) {
-      // Three points is the minimum that encloses anything. The ring is stored unclosed —
-      // repeating the first point would mean every later edit had to keep two copies of
-      // one vertex in step.
-      if (points.length >= 3) latest.current.onAreaComplete?.(points);
-      return;
-    }
-    // Two points is the minimum that describes a direction to offset from; anything less
-    // is a stray click, not a street.
-    if (points.length >= 2) latest.current.onDrawComplete?.(points, sharp);
-  }, [drawDraft, reportDraft]);
-
-  const cancelDraw = useCallback(() => {
-    draftRef.current = [];
-    draftSharpRef.current = [];
-    hoverRef.current = null;
-    drawDraft();
-    reportDraft();
-  }, [drawDraft, reportDraft]);
-
-  const undoDraftPoint = useCallback(() => {
-    const dropped = draftRef.current.length - 1;
-    draftRef.current = draftRef.current.slice(0, -1);
-    // The flag belongs to the point that just went, so it has to go with it — otherwise
-    // the indices shift and a later point inherits a corner it was never given.
-    draftSharpRef.current = draftSharpRef.current.filter((index) => index !== dropped);
-    drawDraft();
-    reportDraft();
-  }, [drawDraft, reportDraft]);
-
-  const clearMeasure = useCallback(() => {
-    measureRef.current = [];
-    hoverRef.current = null;
-    drawMeasure();
-  }, [drawMeasure]);
-
-  useImperativeHandle(
-    ref,
-    () => ({
-      finishDraw,
-      cancelDraw,
-      undoDraftPoint,
-      clearMeasure,
-      zoomBy: (delta) => mapRef.current?.easeTo({ zoom: (mapRef.current.getZoom() ?? 0) + delta }),
-      zoomToAll: () => {
-        const map = mapRef.current;
-        if (!map) return;
-        const points = [
-          ...latest.current.streets.flatMap((street) => street.centerline),
-          ...(latest.current.areas ?? []).flatMap((area) => area.ring),
-        ];
-        if (points.length === 0) return;
-        let minLng = Infinity;
-        let minLat = Infinity;
-        let maxLng = -Infinity;
-        let maxLat = -Infinity;
-        for (const [lng, lat] of points) {
-          minLng = Math.min(minLng, lng);
-          maxLng = Math.max(maxLng, lng);
-          minLat = Math.min(minLat, lat);
-          maxLat = Math.max(maxLat, lat);
-        }
-        map.fitBounds(
-          [
-            [minLng, minLat],
-            [maxLng, maxLat],
-          ],
-          { padding: 90, maxZoom: 19, duration: 600 },
-        );
-      },
-      zoomTo: (centerline) => {
-        const map = mapRef.current;
-        if (!map || centerline.length === 0) return;
-        let minLng = Infinity;
-        let minLat = Infinity;
-        let maxLng = -Infinity;
-        let maxLat = -Infinity;
-        for (const [lng, lat] of centerline) {
-          minLng = Math.min(minLng, lng);
-          maxLng = Math.max(maxLng, lng);
-          minLat = Math.min(minLat, lat);
-          maxLat = Math.max(maxLat, lat);
-        }
-        map.fitBounds(
-          [
-            [minLng, minLat],
-            [maxLng, maxLat],
-          ],
-          { padding: 90, maxZoom: 19, duration: 600 },
-        );
-      },
-    }),
-    [finishDraw, cancelDraw, undoDraftPoint, clearMeasure],
+  /**
+   * The style the map is currently built with.
+   *
+   * Initialised to what the map was CREATED with, so the imagery effect does not rebuild
+   * the style on its first run. That rebuild used to land in the middle of the first paint:
+   * the data went into sources that `setStyle` then destroyed, and the map came up showing
+   * bare imagery with the whole design missing.
+   */
+  const styleKey = useRef(
+    JSON.stringify([basemapId, customTileUrl, waybackRelease, arcgisApiKey]),
   );
 
+  // ------------------------------------------------------------------------ snapping
+
   /**
-   * Show and hide whole groups of layers.
+   * What a click at this point should attach to.
    *
-   * Runs on every change of the toggles and after every style load, because a basemap
-   * switch rebuilds the style and takes the layers with it — a toggle applied once at
-   * click time would silently come back on the next imagery change.
+   * Asked of the rendered map rather than of the model, because the question is "what is
+   * under the cursor", and a tolerance in metres would be right at one zoom and wrong at
+   * every other. Nodes win over roads: if both are within reach you meant the junction.
    */
+  const snapAt = useCallback(
+    (event: MapMouseEvent): Snap | undefined => {
+      const map = mapRef.current;
+      if (!map) return undefined;
+      const { x, y } = event.point;
+      const box: [PointLike, PointLike] = [
+        [x - SNAP_PX, y - SNAP_PX],
+        [x + SNAP_PX, y + SNAP_PX],
+      ];
+
+      const onNode = map
+        .queryRenderedFeatures(box, { layers: ['handle-point'] })
+        .find((f) => f.properties?.kind === 'node');
+      if (onNode?.properties?.nodeId) {
+        return { kind: 'node', nodeId: String(onNode.properties.nodeId) };
+      }
+
+      const state = useEditorStore.getState();
+      const bandLayers = designLayers(0)
+        .filter((l) => l.id.startsWith('band-'))
+        .map((l) => l.id)
+        .filter((id) => map.getLayer(id));
+      const onRoad = map.queryRenderedFeatures(box, { layers: bandLayers })[0];
+      const segmentId = onRoad?.properties?.segmentId ? String(onRoad.properties.segmentId) : null;
+      if (!segmentId) return undefined;
+
+      const segment = state.doc.segments.find((s) => s.id === segmentId);
+      if (!segment) return undefined;
+
+      const nodes = new Map(state.doc.nodes.map((n) => [n.id, n]));
+      const at = splitPointFor(segment, nodes, [event.lngLat.lng, event.lngLat.lat]);
+      if (!at) return undefined;
+
+      return { kind: 'segment', segmentId, shapeIndex: at.shapeIndex, position: at.point };
+    },
+    [],
+  );
+
+  /** Where a point actually lands: on what it snapped to, or where the mouse is. */
+  const resolvePoint = useCallback((event: MapMouseEvent, snap?: Snap): LngLat => {
+    if (snap?.kind === 'segment') return snap.position;
+    if (snap?.kind === 'node') {
+      const node = useEditorStore.getState().doc.nodes.find((n) => n.id === snap.nodeId);
+      if (node) return node.position;
+    }
+    return [event.lngLat.lng, event.lngLat.lat];
+  }, []);
+
+  // ---------------------------------------------------------------------- create once
+
+  useEffect(() => {
+    if (!container.current || mapRef.current) return;
+
+    const map = new MapLibreMap({
+      container: container.current,
+      style: buildStyle(basemapId, { customUrl: customTileUrl, waybackRelease, arcgisApiKey }),
+      center: [-84.512, 39.107],
+      zoom: 16,
+      // North-up. Every width on screen is a metre expression evaluated against the map's
+      // own scale, and the before/after swipe clips against a meridian; both assume it.
+      pitch: 0,
+      bearing: 0,
+      dragRotate: false,
+      attributionControl: false,
+    });
+
+    map.addControl(new AttributionControl({ compact: true }), 'bottom-right');
+    map.addControl(new NavigationControl({ showCompass: false }), 'bottom-right');
+    map.addControl(new ScaleControl({ unit: 'imperial' }), 'bottom-left');
+    map.touchZoomRotate.disableRotation();
+
+    map.on('load', () => {
+      addDesign(map, projectCentre(useEditorStore.getState().doc)[1] || 39.1);
+      pushSources(map, painted.current);
+      setReady(true);
+    });
+
+    mapRef.current = map;
+    return () => {
+      map.remove();
+      mapRef.current = null;
+      setReady(false);
+    };
+    // Style options are applied by their own effect; re-creating the map for them would
+    // throw away the user's viewport every time they changed imagery.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ------------------------------------------------------------------- pointer input
+
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
-    for (const group of LAYER_GROUPS) {
-      const visible = layerVisibility?.[group.id] ?? groupVisibleByDefault(group.id);
-      for (const id of group.layers) {
-        if (!map.getLayer(id)) continue;
-        try {
-          map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none');
-        } catch {
-          // A layer the current style does not have is not an error worth surfacing.
-        }
+
+    const onClick = (event: MapMouseEvent) => {
+      const state = useEditorStore.getState();
+      const snap = snapAt(event);
+      const point = resolvePoint(event, snap);
+
+      if (state.tool === 'build') {
+        state.buildTo(point, snap);
+        return;
       }
-    }
-  }, [layerVisibility, ready, basemapId]);
+
+      if (state.tool === 'area') {
+        areaRing.current = [...areaRing.current, point];
+        drawDraft(map, areaRing.current, null);
+        return;
+      }
+
+      if (state.tool === 'bulldoze') {
+        if (snap?.kind === 'node') {
+          state.bulldoze({ nodeId: snap.nodeId });
+          return;
+        }
+        const hit = pick(map, event);
+        if (hit.segmentId) state.bulldoze({ segmentId: hit.segmentId });
+        else if (hit.areaId) state.bulldoze({ areaId: hit.areaId });
+        return;
+      }
+
+      // Select.
+      if (snap?.kind === 'node') {
+        state.selectNode(snap.nodeId);
+        return;
+      }
+      const hit = pick(map, event);
+      if (hit.segmentId) state.selectSegment(hit.segmentId);
+      else if (hit.areaId) state.selectArea(hit.areaId);
+      else state.clearSelection();
+    };
+
+    /** Finish an area on a double click, which is how every drawing tool ends a shape. */
+    const onDoubleClick = (event: MapMouseEvent) => {
+      const state = useEditorStore.getState();
+      if (state.tool !== 'area') return;
+      event.preventDefault();
+      if (areaRing.current.length >= 3) state.addAreaShape(areaRing.current);
+      areaRing.current = [];
+      drawDraft(map, [], null);
+    };
+
+    const onMouseDown = (event: MapMouseEvent) => {
+      const state = useEditorStore.getState();
+      if (state.tool !== 'select') return;
+
+      const { x, y } = event.point;
+      const box: [PointLike, PointLike] = [
+        [x - SNAP_PX, y - SNAP_PX],
+        [x + SNAP_PX, y + SNAP_PX],
+      ];
+      const handle = map.queryRenderedFeatures(box, { layers: ['handle-point'] })[0];
+      if (!handle) return;
+
+      if (handle.properties?.kind === 'node') {
+        drag.current = { kind: 'node', nodeId: String(handle.properties.nodeId) };
+      } else if (handle.properties?.kind === 'shape') {
+        drag.current = {
+          kind: 'shape',
+          segmentId: String(handle.properties.segmentId),
+          index: Number(handle.properties.shapeIndex),
+        };
+      } else {
+        return;
+      }
+
+      // The whole drag is one undo step, not one per animation frame.
+      state.beginGesture();
+      map.dragPan.disable();
+      event.preventDefault();
+    };
+
+    const onMouseMove = (event: MapMouseEvent) => {
+      hover.current = [event.lngLat.lng, event.lngLat.lat];
+      const state = useEditorStore.getState();
+
+      if (drag.current) {
+        const point: LngLat = [event.lngLat.lng, event.lngLat.lat];
+        if (drag.current.kind === 'node') {
+          state.moveNodeLive(drag.current.nodeId, point);
+        } else {
+          state.moveShapePointLive(drag.current.segmentId, drag.current.index, point);
+        }
+        return;
+      }
+
+      if (state.tool === 'build' && state.buildFromNodeId) {
+        const from = state.doc.nodes.find((n) => n.id === state.buildFromNodeId);
+        if (from) {
+          drawDraft(
+            map,
+            [from.position, ...state.buildShape, snapAngle(event, state.buildShape, from.position)],
+            null,
+          );
+        }
+      } else if (state.tool === 'area' && areaRing.current.length > 0) {
+        drawDraft(map, [...areaRing.current, [event.lngLat.lng, event.lngLat.lat]], null);
+      }
+    };
+
+    const onMouseUp = () => {
+      if (!drag.current) return;
+      drag.current = null;
+      useEditorStore.getState().endGesture();
+      map.dragPan.enable();
+    };
+
+    map.on('click', onClick);
+    map.on('dblclick', onDoubleClick);
+    map.on('mousedown', onMouseDown);
+    map.on('mousemove', onMouseMove);
+    map.on('mouseup', onMouseUp);
+
+    return () => {
+      map.off('click', onClick);
+      map.off('dblclick', onDoubleClick);
+      map.off('mousedown', onMouseDown);
+      map.off('mousemove', onMouseMove);
+      map.off('mouseup', onMouseUp);
+    };
+  }, [ready, snapAt, resolvePoint]);
+
+  // --------------------------------------------------------------------- keyboard
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      const state = useEditorStore.getState();
+
+      if (event.key === 'Escape') {
+        state.cancelBuild();
+        areaRing.current = [];
+        if (mapRef.current) drawDraft(mapRef.current, [], null);
+        return;
+      }
+
+      if (event.key === 'Enter' && state.tool === 'area' && areaRing.current.length >= 3) {
+        state.addAreaShape(areaRing.current);
+        areaRing.current = [];
+        if (mapRef.current) drawDraft(mapRef.current, [], null);
+        return;
+      }
+
+      // Raise and lower what you are about to build, the way the games do it.
+      if (event.key === 'PageUp') {
+        state.setBuildLevel(Math.min(2, state.buildLevel + 1));
+        event.preventDefault();
+        return;
+      }
+      if (event.key === 'PageDown') {
+        state.setBuildLevel(Math.max(-2, state.buildLevel - 1));
+        event.preventDefault();
+        return;
+      }
+
+      if (event.key === 'Delete' || event.key === 'Backspace') {
+        if (state.tool === 'select') state.deleteSelection();
+        return;
+      }
+
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+        if (event.shiftKey) state.redo();
+        else state.undo();
+        event.preventDefault();
+      }
+    };
+
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // ------------------------------------------------------------------ tool cursor
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const canvas = map.getCanvas();
+    canvas.style.cursor =
+      tool === 'build' || tool === 'area' ? 'crosshair' : tool === 'bulldoze' ? 'not-allowed' : '';
+    // Double click places a point in the shape tools; zooming would fight it.
+    if (tool === 'area') map.doubleClickZoom.disable();
+    else map.doubleClickZoom.enable();
+  }, [tool, ready]);
+
+  // ------------------------------------------------------------------- basemap
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+
+    const key = JSON.stringify([basemapId, customTileUrl, waybackRelease, arcgisApiKey]);
+    if (key === styleKey.current) return;
+    styleKey.current = key;
+
+    map.setStyle(buildStyle(basemapId, { customUrl: customTileUrl, waybackRelease, arcgisApiKey }));
+    map.once('styledata', () => {
+      addDesign(map, projectCentre(useEditorStore.getState().doc)[1] || 39.1);
+      // The new style's sources are empty. Refill them from the last paint, or changing
+      // imagery would silently erase the design until the next edit.
+      pushSources(map, painted.current);
+    });
+  }, [basemapId, customTileUrl, waybackRelease, arcgisApiKey, ready]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready || !map.getLayer('basemap')) return;
-    try {
-      map.setPaintProperty('basemap', 'raster-opacity', imageryOpacity ?? 1);
-    } catch {
-      // Same: a style without a basemap layer is a configuration state, not a fault.
-    }
-  }, [imageryOpacity, ready, basemapId]);
+    map.setPaintProperty('basemap', 'raster-opacity', imageryOpacity);
+  }, [imageryOpacity, ready]);
 
-  /** Rebuild derived geometry and push it to the map, applying the swipe clip. */
-  const refresh = useCallback(() => {
-    const map = mapRef.current;
-    if (!map) return;
+  // ---------------------------------------------------------------- design data
 
-    // Guard on the source existing, NOT on map.isStyleLoaded().
-    //
-    // isStyleLoaded() looks like "is the style ready", but internally it also requires
-    // every tile currently in view to have finished loading. Against a dynamic image
-    // service like USGS NAIP, tiles stream more or less continuously, so that flag is
-    // almost never true and gating on it silently suppressed every design update — bands
-    // were generated correctly and simply never reached the map.
-    //
-    // Writing to a GeoJSON source has no such requirement: it only needs the source to
-    // exist, which addDesignLayers guarantees before it calls back here.
-    if (!map.getSource('bands')) return;
-
-    const {
-      streets: s,
-      selectedStreetId: sel,
-      swipe: sw,
-      onWarnings: warn,
-      onJunctions: reportJunctions,
-      onNetwork: reportNetwork,
-    } = latest.current;
-
-    const data = buildDesignData(s, sel, {
-      areas: latest.current.areas,
-      selectedAreaId: latest.current.selectedAreaId,
-      overrides: latest.current.junctionOverrides,
-      defaultCornerRadiusMeters: latest.current.defaultCornerRadiusMeters,
-      trimAtJunctions: latest.current.trimAtJunctions,
-      junctionMergeSlackMeters: latest.current.junctionMergeSlackMeters,
-      mergeBelowDegrees: latest.current.mergeBelowDegrees,
-      nodes: latest.current.nodes,
-      junctionMode: latest.current.junctionMode,
-      // Only a street vertex counts. Dragging an area or a node does not move a junction,
-      // so there is nothing for the neighbours to be stale about.
-      liveStreetId: dragRef.current?.kind === 'street' ? dragRef.current.streetId : null,
-      selectedNodeId: latest.current.selectedNodeId,
-      selectedJunctionKey: latest.current.selectedJunctionKey,
-      showAllCenterlines: latest.current.showAllCenterlines,
-    });
-    warn?.(data.warnings);
-    reportJunctions?.(data.junctions, data.junctionWarnings, data.offsetPairs);
-    reportNetwork?.(data.networkNodeList, data.networkSegments);
-
-    if (sw === null) {
-      setData(map, 'bands', data.bands);
-      setData(map, 'markings', data.markings);
-      setData(map, 'stamps', data.stamps);
-      setData(map, 'centerlines', data.centerlines);
-      setData(map, 'junction-paved', data.junctionPaved);
-      setData(map, 'junction-footprint', data.junctionFootprint);
-      setData(map, 'crossings', data.crossings);
-    } else {
-      // Screen x -> longitude. Exact while the map is north-up, which it always is here.
-      const x = map.getContainer().clientWidth * sw;
-      const minLng = map.unproject([x, map.getContainer().clientHeight / 2]).lng;
-      setData(map, 'bands', clipEastOf(data.bands, minLng));
-      setData(map, 'markings', clipLinesEastOf(data.markings, minLng));
-      setData(map, 'stamps', clipEastOf(data.stamps, minLng));
-      setData(map, 'centerlines', clipLinesEastOf(data.centerlines, minLng));
-      setData(map, 'junction-paved', clipEastOf(data.junctionPaved, minLng));
-      setData(map, 'junction-footprint', clipEastOf(data.junctionFootprint, minLng));
-      setData(map, 'crossings', clipEastOf(data.crossings, minLng));
-    }
-
-    // Editing handles are never clipped: they are UI, not design, and a handle that
-    // disappears behind the swipe divider is a handle you cannot grab.
-    setData(map, 'areas', data.areas);
-    setData(map, 'vertices', data.vertices);
-    setData(map, 'midpoints', data.midpoints);
-    setData(map, 'junction-points', data.junctionPoints);
-    junctionSpotsRef.current = data.junctions.map((j) => j.position);
-    setData(map, 'nodes', data.nodes);
-    setData(map, 'grade', data.gradeLines);
-    setData(map, 'loose-ends', pointsFC(latest.current.looseEnds ?? []));
-    setData(map, 'stop-lines', data.stopLines);
-    setData(map, 'network-nodes', data.networkNodes);
-    setData(map, 'network-cuts', data.networkCuts);
-
-    // The road network. Built from the graph, not from the streets — a road runs between
-    // two nodes and stops where the junction begins, and the junction is the ground between
-    // the stopped ends.
-    const roadDoc = latest.current.roads;
-    if (roadDoc) {
-      const geometry = buildRoadGeometry(roadDoc, {
-        selectedSegmentId: latest.current.selectedSegmentId ?? null,
-        selectedNodeId: latest.current.selectedRoadNodeId ?? null,
-      });
-      roadGeometryRef.current = geometry;
-      setData(map, 'road-bands', { type: 'FeatureCollection', features: geometry.bands });
-      setData(map, 'road-surfaces', {
-        type: 'FeatureCollection',
-        features: geometry.nodeSurfaces,
-      });
-      setData(map, 'road-nodes', {
-        type: 'FeatureCollection',
-        features: geometry.nodePoints,
-      });
-    }
-
-    // queryRenderedFeatures only reports once tiles are built, so sample shortly after —
-    // and only once the edits stop, or a drag would queue one probe per frame.
-    const bandCount = data.bands.features.length;
-    if (statsTimer.current !== null) window.clearTimeout(statsTimer.current);
-    statsTimer.current = window.setTimeout(() => {
-      let rendered = -1;
-      try { rendered = map.queryRenderedFeatures({ layers: ['band-fill'] }).length; } catch { rendered = -2; }
-      let sourceLoaded = 'n/a';
-      try {
-        sourceLoaded = String(map.isSourceLoaded('bands'));
-      } catch {
-        sourceLoaded = 'err';
-      }
-      const layerCount = map.getStyle().layers.length;
-      latest.current.onRenderStats?.({
-        bands: bandCount,
-        drawn: Boolean(map.getLayer('band-fill') && map.getSource('bands')),
-        rendered,
-        sourceLoaded,
-        layerCount,
-      });
-    }, 600);
-  }, []);
-
-  // Stable handle so the idle retry above can call the latest refresh without making
-  // refresh depend on itself.
-  const refreshRef = useRef(refresh);
-  refreshRef.current = refresh;
-
-  /**
-   * Coalesce refreshes to one per frame.
-   *
-   * Dragging a vertex writes to the store on every pointer move, and each write can reach
-   * here from two directions at once — the React effect below and the map's own `move`
-   * handler. Rebuilding the bands twice in a frame costs two full passes of offsetting
-   * and polygon cleanup for a picture the compositor draws once.
-   */
-  const scheduleRefresh = useCallback(() => {
-    if (frameRef.current !== null) return;
-    frameRef.current = requestAnimationFrame(() => {
-      frameRef.current = null;
-      refreshRef.current();
-    });
-  }, []);
-
-  // ---- create once
-  useEffect(() => {
-    if (!containerRef.current) return;
-
-    const map = new MapLibreMap({
-      container: containerRef.current,
-      style: buildStyle(basemapId, sourceOptions),
-      center,
-      zoom,
-      // Past z21 a pixel is under four centimetres of ground, which is finer than any
-      // aerial imagery this tool can load — the tiles are upsampled, and each level costs
-      // four times the requests of the one below for no more detail.
-      maxZoom: 21,
-      attributionControl: false,
-      // Aerial imagery for a given capture date does not change. Re-fetching it when a
-      // cache header expires is pure traffic, and it happens while you are working.
-      refreshExpiredTiles: false,
-      // Bounded, so a long session does not accumulate every tile it has ever seen. This
-      // is the part of "it gets slower the further you go" that is about memory rather
-      // than about geometry.
-      maxTileCacheSize: 160,
-      // Matches the raster fade above: no cross-fade anywhere.
-      fadeDuration: 0,
-      // North-up only. See the note at the top of this file.
-      dragRotate: false,
-      pitchWithRotate: false,
-      touchZoomRotate: true,
-    });
-
-    mapRef.current = map;
-    map.touchZoomRotate.disableRotation();
-    map.keyboard.disableRotation();
-
-    map.addControl(new NavigationControl({ showCompass: false }), 'top-right');
-    map.addControl(new AttributionControl({ compact: true }), 'bottom-right');
-
-    const scale = new ScaleControl({ maxWidth: 110, unit: units === 'ft' ? 'imperial' : 'metric' });
-    scaleRef.current = scale;
-    map.addControl(scale, 'bottom-left');
-
-    const report = () => {
-      const c = map.getCenter();
-      latest.current.onViewChange?.({ lng: c.lng, lat: c.lat, zoom: map.getZoom() });
-    };
-
-    map.on('move', () => {
-      report();
-      // The swipe boundary is a screen position, so it moves with the map.
-      if (latest.current.swipe !== null) scheduleRefresh();
-    });
-
-    map.on('load', () => {
-      addDesignLayers(map);
-      setReady(true);
-      report();
-      refresh();
-    });
-
-    // MapLibre routes tile, source and style failures here and swallows them otherwise —
-    // without this a broken imagery source is indistinguishable from a dark one.
-    map.on('error', (e) => {
-      console.error('[GeoStripe] MapLibre error:', e.error?.message ?? e, e);
-    });
-
-    // ------------------------------------------------------------------ pointer input
-
-    /**
-     * Where the next drawn point should land.
-     *
-     * Alt suppresses snapping entirely, which is the escape hatch for tracing something
-     * that genuinely runs a metre off an existing line. Shift adds angle snapping, which
-     * is opt-in because tracing imagery wants the cursor free.
-     */
-    const snapFor = (event: MapMouseEvent, from: LngLat | null): SnapResult => {
-      const here: LngLat = [event.lngLat.lng, event.lngLat.lat];
-      const original = event.originalEvent as MouseEvent | undefined;
-      if (original?.altKey) return { point: here, kind: 'none', label: '' };
-
-      // Screen pixels to ground metres, taken from the map rather than assumed: the same
-      // fourteen pixels is a metre at one zoom and thirty at another.
-      const a = map.unproject([event.point.x, event.point.y]);
-      const b = map.unproject([event.point.x + SNAP_DRAW_PX, event.point.y]);
-      const toleranceMeters = Math.max(0.25, distanceMeters([a.lng, a.lat], [b.lng, b.lat]));
-
-      return snapPoint({
-        cursor: here,
-        streets: latest.current.streets,
-        areas: latest.current.areas ?? [],
-        from,
-        toleranceMeters,
-        angleStepDegrees: original?.shiftKey ? SNAP_ANGLE_DEGREES : 0,
-      });
-    };
-
-    const showSnap = (result: SnapResult) => {
-      if (!map.getSource('snap')) return;
-      setData(
-        map,
-        'snap',
-        result.kind === 'none'
-          ? EMPTY
-          : {
-              type: 'FeatureCollection',
-              features: [
-                {
-                  type: 'Feature',
-                  properties: { kind: result.kind },
-                  geometry: { type: 'Point', coordinates: result.point },
-                },
-              ],
-            },
-      );
-    };
-
-    const near = (event: MapMouseEvent, point: LngLat | undefined) => {
-      if (!point) return false;
-      const a = map.project(point);
-      return Math.hypot(a.x - event.point.x, a.y - event.point.y) <= SNAP_PX;
-    };
-
-    map.on('click', (event) => {
-      const active = latest.current.tool;
-
-      // A node under the cursor wins in every tool: it is the smallest target on the map
-      // and the only way to reach the intersection you placed.
-      const nodeUnder = (): string | null => {
-        try {
-          const hits = map.queryRenderedFeatures(
-            [
-              [event.point.x - SNAP_PX, event.point.y - SNAP_PX],
-              [event.point.x + SNAP_PX, event.point.y + SNAP_PX],
-            ],
-            { layers: ['node-point'] },
-          );
-          const id = hits[0]?.properties?.['nodeId'];
-          return typeof id === 'string' ? id : null;
-        } catch {
-          return null;
-        }
-      };
-
-      /**
-       * What the pointer is over, in graph terms.
-       *
-       * A node beats a road, always: it is the smaller target and the one you are aiming
-       * at when you want to join something. Falling through to a road means the click
-       * splits it, so the new node is genuinely part of that road rather than sitting on
-       * top of it — which is how a ramp comes to meet a freeway.
-       *
-       * The tolerance is in pixels rather than metres because the question is "did you hit
-       * it", and that is a question about the screen. Metres would be forgiving at one zoom
-       * and impossible at another.
-       */
-      const roadSnapAt = (): RoadSnap | undefined => {
-        const box: [[number, number], [number, number]] = [
-          [event.point.x - SNAP_PX, event.point.y - SNAP_PX],
-          [event.point.x + SNAP_PX, event.point.y + SNAP_PX],
-        ];
-        try {
-          const onNode = map.queryRenderedFeatures(box, { layers: ['road-node-point'] });
-          const nodeId = onNode[0]?.properties?.['nodeId'];
-          if (typeof nodeId === 'string') return { kind: 'node', nodeId };
-        } catch {
-          // A layer the style has not built yet is not an error worth surfacing.
-        }
-        try {
-          const onRoad = map.queryRenderedFeatures(box, { layers: ['road-band-fill'] });
-          const segmentId = onRoad[0]?.properties?.['streetId'];
-          const doc = latest.current.roads;
-          if (typeof segmentId === 'string' && doc) {
-            const segment = doc.segments.find((candidate) => candidate.id === segmentId);
-            if (segment) {
-              const nodes = new Map(doc.nodes.map((node) => [node.id, node]));
-              const hit = splitPointFor(segment, nodes, event.lngLat.toArray() as LngLat);
-              if (hit) return { kind: 'segment', segmentId, shapeIndex: hit.shapeIndex };
-            }
-          }
-        } catch {
-          // As above.
-        }
-        return undefined;
-      };
-
-      if (active === 'road') {
-        latest.current.onRoadClick?.(event.lngLat.toArray() as LngLat, roadSnapAt());
-        return;
-      }
-
-      if (active === 'select') {
-        const snap = roadSnapAt();
-        if (snap?.kind === 'node') {
-          latest.current.onSelectRoadNode?.(snap.nodeId);
-          return;
-        }
-        if (snap?.kind === 'segment') {
-          latest.current.onSelectSegment?.(snap.segmentId);
-          return;
-        }
-      }
-
-      if (active === 'node') {
-        const existing = nodeUnder();
-        if (existing) {
-          latest.current.onSelectNode?.(existing);
-        } else {
-          // A detected junction beats a snapped centerline point, which beats the raw
-          // cursor. Claiming an intersection that already exists is the common case by a
-          // wide margin, and landing a couple of metres off does not claim it.
-          const claimed = nearestJunction(event.lngLat.toArray() as LngLat, map);
-          latest.current.onPlaceNode?.(claimed ?? snapFor(event, null).point);
-        }
-        return;
-      }
-
-      if (active === 'select') {
-        const existing = nodeUnder();
-        if (existing) {
-          latest.current.onSelectNode?.(existing);
-          return;
-        }
-      }
-
-      if (active === 'draw' || active === 'area') {
-        const draft = draftRef.current;
-        // Clicking the last point again — which is also what the second half of a
-        // double-click looks like — ends the line rather than stacking a duplicate.
-        if (draft.length >= 2 && (near(event, draft[draft.length - 1]) || near(event, draft[0]))) {
-          finishDraw();
-          return;
-        }
-        // The committed point is the SNAPPED one. Junctions are derived from where
-        // centerlines really meet, so a vertex that lands where it was aimed is the
-        // difference between a junction at the crossing and one at a near miss.
-        const snapped = snapFor(event, draft[draft.length - 1] ?? null).point;
-        // A point placed in straight mode is pinned as a hard corner, so the arc does not
-        // round off a junction you meant to be square.
-        if ((latest.current.segmentMode ?? 'straight') === 'straight') {
-          draftSharpRef.current = [...draftSharpRef.current, draft.length];
-        }
-        draftRef.current = [...draft, snapped];
-        drawDraft();
-        reportDraft();
-        return;
-      }
-
-      if (active === 'measure') {
-        // Measuring snaps too: measuring kerb to kerb is the commonest thing anyone does
-        // with it, and both kerbs are on lines already drawn.
-        const snapped = snapFor(event, measureRef.current[0] ?? null).point;
-        // A third click starts a fresh measurement rather than extending a two-point one.
-        measureRef.current =
-          measureRef.current.length >= 2 ? [snapped] : [...measureRef.current, snapped];
-        drawMeasure();
-        return;
-      }
-
-      // Select. A click on bare imagery is deliberately NOT a deselect — losing the
-      // inspector every time you miss a band by two pixels is maddening.
-      //
-      // Wrapped because queryRenderedFeatures throws if the layer is not in the style yet,
-      // which is a real window right after a basemap switch.
-      try {
-        // The junction marker wins over the pavement beneath it: it is small, deliberate,
-        // and the only way to reach the intersection inspector.
-        const marker = map.queryRenderedFeatures(
-          [
-            [event.point.x - SNAP_PX, event.point.y - SNAP_PX],
-            [event.point.x + SNAP_PX, event.point.y + SNAP_PX],
-          ],
-          { layers: ['junction-point'] },
-        );
-        const junctionKey = marker[0]?.properties?.['junctionKey'];
-        if (typeof junctionKey === 'string') {
-          latest.current.onSelectJunction?.(junctionKey);
-          return;
-        }
-
-        const hits = map.queryRenderedFeatures(event.point, { layers: ['band-fill'] });
-        const streetId = hits[0]?.properties?.['streetId'];
-        if (typeof streetId === 'string') {
-          latest.current.onSelectStreet?.(streetId);
-          return;
-        }
-
-        // Land cover sits under the streets, so it is only reachable where none is drawn.
-        const ground = map.queryRenderedFeatures(event.point, { layers: ['area-fill'] });
-        const areaId = ground[0]?.properties?.['areaId'];
-        if (typeof areaId === 'string') {
-          latest.current.onSelectArea?.(areaId);
-          return;
-        }
-
-        // Nothing under the cursor. This used to hold the selection, on the grounds that
-        // losing the inspector by missing a band by two pixels is maddening — but the
-        // reverse turned out worse: with no other way to deselect, the panel could not be
-        // put down at all. Escape does the same thing without moving the mouse.
-        latest.current.onClearSelection?.();
-      } catch {
-        // No design layers yet; nothing to select.
-      }
-    });
-
-    map.on('mousemove', (event) => {
-      const active = latest.current.tool;
-
-      if (active === 'road') {
-        // The rubber band from the node the road is being drawn from. Without it there is
-        // no way to tell whether a click started a road or ended one.
-        const from = latest.current.roadDraftFrom;
-        const doc = latest.current.roads;
-        const node = from && doc ? doc.nodes.find((candidate) => candidate.id === from) : null;
-        setData(
-          map,
-          'road-draft',
-          node
-            ? {
-                type: 'FeatureCollection',
-                features: [
-                  {
-                    type: 'Feature',
-                    properties: {},
-                    geometry: {
-                      type: 'LineString',
-                      coordinates: [node.position, event.lngLat.toArray() as LngLat],
-                    },
-                  },
-                ],
-              }
-            : EMPTY,
-        );
-        return;
-      }
-
-      if (active === 'draw' || active === 'area') {
-        const draft = draftRef.current;
-        const result = snapFor(event, draft[draft.length - 1] ?? null);
-        showSnap(result);
-        if (draft.length > 0) {
-          hoverRef.current = result.point;
-          drawDraft();
-        }
-        return;
-      }
-
-      if (active === 'measure') {
-        const result = snapFor(event, measureRef.current[0] ?? null);
-        showSnap(result);
-        if (measureRef.current.length === 1) {
-          hoverRef.current = result.point;
-          drawMeasure();
-        }
-        return;
-      }
-
-      if (active === 'node') {
-        // Show what a click would claim. Taking over an intersection that exists and
-        // placing one in open ground are different acts with different consequences, and
-        // until this was on screen the only way to tell them apart was to click and see.
-        const claimed = nearestJunction(event.lngLat.toArray() as LngLat, map);
-        showSnap(
-          claimed
-            ? { point: claimed, kind: 'vertex', label: 'take this intersection' }
-            : { point: snapFor(event, null).point, kind: 'edge', label: 'new intersection here' },
-        );
-        return;
-      }
-
-      showSnap({ point: [0, 0], kind: 'none', label: '' });
-    });
-
-    map.on('dblclick', (event) => {
-      if (latest.current.tool !== 'draw' && latest.current.tool !== 'area') return;
-      // The two clicks that make up the double-click already committed their vertices;
-      // this just closes the line out.
-      event.preventDefault();
-      finishDraw();
-    });
-
-    // ---- vertex dragging
-    //
-    // preventDefault on the mousedown is what stops MapLibre panning the map out from
-    // under the handle. The move/up listeners go on the map rather than the window
-    // because MapLibre already normalises its own event coordinates.
-    const onNodeDragMove = (event: MapMouseEvent) => {
-      const id = nodeDragRef.current;
-      if (!id) return;
-      latest.current.onMoveNode?.(id, [event.lngLat.lng, event.lngLat.lat]);
-    };
-
-    const onNodeDragEnd = () => {
-      if (!nodeDragRef.current) return;
-      nodeDragRef.current = null;
-      map.off('mousemove', onNodeDragMove);
-      map.off('mouseup', onNodeDragEnd);
-      map.dragPan.enable();
-      latest.current.onGestureEnd?.();
-    };
-
-    map.on('mousedown', 'node-point', (event) => {
-      const active = latest.current.tool;
-      if (active !== 'select' && active !== 'node') return;
-      const id = event.features?.[0]?.properties?.['nodeId'];
-      if (typeof id !== 'string') return;
-
-      event.preventDefault();
-      nodeDragRef.current = id;
-      latest.current.onSelectNode?.(id);
-      // One undo step for the whole drag, like every other gesture here.
-      latest.current.onGestureStart?.();
-      map.dragPan.disable();
-      map.on('mousemove', onNodeDragMove);
-      map.on('mouseup', onNodeDragEnd);
-    });
-
-    const onDragMove = (event: MapMouseEvent) => {
-      const drag = dragRef.current;
-      if (!drag) return;
-      latest.current.onVertexMove?.(drag.kind, drag.streetId, drag.index, [
-        event.lngLat.lng,
-        event.lngLat.lat,
-      ]);
-    };
-
-    const onDragEnd = () => {
-      if (!dragRef.current) return;
-      dragRef.current = null;
-      map.off('mousemove', onDragMove);
-      window.removeEventListener('mouseup', onDragEnd);
-      map.getCanvas().style.cursor = '';
-      map.dragPan.enable();
-      latest.current.onGestureEnd?.();
-    };
-
-    const beginDrag = (kind: EntityKind, streetId: string, index: number) => {
-      dragRef.current = { kind, streetId, index };
-      map.dragPan.disable();
-      map.getCanvas().style.cursor = 'grabbing';
-      map.on('mousemove', onDragMove);
-      // On the window, not the map: releasing the button outside the canvas — over a rail,
-      // or off the browser entirely — must still close the gesture. A map-only listener
-      // leaves the vertex stuck to the cursor and beginGesture unmatched forever.
-      window.addEventListener('mouseup', onDragEnd);
-    };
-
-    map.on('mousedown', 'vertex-point', (event) => {
-      if (latest.current.tool !== 'select') return;
-      const props = event.features?.[0]?.properties;
-      const streetId = props?.['streetId'];
-      const index = props?.['index'];
-      const kind: EntityKind = props?.['kind'] === 'area' ? 'area' : 'street';
-      if (typeof streetId !== 'string' || typeof index !== 'number') return;
-
-      event.preventDefault();
-
-      // The mode says what a plain click does; the modifiers override it for a one-off.
-      // Both routes exist because each suits a different moment: the mode for cleaning up
-      // a line point by point, the modifier for the single stray vertex you noticed while
-      // doing something else.
-      const action = event.originalEvent.altKey
-        ? 'remove'
-        : event.originalEvent.shiftKey
-          ? 'sharp'
-          : (latest.current.pointAction ?? 'move');
-
-      if (action === 'remove') {
-        latest.current.onVertexDelete?.(kind, streetId, index);
-        return;
-      }
-      if (action === 'sharp') {
-        latest.current.onVertexSharp?.(kind, streetId, index);
-        return;
-      }
-
-      latest.current.onGestureStart?.();
-      beginDrag(kind, streetId, index);
-    });
-
-    // Grabbing a midpoint inserts a real vertex there and drags it in the same motion, so
-    // "bend the street here" is one gesture and one undo step.
-    map.on('mousedown', 'midpoint-point', (event) => {
-      if (latest.current.tool !== 'select') return;
-      const props = event.features?.[0]?.properties;
-      const streetId = props?.['streetId'];
-      const index = props?.['index'];
-      const kind: EntityKind = props?.['kind'] === 'area' ? 'area' : 'street';
-      if (typeof streetId !== 'string' || typeof index !== 'number') return;
-
-      event.preventDefault();
-      latest.current.onGestureStart?.();
-      latest.current.onVertexInsert?.(kind, streetId, index, [
-        event.lngLat.lng,
-        event.lngLat.lat,
-      ]);
-      beginDrag(kind, streetId, index + 1);
-    });
-
-    const setCursor = (value: string) => () => {
-      if (latest.current.tool === 'select' && !dragRef.current) {
-        map.getCanvas().style.cursor = value;
-      }
-    };
-    map.on('mouseenter', 'vertex-point', setCursor('grab'));
-    map.on('mouseleave', 'vertex-point', setCursor(''));
-    map.on('mouseenter', 'midpoint-point', setCursor('copy'));
-    map.on('mouseleave', 'midpoint-point', setCursor(''));
-    map.on('mouseenter', 'band-fill', setCursor('pointer'));
-    map.on('mouseleave', 'band-fill', setCursor(''));
-
-    return () => {
-      window.removeEventListener('mouseup', onDragEnd);
-      if (statsTimer.current !== null) window.clearTimeout(statsTimer.current);
-      if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
-      map.remove();
-      mapRef.current = null;
-      scaleRef.current = null;
-      setReady(false);
-    };
-    // Created once; every prop change below is applied to the live map instead.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // ---- keyboard, while drawing or measuring
-  useEffect(() => {
-    function onKey(event: KeyboardEvent) {
-      const target = event.target as HTMLElement | null;
-      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
-
-      // Escape and Delete work in every tool, because "put this down" and "get rid of
-      // this" are the two things you need most and should never have to hunt for.
-      if (tool === 'select' || tool === 'node') {
-        if (event.key === 'Escape') {
-          event.preventDefault();
-          latest.current.onClearSelection?.();
-        } else if (event.key === 'Delete' || event.key === 'Backspace') {
-          event.preventDefault();
-          latest.current.onDeleteSelection?.();
-        }
-        return;
-      }
-
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        if (tool === 'road') {
-          // Stop the chain without undoing the roads already placed. The rubber band is
-          // cleared by the next mousemove, which finds no node to draw from.
-          latest.current.onCancelRoadDraft?.();
-          const live = mapRef.current;
-          if (live) setData(live, 'road-draft', EMPTY);
-        } else if (tool === 'draw' || tool === 'area') cancelDraw();
-        else clearMeasure();
-      } else if ((tool === 'draw' || tool === 'area') && event.key === 'Enter') {
-        event.preventDefault();
-        finishDraw();
-      } else if (
-        (tool === 'draw' || tool === 'area') &&
-        (event.key === 'Backspace' || event.key === 'Delete')
-      ) {
-        event.preventDefault();
-        undoDraftPoint();
-      }
-    }
-
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [tool, cancelDraw, clearMeasure, finishDraw, undoDraftPoint]);
-
-  // ---- tool changes: cursor, double-click zoom, and clearing whatever was in flight
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-
-    const drawing = tool !== 'select';
-    map.getCanvas().style.cursor = drawing ? 'crosshair' : '';
-    // Double-click means "finish the line" while drawing, so it must not also zoom.
-    if (drawing) map.doubleClickZoom.disable();
-    else map.doubleClickZoom.enable();
-
-    if (tool !== 'draw' && tool !== 'area') cancelDraw();
-    if (tool !== 'measure') clearMeasure();
-  }, [tool, cancelDraw, clearMeasure]);
-
-  // ---- basemap switching
-  //
-  // Seeded with the mount-time basemap so this does not fire a redundant setStyle the
-  // instant `ready` flips — that would tear down the design layers the load handler had
-  // only just added, for no reason.
-  const appliedRef = useRef<string>(JSON.stringify([basemapId, sourceOptions]));
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
-    const key = JSON.stringify([basemapId, sourceOptions]);
-    if (appliedRef.current === key) return;
-    appliedRef.current = key;
 
-    // setStyle drops every layer, so the design has to be re-added once it settles.
-    map.setStyle(buildStyle(basemapId, sourceOptions));
-    map.once('idle', () => {
-      addDesignLayers(map);
-      refreshRef.current();
+    const sources = paintDoc(doc, assetMap(assets), {
+      selectedSegmentId,
+      selectedNodeId,
+      selectedAreaId,
+      defaultRadiusMeters,
+      showAllCenterlines,
     });
-  }, [basemapId, sourceOptions, ready]);
 
-  // ---- design data
-  useEffect(() => {
-    if (ready) scheduleRefresh();
+    painted.current = sources;
+    pushSources(map, sources);
   }, [
-    streets,
-    areas,
-    selectedAreaId,
-    selectedStreetId,
-    swipe,
+    doc,
+    assets,
     ready,
-    scheduleRefresh,
-    junctionOverrides,
-    defaultCornerRadiusMeters,
-    trimAtJunctions,
-    junctionMergeSlackMeters,
-    mergeBelowDegrees,
-    nodes,
-    junctionMode,
+    selectedSegmentId,
     selectedNodeId,
-    onSelectNode,
-    onPlaceNode,
-    onMoveNode,
-    onClearSelection,
-    onDeleteSelection,
-    selectedJunctionKey,
+    selectedAreaId,
+    defaultRadiusMeters,
     showAllCenterlines,
-    layerVisibility,
-    imageryOpacity,
-    looseEnds,
   ]);
 
-  // ---- scale bar unit follows the app
+  // The rubber band follows the document too — finishing a road has to clear it.
   useEffect(() => {
-    scaleRef.current?.setUnit(units === 'ft' ? 'imperial' : 'metric');
-  }, [units]);
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    if (!buildFromNodeId) {
+      drawDraft(map, [], null);
+      return;
+    }
+    const from = doc.nodes.find((n) => n.id === buildFromNodeId);
+    if (from) drawDraft(map, [from.position, ...buildShape], null);
+  }, [buildFromNodeId, buildShape, doc, ready]);
 
-  const blocked = unconfiguredReason(basemapId, sourceOptions);
+  // ------------------------------------------------------------- layer visibility
 
-  return (
-    <div className="map-host">
-      <div ref={containerRef} className="map-canvas" />
-      {blocked && (
-        <div className="map-empty">
-          <p>{blocked}</p>
-        </div>
-      )}
-    </div>
-  );
-});
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    for (const group of LAYER_GROUPS) {
+      const visible = layerVisibility[group.id as LayerGroupId] !== false;
+      for (const id of group.layers) {
+        if (map.getLayer(id)) {
+          map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none');
+        }
+      }
+    }
+  }, [layerVisibility, ready]);
 
-export default MapCanvas;
+  return <div ref={container} className={className} style={{ width: '100%', height: '100%' }} />;
+}
+
+// ------------------------------------------------------------------------- helpers
+
+/** What is under the cursor, among the things a click can select. */
+function pick(map: MapLibreMap, event: MapMouseEvent): {
+  segmentId?: string;
+  areaId?: string;
+} {
+  const bandLayers = ['band--1', 'band-0', 'band-1'].filter((id) => map.getLayer(id));
+  const onRoad = map.queryRenderedFeatures(event.point, { layers: bandLayers })[0];
+  if (onRoad?.properties?.segmentId) return { segmentId: String(onRoad.properties.segmentId) };
+
+  if (map.getLayer('area-fill')) {
+    const onArea = map.queryRenderedFeatures(event.point, { layers: ['area-fill'] })[0];
+    if (onArea?.properties?.areaId) return { areaId: String(onArea.properties.areaId) };
+  }
+  return {};
+}
+
+/** The rubber band and its points, as one collection. */
+function drawDraft(map: MapLibreMap, line: readonly LngLat[], _unused: null) {
+  const features: FeatureCollection['features'] = [];
+  if (line.length >= 2) {
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: line as LngLat[] },
+      properties: {},
+    });
+  }
+  for (const point of line) {
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: point },
+      properties: {},
+    });
+  }
+  setData(map, DRAFT_SOURCE, { type: 'FeatureCollection', features });
+}
+
+/**
+ * Where the cursor is, snapped to a 15-degree increment when Shift is held.
+ *
+ * Measured from the last point placed rather than from the start of the road, which is what
+ * makes it useful for the second bend of a curve as well as the first.
+ */
+function snapAngle(
+  event: MapMouseEvent,
+  shape: readonly LngLat[],
+  origin: LngLat,
+): LngLat {
+  const point: LngLat = [event.lngLat.lng, event.lngLat.lat];
+  if (!event.originalEvent.shiftKey) return point;
+
+  const from = shape[shape.length - 1] ?? origin;
+  const scale = Math.cos((from[1] * Math.PI) / 180);
+  const dx = (point[0] - from[0]) * scale;
+  const dy = point[1] - from[1];
+  const length = Math.hypot(dx, dy);
+  if (length < 1e-12) return point;
+
+  const step = (SNAP_ANGLE_DEGREES * Math.PI) / 180;
+  const angle = Math.round(Math.atan2(dy, dx) / step) * step;
+  return [from[0] + (Math.cos(angle) * length) / scale, from[1] + Math.sin(angle) * length];
+}
+
+export const emptyPaintSources = emptySources;

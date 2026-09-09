@@ -1,10 +1,6 @@
 import type { ComponentType, Direction } from '../library/primitives';
-import type { CurveSettings } from '../geo/curve';
-import type { GradePoint } from '../geo/grade';
-import type { SectionChange } from '../geo/lanes';
 import type { GlyphId } from '../geo/glyphs';
 import type { StripeStyle } from '../geo/markings';
-import type { LandcoverType } from '../library/landcover';
 
 /**
  * One band of a cross-section. `id` is runtime-only — it is regenerated on load and
@@ -40,11 +36,11 @@ export interface SectionComponent {
 }
 
 /**
- * A cross-section — what the Asset Builder produces and the Map Editor places.
+ * A cross-section: an ordered stack of widths, with no centerline and no coordinates.
  *
- * Deliberately geometry-agnostic: an ordered stack of widths with no centerline and no
- * coordinates. It becomes real geometry only when placed on a street, which is why this
- * whole page can be built before the geometry engine exists.
+ * Kept as a type of its own even though a LineAsset now carries these fields directly,
+ * because the section arithmetic in section.ts is written against it and is useful without
+ * an asset — the asset editor works on a stack that is not yet placed anywhere.
  */
 export interface CrossSection {
   id: string;
@@ -59,127 +55,6 @@ export interface CrossSection {
    * makes travelway-centre, geometric-centre and left-edge anchoring all representable.
    */
   anchorOffsetMeters: number | null;
-}
-
-/**
- * A street placed on the map: a drawn centerline plus the cross-section applied to it.
- *
- * The centerline is the parametric truth. Band polygons are derived from it on every
- * render and never stored here, so editing a width or dragging a vertex regenerates the
- * geometry rather than mutating it.
- */
-export interface Street {
-  id: string;
-  name: string;
-  /**
-   * WGS84 [lng, lat] control points — the vertices you drag.
-   *
-   * NOT the line the geometry is built from when the street is curved. Everything that
-   * needs real geometry goes through `resolveCenterline`, which tessellates these into a
-   * dense polyline. Keeping the controls separate is what lets a curve stay editable.
-   */
-  centerline: [number, number][];
-  /** How the control points are joined. Absent means a plain polyline. */
-  curve?: CurveSettings;
-  /**
-   * Grade separation, the way OSM uses `layer`: 0 is at grade, +1 an overpass, -1 a
-   * tunnel. Streets at different levels do not form junctions, which is the entire point —
-   * a freeway crossing a street underneath it is not an intersection, and treating it as
-   * one would carve a hole through both.
-   *
-   * Applies to the whole street. For one that climbs, crosses and comes back down, use
-   * `grade` instead; this is the flat case and the fallback when there is no profile.
-   */
-  level?: number;
-  /**
-   * Where the street leaves the ground and where it returns, along its own length.
-   *
-   * The thing a single `level` cannot say. An overpass is four breakpoints — ground, up,
-   * up, ground — and the sloping stretches between them are its ramps. Absent means flat
-   * at `level`.
-   */
-  grade?: GradePoint[];
-  /**
-   * The cross-section from station zero.
-   *
-   * For a street whose lanes change along its length — a freeway dropping one into a ramp
-   * — this is the first of several; see `sectionChanges`.
-   */
-  section: CrossSection;
-  /**
-   * Where the cross-section changes, along the street's own length.
-   *
-   * What a single `section` cannot say. Four lanes run up to an interchange, one peels off,
-   * three carry on: one road, one alignment, three different widths. Without this the only
-   * way to draw it is to cut the highway into separate streets that meet end to end, which
-   * invents a junction between them and makes you drag two centrelines to move one road.
-   */
-  sectionChanges?: SectionChange[];
-  /** Measured curb-to-curb of the real street, for the fit check. */
-  existingWidthMeters?: number;
-  visible: boolean;
-}
-
-/**
- * A land-cover polygon: everything a design places that is not a band along a street.
- *
- * Deliberately its own entity rather than a component type. A street's geometry is derived
- * from a centerline and a stack of widths; an area has neither, and forcing it through the
- * banding engine would mean inventing a centerline for a pond. It shares the curve
- * machinery, though — a park boundary curves for the same reasons a street does.
- */
-export interface Area {
-  id: string;
-  name: string;
-  landcover: LandcoverType;
-  /**
-   * Control points of a closed ring, WGS84, with the first point NOT repeated at the end.
-   * Closing is a rendering concern; repeating it here would mean every edit had to keep
-   * two copies of one vertex in step.
-   */
-  ring: [number, number][];
-  curve?: CurveSettings;
-  visible: boolean;
-}
-
-/**
- * An intersection you placed, rather than one the geometry noticed.
- *
- * GeoStripe started by deriving every junction from where centerlines happen to cross, and
- * that is still what happens where you have not said otherwise — it means a design works
- * before you have thought about intersections at all. But a derived junction is not a
- * thing you own: you cannot select the crossing itself, cannot move it independently of
- * the streets, and cannot say "there is no junction here" about two roads that pass each
- * other on the flat.
- *
- * A node fixes all three. It is the authority wherever it sits: the junction is AT the
- * node, built from whichever streets pass within reach of it, keyed by the node's id — so
- * its corner radii and crossings survive anything that happens to the streets, including
- * being redrawn from scratch.
- *
- * Dragging one behaves the way it does in a road-building game, and for the same reason:
- * a street that ENDS near the node has its endpoint carried along, because that endpoint
- * and the node are the same place; a street that merely passes through lets the node slide
- * along it, because the node is a point on that street and moving it should not bend it.
- */
-export interface JunctionNode {
-  id: string;
-  name?: string;
-  /** WGS84. Authoritative: the junction is built here, not at the detected crossing. */
-  position: [number, number];
-  /**
-   * How far the node reaches for streets, in metres. Absent derives it from the widest
-   * section involved, which is right unless streets are stacked unusually close.
-   */
-  reachMeters?: number;
-  /**
-   * No junction here at all — the streets simply overlap.
-   *
-   * Not the same as deleting the node: deleting it hands the spot back to automatic
-   * detection, which would put the junction straight back. This is how you say two roads
-   * cross without meeting, which nothing else in the model can express.
-   */
-  disabled?: boolean;
 }
 
 export function newId(prefix: string): string {
