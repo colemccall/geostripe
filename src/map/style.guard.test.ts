@@ -1,0 +1,96 @@
+import { describe, expect, it } from 'vitest';
+import { validateStyleMin } from '@maplibre/maplibre-gl-style-spec';
+import { designLayers, metresToPixels } from './paint';
+
+/**
+ * Validate the design layers against MapLibre's own style specification.
+ *
+ * This guards a failure that is silent, which is the only reason it is worth a test file
+ * of its own. MapLibre does not throw on a layer whose paint expression is malformed — it
+ * logs and drops the layer, and the map renders as bare imagery with the design missing.
+ * Every width and every offset in this editor is now an expression rather than a computed
+ * polygon, so the surface for that failure is the whole renderer.
+ *
+ * `validateStyleMin` is the same validator MapLibre runs internally, so a style that passes
+ * here is one it will accept. That makes this a real check rather than a re-implementation
+ * of the rules, which would drift.
+ */
+
+const LAT = 39.1;
+
+/** A minimal style carrying the design layers, which is what the validator wants. */
+function styleWith(layers: unknown[]) {
+  return {
+    version: 8,
+    sources: {
+      areas: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
+      bands: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
+      stripes: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
+      stamps: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
+      plates: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
+      guides: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
+      handles: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
+    },
+    layers,
+  };
+}
+
+describe('the design style is one MapLibre will accept', () => {
+  it('validates clean, layer for layer', () => {
+    const errors = validateStyleMin(styleWith(designLayers(LAT)) as never);
+    expect(errors.map((e) => `${e.message}`)).toEqual([]);
+  });
+
+  it('names every source it draws from', () => {
+    const sources = new Set(['areas', 'bands', 'stripes', 'stamps', 'plates', 'guides', 'handles']);
+    for (const layer of designLayers(LAT)) {
+      if ('source' in layer) expect(sources.has(layer.source as string)).toBe(true);
+    }
+  });
+
+  it('gives every layer a unique id, or MapLibre keeps only the first', () => {
+    const ids = designLayers(LAT).map((l) => l.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('accepts the metre-to-pixel expression as a line width', () => {
+    // The expression is the whole renderer. If MapLibre rejects its shape, every road in
+    // the project is invisible and nothing throws.
+    const errors = validateStyleMin(
+      styleWith([
+        {
+          id: 'probe',
+          type: 'line',
+          source: 'bands',
+          paint: {
+            'line-width': metresToPixels(LAT, ['get', 'widthM'] as never),
+            'line-offset': metresToPixels(LAT, ['get', 'offsetM'] as never),
+          },
+        },
+      ]) as never,
+    );
+    expect(errors.map((e) => e.message)).toEqual([]);
+  });
+
+  it('draws the junction plates after the stripes they cover', () => {
+    // The stacking order IS the junction trimming. If a plate ever ends up below the paint
+    // it is meant to hide, lane lines run straight through every intersection.
+    const ids = designLayers(LAT).map((l) => l.id);
+    for (const deck of [-1, 0, 1]) {
+      const stripe = ids.indexOf(`stripe-dashed-${deck}`);
+      const plate = ids.indexOf(`plate-${deck}`);
+      expect(stripe).toBeGreaterThanOrEqual(0);
+      expect(plate).toBeGreaterThan(stripe);
+    }
+  });
+
+  it('draws the handles last, so a node is always grabbable', () => {
+    const ids = designLayers(LAT).map((l) => l.id);
+    expect(ids[ids.length - 1]).toBe('handle-point');
+  });
+
+  it('puts the ground under every road', () => {
+    const ids = designLayers(LAT).map((l) => l.id);
+    expect(ids.indexOf('area-fill')).toBeLessThan(ids.indexOf('band-0'));
+  });
+});

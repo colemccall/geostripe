@@ -2481,3 +2481,419 @@ button {
   padding: 4px 0;
   font-size: 12px;
 }
+
+/* ==========================================================================
+   The editor: map, and one rail holding the palette and the inspector.
+
+   Two panes rather than the three the old two-page layout needed. The palette
+   is what you build with, the inspector is what you selected, and both are
+   about the same thing — an asset — so putting them in one column is what lets
+   "this road is wrong" and "fix the type it is made of" be the same gesture.
+   ========================================================================== */
+
+.editor {
+  /* The workspace is a flex row, so the editor has to claim the space rather than
+     assume it — without this it collapses to the width of its own rail. */
+  position: relative;
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr) var(--rail-right);
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.editor.rail-closed {
+  grid-template-columns: minmax(0, 1fr) 0;
+}
+
+.editor-map {
+  position: relative;
+  min-width: 0;
+  background: var(--ground);
+}
+
+.map-canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.map-toolbar {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 2;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+
+.map-toolbar button {
+  padding: 6px 12px;
+  font: 500 13px var(--font-ui);
+  color: var(--ink-2);
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.map-toolbar button:hover {
+  background: var(--panel-2);
+}
+
+.map-toolbar button.is-active {
+  color: var(--accent-ink);
+  background: var(--accent-fill);
+}
+
+.toolbar-level {
+  padding: 0 10px;
+  font: 500 12px var(--font-mono);
+  color: var(--derived);
+  white-space: nowrap;
+}
+
+.map-status {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  z-index: 2;
+  padding: 4px 10px;
+  font: 400 12px var(--font-mono);
+  color: var(--ink-dim);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+
+.editor-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  padding: 12px;
+  overflow-y: auto;
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+}
+
+.rail-closed .editor-rail {
+  display: none;
+}
+
+.rail-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.project-name {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  font: 600 14px var(--font-ui);
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+
+.rail-file {
+  display: flex;
+  gap: 4px;
+}
+
+.rail-file button,
+.inspector-actions button,
+.palette-head button {
+  padding: 6px 10px;
+  font: 500 12px var(--font-ui);
+  color: var(--ink-2);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.rail-file button:hover,
+.inspector-actions button:hover,
+.palette-head button:hover {
+  background: var(--panel-2);
+}
+
+.rail-toggle {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 3;
+  width: 24px;
+  height: 24px;
+  color: var(--ink-2);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+/* -------------------------------------------------------------- the palette */
+
+.palette {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.palette-head {
+  display: flex;
+  gap: 6px;
+}
+
+.palette-head input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  font: 400 13px var(--font-ui);
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+
+.palette-families {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.palette-families button {
+  padding: 3px 8px;
+  font: 500 11px var(--font-ui);
+  color: var(--ink-dim);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.palette-families button:hover {
+  border-color: var(--line);
+}
+
+.palette-families button.is-active {
+  color: var(--accent-ink);
+  background: var(--accent-fill);
+}
+
+.palette-heading {
+  margin: 6px 0 0;
+  font: 600 10px var(--font-ui);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.asset-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 260px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.asset-list li {
+  display: flex;
+  gap: 2px;
+  align-items: stretch;
+}
+
+.asset-row {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 5px 8px;
+  font: 400 13px var(--font-ui);
+  color: var(--ink);
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.asset-row:hover {
+  background: var(--panel-2);
+}
+
+.asset-row.is-active {
+  border-color: var(--accent);
+  background: var(--accent-fill);
+  color: var(--accent-ink);
+}
+
+/* A plan view of the section, at palette scale: the bands in proportion, which is
+   how you recognise a four-lane road without reading its name. */
+.asset-swatch {
+  display: flex;
+  flex: 0 0 34px;
+  height: 16px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
+.asset-swatch-area {
+  display: block;
+}
+
+.asset-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-width {
+  font: 400 11px var(--font-mono);
+  color: var(--ink-dim);
+}
+
+.asset-row.is-active .asset-width {
+  color: var(--accent-ink);
+}
+
+.asset-edit {
+  padding: 0 6px;
+  font-size: 12px;
+  color: var(--ink-dim);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.asset-edit:hover {
+  color: var(--ink);
+  background: var(--panel-2);
+}
+
+.palette-empty,
+.inspector-empty {
+  margin: 4px 0;
+  font: 400 12px var(--font-ui);
+  color: var(--ink-dim);
+}
+
+/* ------------------------------------------------------------ the inspector */
+
+.inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.inspector-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.inspector-block h3 {
+  margin: 0;
+  font: 600 10px var(--font-ui);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.inspector-block label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  font: 400 12px var(--font-ui);
+  color: var(--ink-2);
+}
+
+.inspector-block label select,
+.inspector-block label input[type='text'],
+.inspector-block label input[type='number'] {
+  flex: 1;
+  min-width: 0;
+  max-width: 190px;
+  padding: 5px 7px;
+  font: 400 12px var(--font-ui);
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.inspector-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.inspector-note {
+  margin: 0;
+  font: 400 11px var(--font-ui);
+  line-height: 1.45;
+  color: var(--ink-dim);
+}
+
+.asset-editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.asset-editor-head button {
+  font-size: 16px;
+  line-height: 1;
+  color: var(--ink-dim);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.inspector-asset {
+  border-color: var(--accent);
+}
+
+.rail-layers {
+  padding: 8px 10px;
+  font: 400 12px var(--font-ui);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.rail-layers summary {
+  font-weight: 600;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.rail-layers label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 6px;
+  color: var(--ink-2);
+}

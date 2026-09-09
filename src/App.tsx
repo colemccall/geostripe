@@ -3,12 +3,13 @@ import { HashRouter, Navigate, Route, Routes } from 'react-router-dom';
 import AppShell from './components/AppShell';
 
 /**
- * Routes are code-split because MapLibre is ~800 kB on its own, and the Asset Builder
- * does not use it at all — a cross-section is arithmetic over widths, with no map. Split
- * this way, opening /builder never downloads the mapping engine.
+ * One route, lazily loaded so MapLibre is not in the entry chunk.
+ *
+ * There were two. The Asset Builder was its own page while a cross-section was something
+ * you composed before you had anywhere to put it; assets are now what the roads on screen
+ * are made of, so the editor for one lives beside them and the route is gone.
  */
 const MapEditor = lazy(() => import('./routes/MapEditor'));
-const AssetBuilder = lazy(() => import('./routes/AssetBuilder'));
 
 /**
  * Routing: HashRouter, deliberately.
@@ -37,14 +38,6 @@ export default function App() {
             element={
               <Suspense fallback={<div className="route-loading">Loading map…</div>}>
                 <MapEditor />
-              </Suspense>
-            }
-          />
-          <Route
-            path="/builder"
-            element={
-              <Suspense fallback={<div className="route-loading">Loading builder…</div>}>
-                <AssetBuilder />
               </Suspense>
             }
           />

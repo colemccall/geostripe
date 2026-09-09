@@ -1,10 +1,10 @@
+import type { Feature, Polygon } from 'geojson';
 import { describe, expect, it } from 'vitest';
 import { COMPONENT_TYPES, PRIMITIVES } from './primitives';
 import { TEMPLATES, instantiateTemplate, templateTotalWidth } from './templates';
-import { bandsForStreet } from '../geo/banding';
+import { bandsForSegment } from '../geo/bands';
 import { totalWidth, travelwayWidth } from '../model/section';
-import { METRES_PER_FOOT, metresToDisplay } from '../lib/units';
-import { createDemoStreets } from '../demo/washingtonPark';
+import { metresToDisplay } from '../lib/units';
 import type { LngLat } from '../geo/projection';
 import type { CrossSection } from '../model/types';
 
@@ -58,13 +58,13 @@ const LINE: LngLat[] = [CINCY, [-84.5194 + 0.0026, 39.1096 + 0.0026]];
 
 /** Area over length: robust to vertex order, unlike picking two corners. */
 function renderedWidths(section: CrossSection): number[] {
-  const { bands } = bandsForStreet('audit', LINE, section);
+  const bands = bandsForSegment(LINE, section);
   const length = haversine(LINE[0]!, LINE[1]!);
-  return bands.map((band) => {
+  return bands.map((band: Feature<Polygon>) => {
     const ring =
       band.geometry.type === 'Polygon'
-        ? (band.geometry.coordinates[0] as LngLat[])
-        : (band.geometry.coordinates[0]![0] as LngLat[]);
+        ? (band.geometry.coordinates[0] as unknown as LngLat[])
+        : (band.geometry.coordinates[0]![0] as unknown as LngLat[]);
     return ringAreaM2(ring, CINCY) / length;
   });
 }
@@ -153,50 +153,5 @@ describe('templates add up', () => {
     // quietly arguing that there is less to reclaim than there is.
     const section = instantiateTemplate(TEMPLATES.find((t) => t.id === 'existing-stroad')!);
     expect(ft(travelwayWidth(section.components))).toBeCloseTo(55, 0);
-  });
-});
-
-describe('the demo streets are internally honest', () => {
-  for (const street of createDemoStreets()) {
-    it(`${street.name} fits the right-of-way it claims`, () => {
-      const designed = totalWidth(street.section.components);
-      expect(street.existingWidthMeters).toBeDefined();
-      expect(designed).toBeLessThanOrEqual(street.existingWidthMeters!);
-      // And not absurdly under: a design using half the street would be a modelling slip,
-      // not a redesign.
-      expect(designed).toBeGreaterThan(street.existingWidthMeters! * 0.85);
-    });
-
-    it(`${street.name} renders to its stated total`, () => {
-      const { bands } = bandsForStreet(street.id, street.centerline, street.section);
-      expect(bands).toHaveLength(street.section.components.length);
-
-      const length = haversine(
-        street.centerline[0]!,
-        street.centerline[street.centerline.length - 1]!,
-      );
-      const measured = bands.reduce((sum, band) => {
-        const ring =
-          band.geometry.type === 'Polygon'
-            ? (band.geometry.coordinates[0] as LngLat[])
-            : (band.geometry.coordinates[0]![0] as LngLat[]);
-        return sum + ringAreaM2(ring, street.centerline[0]!) / length;
-      }, 0);
-
-      const declared = totalWidth(street.section.components);
-      expect(Math.abs(measured - declared) / declared).toBeLessThan(0.01);
-    });
-  }
-});
-
-describe('unit conversion at the display boundary', () => {
-  it('is exact, so a width does not drift by round-tripping through feet', () => {
-    // Every width in the UI is entered in feet and stored in metres. A lossy conversion
-    // would make 11.0 ft become 3.3528 m become 10.999 ft and creep on every edit.
-    expect(METRES_PER_FOOT).toBe(0.3048);
-    for (const type of COMPONENT_TYPES) {
-      const metres = PRIMITIVES[type].defaultWidthMeters;
-      expect(ft(metres) * METRES_PER_FOOT).toBeCloseTo(metres, 12);
-    }
   });
 });

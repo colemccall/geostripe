@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { Outlet } from 'react-router-dom';
 import { useEffect } from 'react';
 import { BASEMAPS, WAYBACK_VINTAGES, basemapById } from '../map/basemaps';
 import type { BasemapId } from '../map/basemaps';
@@ -8,11 +8,12 @@ import { APP_VERSION, buildDetail, buildStamp } from '../lib/version';
 import UpdateNotice from './UpdateNotice';
 
 /**
- * Persistent chrome shared by both routes.
+ * The chrome above the editor: what it is called, what it is drawn on, and undo.
  *
- * Units, imagery source, and undo/redo live here because they are global to the session
- * rather than to a page — the same cross-section is being edited whichever route you are
- * on, and switching pages should never lose your place in the history.
+ * There used to be two workspaces and a tab strip to move between them. Editing an asset
+ * happens beside the roads made of it now, so there is one workspace and nothing to switch
+ * between — which is also why undo lives up here rather than per page: there is only ever
+ * one history.
  */
 export default function AppShell() {
   const units = useEditorStore((s) => s.units);
@@ -32,8 +33,6 @@ export default function AppShell() {
     undo,
     redo,
   } = useEditorStore.getState();
-  const location = useLocation();
-  const onMap = location.pathname === '/';
 
   // Ctrl/Cmd+Z and Shift+Ctrl/Cmd+Z, skipped while typing in a field.
   useEffect(() => {
@@ -66,13 +65,6 @@ export default function AppShell() {
           <UpdateNotice />
         </div>
 
-        <nav className="tabs" aria-label="Workspace">
-          <NavLink to="/" end>
-            Map editor
-          </NavLink>
-          <NavLink to="/builder">Asset builder</NavLink>
-        </nav>
-
         <div className="history">
           <button
             type="button"
@@ -98,8 +90,7 @@ export default function AppShell() {
 
         <div className="spacer" />
 
-        {onMap && (
-          <div className="control">
+        <div className="control">
             <span className="label">Imagery</span>
             <select
               className="select"
@@ -153,8 +144,7 @@ export default function AppShell() {
                 aria-label="ArcGIS API key"
               />
             )}
-          </div>
-        )}
+        </div>
 
         <div className="control">
           <span className="label">Units</span>
