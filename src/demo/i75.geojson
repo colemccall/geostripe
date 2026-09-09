@@ -12,7 +12,7 @@
       },
       "properties": {
         "streetcity": "node",
-        "id": "n-98f004a6"
+        "id": "n-8616ce24"
       }
     },
     {
@@ -26,7 +26,287 @@
       },
       "properties": {
         "streetcity": "node",
-        "id": "n-7cf4d738"
+        "id": "n-38ffd3a6"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.53180413023668,
+          39.11375533170098
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-e45cff6a"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.53209452284635,
+          39.10638742495573
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-507d78af"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.53318663797974,
+          39.10163834700548
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-9cbb3731"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.53265891248824,
+          39.09805210210302
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-c47c36d1"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.53290262026913,
+          39.1036310302498
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-a4cfa7fe"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.53287339853324,
+          39.10379095172456
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-927f2bf0"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.52249936191862,
+          39.09439915927364
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-11eae896"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.52246995538414,
+          39.09561244692503
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-c58dbcb1"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.52130575789276,
+          39.09678842519849
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-4b28e71e"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.51851696932593,
+          39.097017074218
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-ae80b3fd"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.5213580113926,
+          39.0970273525766
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-0cbda87b"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.51858631460269,
+          39.09728833787277
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-412908ec"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.52168831218262,
+          39.09851544444158
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-099764d0"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.51787013531775,
+          39.09789233282993
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-a410504f"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.52252361493504,
+          39.09719658376251
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-59b0d5e4"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.51881509551939,
+          39.09818327910755
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-cc89586b"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.521649559175,
+          39.098341946649235
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-47c5a034"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.51850627042948,
+          39.09779421040673
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-c406920b"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.52229604517606,
+          39.09721535481569
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-d9c9b393"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.51872940305763,
+          39.097848068817115
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-646d6032"
       }
     },
     {
@@ -40,7 +320,371 @@
       },
       "properties": {
         "streetcity": "node",
-        "id": "n-733ec57d"
+        "id": "n-10f1a91d"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.53356460989254,
+          39.101673474775914
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-ea52a262"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.52830605235408,
+          39.10567509266181
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-24da422e"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.52984356926815,
+          39.10583665380848
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-08c021ad"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.52615751550525,
+          39.10111553596712
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-460e89b4"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.51970077974303,
+          39.10164788334197
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-ce54a2c1"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.53639779212857,
+          39.104043190572604
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-b6de14d4"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.53637539597608,
+          39.10420129653965
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-73d82b52"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.53026927849005,
+          39.10129767768212
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-0fc06f6c"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.52604350639795,
+          39.099256655531036
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-1ade45a6"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.52042018705475,
+          39.094544542478175
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-1a7244f4"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.5266583387539,
+          39.095073398866205
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-1788af13"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.51807624139913,
+          39.09418747620351
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-9f60b55b"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.52606220018268,
+          39.10273235345506
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-875aa793"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.52599738406639,
+          39.10337478412058
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-3792065e"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.52197582888572,
+          39.09987075776899
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-3abe31ec"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.51934790121496,
+          39.1002674992164
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-5654cfd0"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.52990861754566,
+          39.09865279463352
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-7c27167b"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.52142116519396,
+          39.09731612121827
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-b126add8"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.52102410258222,
+          39.095807258764125
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-263fa04f"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.51870769241839,
+          39.09776314151386
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-d41f01c7"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.518319057636,
+          39.09624288669086
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-3cf5b79b"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.52809328308638,
+          39.10313529685279
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-d8ef1718"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.5296541789722,
+          39.103255331822254
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-9b36fc83"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.52808234452407,
+          39.103290211466664
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-f48fd09b"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.52958438442272,
+          39.10341781554073
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-a5f9968f"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.53095298833647,
+          39.10955577663095
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-e7f25652"
       }
     },
     {
@@ -54,7 +698,7 @@
       },
       "properties": {
         "streetcity": "node",
-        "id": "n-c9be5af9"
+        "id": "n-9a189d1d"
       }
     },
     {
@@ -68,7 +712,7 @@
       },
       "properties": {
         "streetcity": "node",
-        "id": "n-29548208"
+        "id": "n-812e5206"
       }
     },
     {
@@ -76,13 +720,13 @@
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -84.5234771,
-          39.0870412
+          -84.52274020102588,
+          39.08664148078341
         ]
       },
       "properties": {
         "streetcity": "node",
-        "id": "n-245342f0"
+        "id": "n-65be9e24"
       }
     },
     {
@@ -96,7 +740,7 @@
       },
       "properties": {
         "streetcity": "node",
-        "id": "n-b7351312"
+        "id": "n-d3fa0a5d"
       }
     },
     {
@@ -110,7 +754,7 @@
       },
       "properties": {
         "streetcity": "node",
-        "id": "n-6947025b"
+        "id": "n-621f4a39"
       }
     },
     {
@@ -124,7 +768,7 @@
       },
       "properties": {
         "streetcity": "node",
-        "id": "n-e295de3a"
+        "id": "n-bf9080f3"
       }
     },
     {
@@ -138,7 +782,7 @@
       },
       "properties": {
         "streetcity": "node",
-        "id": "n-25ce6505"
+        "id": "n-c6ab0b3c"
       }
     },
     {
@@ -152,7 +796,7 @@
       },
       "properties": {
         "streetcity": "node",
-        "id": "n-b8e9dcf8"
+        "id": "n-91e99c1d"
       }
     },
     {
@@ -166,7 +810,7 @@
       },
       "properties": {
         "streetcity": "node",
-        "id": "n-d264688d"
+        "id": "n-56eb1adb"
       }
     },
     {
@@ -180,7 +824,7 @@
       },
       "properties": {
         "streetcity": "node",
-        "id": "n-3d1be39e"
+        "id": "n-40352826"
       }
     },
     {
@@ -194,7 +838,7 @@
       },
       "properties": {
         "streetcity": "node",
-        "id": "n-55eb75ae"
+        "id": "n-b734abbb"
       }
     },
     {
@@ -208,7 +852,7 @@
       },
       "properties": {
         "streetcity": "node",
-        "id": "n-aee765a9"
+        "id": "n-6903b803"
       }
     },
     {
@@ -222,7 +866,7 @@
       },
       "properties": {
         "streetcity": "node",
-        "id": "n-e8697b16"
+        "id": "n-b4f81d1e"
       }
     },
     {
@@ -236,7 +880,7 @@
       },
       "properties": {
         "streetcity": "node",
-        "id": "n-068aba72"
+        "id": "n-ad68ed79"
       }
     },
     {
@@ -244,13 +888,13 @@
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -84.5329304,
-          39.0986403
+          -84.53282513000056,
+          39.098630650694275
         ]
       },
       "properties": {
         "streetcity": "node",
-        "id": "n-9587b253"
+        "id": "n-c9b2768a"
       }
     },
     {
@@ -264,7 +908,7 @@
       },
       "properties": {
         "streetcity": "node",
-        "id": "n-517dabf0"
+        "id": "n-888969bb"
       }
     },
     {
@@ -278,7 +922,7 @@
       },
       "properties": {
         "streetcity": "node",
-        "id": "n-5e7a4dfd"
+        "id": "n-bc08a5c6"
       }
     },
     {
@@ -286,13 +930,13 @@
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -84.5332552,
-          39.0985632
+          -84.53333385912369,
+          39.098522187677986
         ]
       },
       "properties": {
         "streetcity": "node",
-        "id": "n-b9ce077b"
+        "id": "n-b83b1558"
       }
     },
     {
@@ -306,7 +950,7 @@
       },
       "properties": {
         "streetcity": "node",
-        "id": "n-9ecee3a6"
+        "id": "n-96ae4827"
       }
     },
     {
@@ -320,7 +964,385 @@
       },
       "properties": {
         "streetcity": "node",
-        "id": "n-09dcf26c"
+        "id": "n-6984af1a"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.52998751662035,
+          39.11383348353823
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-4c6df265"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.53284450298203,
+          39.11576590398448
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-64069315"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.53304215281148,
+          39.11567827471083
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-e107c2fb"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.52998751662017,
+          39.11369411877649
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-f323fef5"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.53006129115042,
+          39.11376416054236
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-fb9b5d56"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.5243117565404,
+          39.11340227529692
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-17f0198c"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.53639553239488,
+          39.10690513828604
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-fae962c0"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.52387451856094,
+          39.10539384640143
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-a63bc297"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.53631829830121,
+          39.104604378413
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-d623fafe"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.51813604298371,
+          39.10185526866104
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-b5d5bc96"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.52576259743886,
+          39.105512084843404
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-3df6431e"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.53901934019886,
+          39.099996208488676
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-983ad79a"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.51620840775198,
+          39.100741472375745
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-7f5cf82b"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.51992238251766,
+          39.09328611045265
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-06372dca"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.52226345700555,
+          39.101331746149214
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-5c827d75"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.51582465972355,
+          39.09821305978451
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-f5d31868"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.52626995472262,
+          39.097390611023854
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-2c469f75"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.52668430245238,
+          39.095070091604654
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-9836233b"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.51823058806005,
+          39.09625743155917
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-48327b9d"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.52158056045718,
+          39.10909180850908
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-d977f64b"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.518111478074,
+          39.094100410592574
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-62805684"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.51997826597358,
+          39.102730112809496
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-75e75d4c"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.52040689250875,
+          39.104421260318475
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-2c3e6f47"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.5278878427416,
+          39.10785183906731
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-4e0daba1"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.52829075786309,
+          39.10111735699246
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-98e7f200"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.53102176537774,
+          39.10956106257453
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-cfe927f3"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.52344246922902,
+          39.109009382034714
+        ]
+      },
+      "properties": {
+        "streetcity": "node",
+        "id": "n-632c32c0"
       }
     },
     {
@@ -333,8 +1355,33 @@
             39.1188418
           ],
           [
-            -84.5334522,
-            39.1164128
+            -84.53180413023668,
+            39.11375533170098
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-bf5a338d",
+        "name": "Street 1",
+        "assetId": "imported-1",
+        "fromNodeId": "n-9a189d1d",
+        "toNodeId": "n-e45cff6a",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.53180413023668,
+            39.11375533170098
           ],
           [
             -84.5314944,
@@ -349,8 +1396,33 @@
             39.1075473
           ],
           [
-            -84.5319686,
-            39.1068233
+            -84.53209452284635,
+            39.10638742495573
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-ff7d2137",
+        "name": "Street 1",
+        "assetId": "imported-1",
+        "fromNodeId": "n-e45cff6a",
+        "toNodeId": "n-507d78af",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.53209452284635,
+            39.10638742495573
           ],
           [
             -84.5322163,
@@ -361,12 +1433,91 @@
             39.1049731
           ],
           [
-            -84.5328718,
-            39.1037997
+            -84.53287339853324,
+            39.10379095172456
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-157a3a51",
+        "name": "Street 1",
+        "assetId": "imported-1",
+        "fromNodeId": "n-507d78af",
+        "toNodeId": "n-927f2bf0",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.53287339853324,
+            39.10379095172456
           ],
           [
-            -84.5330622,
-            39.1027577
+            -84.53290262026913,
+            39.1036310302498
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-1d2a3aea",
+        "name": "Street 1",
+        "assetId": "imported-1",
+        "fromNodeId": "n-927f2bf0",
+        "toNodeId": "n-a4cfa7fe",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.53290262026913,
+            39.1036310302498
+          ],
+          [
+            -84.53318663797974,
+            39.10163834700548
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-e7a3c4e9",
+        "name": "Street 1",
+        "assetId": "imported-1",
+        "fromNodeId": "n-a4cfa7fe",
+        "toNodeId": "n-9cbb3731",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.53318663797974,
+            39.10163834700548
           ],
           [
             -84.53320762852839,
@@ -376,11 +1527,11 @@
       },
       "properties": {
         "streetcity": "segment",
-        "id": "s-53569344",
+        "id": "s-cdc18a8c",
         "name": "Street 1",
         "assetId": "imported-1",
-        "fromNodeId": "n-c9be5af9",
-        "toNodeId": "n-7cf4d738",
+        "fromNodeId": "n-9cbb3731",
+        "toNodeId": "n-38ffd3a6",
         "curve": {
           "mode": "smooth",
           "radiusMeters": 12
@@ -405,11 +1556,11 @@
       },
       "properties": {
         "streetcity": "segment",
-        "id": "s-a006350a",
+        "id": "s-895595b2",
         "name": "Street 1",
         "assetId": "imported-1",
-        "fromNodeId": "n-7cf4d738",
-        "toNodeId": "n-98f004a6",
+        "fromNodeId": "n-38ffd3a6",
+        "toNodeId": "n-8616ce24",
         "curve": {
           "mode": "smooth",
           "radiusMeters": 12
@@ -443,8 +1594,33 @@
             39.0985423
           ],
           [
-            -84.5328006,
-            39.0981543
+            -84.53265891248824,
+            39.09805210210302
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-891645df",
+        "name": "Street 1",
+        "assetId": "imported-1",
+        "fromNodeId": "n-8616ce24",
+        "toNodeId": "n-c47c36d1",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.53265891248824,
+            39.09805210210302
           ],
           [
             -84.5322459,
@@ -490,11 +1666,11 @@
       },
       "properties": {
         "streetcity": "segment",
-        "id": "s-df4c3473",
+        "id": "s-61ad880e",
         "name": "Street 1",
         "assetId": "imported-1",
-        "fromNodeId": "n-98f004a6",
-        "toNodeId": "n-29548208",
+        "fromNodeId": "n-c47c36d1",
+        "toNodeId": "n-812e5206",
         "curve": {
           "mode": "smooth",
           "radiusMeters": 12
@@ -508,28 +1684,78 @@
         "type": "LineString",
         "coordinates": [
           [
-            -84.5234771,
-            39.0870412
+            -84.52274020102588,
+            39.08664148078341
           ],
           [
-            -84.5233502,
-            39.0887483
+            -84.52268833942902,
+            39.08996875092956
           ],
           [
-            -84.5232339,
-            39.090365
+            -84.5226073138053,
+            39.091632830644954
           ],
           [
-            -84.5231044,
-            39.0920952
+            -84.52249936191862,
+            39.09439915927364
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-7e8f1e0d",
+        "name": "Street 2",
+        "assetId": "imported-1",
+        "fromNodeId": "n-65be9e24",
+        "toNodeId": "n-11eae896",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52249936191862,
+            39.09439915927364
           ],
           [
-            -84.5229431,
-            39.0937112
+            -84.52249576811123,
+            39.094547760050716
           ],
           [
-            -84.5227712,
-            39.0948676
+            -84.52246995538414,
+            39.09561244692503
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-3f100647",
+        "name": "Street 2",
+        "assetId": "imported-1",
+        "fromNodeId": "n-11eae896",
+        "toNodeId": "n-c58dbcb1",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52246995538414,
+            39.09561244692503
           ],
           [
             -84.5224622,
@@ -539,11 +1765,11 @@
       },
       "properties": {
         "streetcity": "segment",
-        "id": "s-e99c6314",
+        "id": "s-fa2adfdc",
         "name": "Street 2",
         "assetId": "imported-1",
-        "fromNodeId": "n-245342f0",
-        "toNodeId": "n-b7351312",
+        "fromNodeId": "n-c58dbcb1",
+        "toNodeId": "n-d3fa0a5d",
         "curve": {
           "mode": "smooth",
           "radiusMeters": 12
@@ -561,8 +1787,33 @@
             39.0958731
           ],
           [
-            -84.521939,
-            39.0964594
+            -84.52130575789276,
+            39.09678842519849
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-5b510cbe",
+        "name": "Street 3",
+        "assetId": "imported-2",
+        "fromNodeId": "n-621f4a39",
+        "toNodeId": "n-4b28e71e",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52130575789276,
+            39.09678842519849
           ],
           [
             -84.5210354,
@@ -577,8 +1828,33 @@
             39.097085
           ],
           [
-            -84.5189741,
-            39.0970368
+            -84.51851696932593,
+            39.097017074218
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-4002404c",
+        "name": "Street 3",
+        "assetId": "imported-2",
+        "fromNodeId": "n-4b28e71e",
+        "toNodeId": "n-ae80b3fd",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.51851696932593,
+            39.097017074218
           ],
           [
             -84.5184156,
@@ -592,11 +1868,11 @@
       },
       "properties": {
         "streetcity": "segment",
-        "id": "s-d7cf2d93",
+        "id": "s-6357e548",
         "name": "Street 3",
         "assetId": "imported-2",
-        "fromNodeId": "n-6947025b",
-        "toNodeId": "n-e295de3a",
+        "fromNodeId": "n-ae80b3fd",
+        "toNodeId": "n-bf9080f3",
         "curve": {
           "mode": "smooth",
           "radiusMeters": 12
@@ -626,8 +1902,33 @@
             39.0967303
           ],
           [
-            -84.5214659,
-            39.0969921
+            -84.5213580113926,
+            39.0970273525766
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-d7a82203",
+        "name": "Street 4",
+        "assetId": "imported-2",
+        "fromNodeId": "n-c6ab0b3c",
+        "toNodeId": "n-0cbda87b",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.5213580113926,
+            39.0970273525766
           ],
           [
             -84.5204229,
@@ -638,8 +1939,33 @@
             39.0973553
           ],
           [
-            -84.5188264,
-            39.0972995
+            -84.51858631460269,
+            39.09728833787277
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-eadc34f1",
+        "name": "Street 4",
+        "assetId": "imported-2",
+        "fromNodeId": "n-0cbda87b",
+        "toNodeId": "n-412908ec",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.51858631460269,
+            39.09728833787277
           ],
           [
             -84.5183446,
@@ -657,11 +1983,11 @@
       },
       "properties": {
         "streetcity": "segment",
-        "id": "s-52c071e1",
+        "id": "s-1ddd25ae",
         "name": "Street 4",
         "assetId": "imported-2",
-        "fromNodeId": "n-25ce6505",
-        "toNodeId": "n-b8e9dcf8",
+        "fromNodeId": "n-412908ec",
+        "toNodeId": "n-91e99c1d",
         "curve": {
           "mode": "smooth",
           "radiusMeters": 12
@@ -679,12 +2005,62 @@
             39.0978848
           ],
           [
-            -84.5176365,
-            39.0978564
+            -84.51787013531775,
+            39.09789233282993
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-78410106",
+        "name": "Street 5",
+        "assetId": "imported-2",
+        "fromNodeId": "n-56eb1adb",
+        "toNodeId": "n-a410504f",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.51787013531775,
+            39.09789233282993
           ],
           [
-            -84.5184486,
-            39.0979813
+            -84.51881509551939,
+            39.09818327910755
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-f373e5e7",
+        "name": "Street 5",
+        "assetId": "imported-2",
+        "fromNodeId": "n-a410504f",
+        "toNodeId": "n-cc89586b",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.51881509551939,
+            39.09818327910755
           ],
           [
             -84.5189534,
@@ -703,8 +2079,33 @@
             39.0987137
           ],
           [
-            -84.5215505,
-            39.0986002
+            -84.52168831218262,
+            39.09851544444158
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-0c3f4724",
+        "name": "Street 5",
+        "assetId": "imported-2",
+        "fromNodeId": "n-cc89586b",
+        "toNodeId": "n-099764d0",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52168831218262,
+            39.09851544444158
           ],
           [
             -84.5219383,
@@ -715,8 +2116,33 @@
             39.098004
           ],
           [
-            -84.522423,
-            39.097555
+            -84.52252361493504,
+            39.09719658376251
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-15e618e1",
+        "name": "Street 5",
+        "assetId": "imported-2",
+        "fromNodeId": "n-099764d0",
+        "toNodeId": "n-59b0d5e4",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52252361493504,
+            39.09719658376251
           ],
           [
             -84.5225258,
@@ -742,11 +2168,11 @@
       },
       "properties": {
         "streetcity": "segment",
-        "id": "s-8a8e88f6",
+        "id": "s-dddbf6f3",
         "name": "Street 5",
         "assetId": "imported-2",
-        "fromNodeId": "n-d264688d",
-        "toNodeId": "n-3d1be39e",
+        "fromNodeId": "n-59b0d5e4",
+        "toNodeId": "n-40352826",
         "curve": {
           "mode": "smooth",
           "radiusMeters": 12
@@ -764,12 +2190,62 @@
             39.0977147
           ],
           [
-            -84.5177132,
-            39.0976393
+            -84.51850627042948,
+            39.09779421040673
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-8885a77a",
+        "name": "Street 6",
+        "assetId": "imported-2",
+        "fromNodeId": "n-b734abbb",
+        "toNodeId": "n-c406920b",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.51850627042948,
+            39.09779421040673
           ],
           [
-            -84.5186982,
-            39.0978317
+            -84.51872940305763,
+            39.097848068817115
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-0b4a9b12",
+        "name": "Street 6",
+        "assetId": "imported-2",
+        "fromNodeId": "n-c406920b",
+        "toNodeId": "n-646d6032",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.51872940305763,
+            39.097848068817115
           ],
           [
             -84.519174,
@@ -788,8 +2264,33 @@
             39.0986224
           ],
           [
-            -84.5213186,
-            39.0985285
+            -84.521649559175,
+            39.098341946649235
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-77b0f07e",
+        "name": "Street 6",
+        "assetId": "imported-2",
+        "fromNodeId": "n-646d6032",
+        "toNodeId": "n-47c5a034",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.521649559175,
+            39.098341946649235
           ],
           [
             -84.5217442,
@@ -800,8 +2301,33 @@
             39.0979027
           ],
           [
-            -84.5222505,
-            39.0974368
+            -84.52229604517606,
+            39.09721535481569
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-ddd37a8b",
+        "name": "Street 6",
+        "assetId": "imported-2",
+        "fromNodeId": "n-47c5a034",
+        "toNodeId": "n-d9c9b393",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52229604517606,
+            39.09721535481569
           ],
           [
             -84.5223629,
@@ -819,11 +2345,11 @@
       },
       "properties": {
         "streetcity": "segment",
-        "id": "s-13cf3518",
+        "id": "s-61e25b9e",
         "name": "Street 6",
         "assetId": "imported-2",
-        "fromNodeId": "n-55eb75ae",
-        "toNodeId": "n-aee765a9",
+        "fromNodeId": "n-d9c9b393",
+        "toNodeId": "n-6903b803",
         "curve": {
           "mode": "smooth",
           "radiusMeters": 12
@@ -848,11 +2374,11 @@
       },
       "properties": {
         "streetcity": "segment",
-        "id": "s-d5069ea0",
+        "id": "s-f79fac88",
         "name": "Street 7",
         "assetId": "imported-2",
-        "fromNodeId": "n-e8697b16",
-        "toNodeId": "n-98f004a6",
+        "fromNodeId": "n-b4f81d1e",
+        "toNodeId": "n-8616ce24",
         "curve": {
           "mode": "smooth",
           "radiusMeters": 12
@@ -909,11 +2435,11 @@
       },
       "properties": {
         "streetcity": "segment",
-        "id": "s-e2aa5e28",
+        "id": "s-f895c81d",
         "name": "Street 7",
         "assetId": "imported-2",
-        "fromNodeId": "n-98f004a6",
-        "toNodeId": "n-733ec57d",
+        "fromNodeId": "n-8616ce24",
+        "toNodeId": "n-10f1a91d",
         "curve": {
           "mode": "smooth",
           "radiusMeters": 12
@@ -938,11 +2464,11 @@
       },
       "properties": {
         "streetcity": "segment",
-        "id": "s-422e399e",
+        "id": "s-2766494d",
         "name": "Street 7",
         "assetId": "imported-2",
-        "fromNodeId": "n-733ec57d",
-        "toNodeId": "n-068aba72",
+        "fromNodeId": "n-10f1a91d",
+        "toNodeId": "n-ad68ed79",
         "curve": {
           "mode": "smooth",
           "radiusMeters": 12
@@ -956,8 +2482,8 @@
         "type": "LineString",
         "coordinates": [
           [
-            -84.5329304,
-            39.0986403
+            -84.53282513000056,
+            39.098630650694275
           ],
           [
             -84.5329011,
@@ -1007,11 +2533,11 @@
       },
       "properties": {
         "streetcity": "segment",
-        "id": "s-45b06c40",
+        "id": "s-ac1a2e96",
         "name": "Street 8",
         "assetId": "imported-2",
-        "fromNodeId": "n-9587b253",
-        "toNodeId": "n-733ec57d",
+        "fromNodeId": "n-c9b2768a",
+        "toNodeId": "n-10f1a91d",
         "curve": {
           "mode": "smooth",
           "radiusMeters": 12
@@ -1036,11 +2562,11 @@
       },
       "properties": {
         "streetcity": "segment",
-        "id": "s-fa100ce6",
+        "id": "s-53dded2e",
         "name": "Street 8",
         "assetId": "imported-2",
-        "fromNodeId": "n-733ec57d",
-        "toNodeId": "n-7cf4d738",
+        "fromNodeId": "n-10f1a91d",
+        "toNodeId": "n-38ffd3a6",
         "curve": {
           "mode": "smooth",
           "radiusMeters": 12
@@ -1073,11 +2599,11 @@
       },
       "properties": {
         "streetcity": "segment",
-        "id": "s-afa73573",
+        "id": "s-9e09b616",
         "name": "Street 8",
         "assetId": "imported-2",
-        "fromNodeId": "n-7cf4d738",
-        "toNodeId": "n-517dabf0",
+        "fromNodeId": "n-38ffd3a6",
+        "toNodeId": "n-888969bb",
         "curve": {
           "mode": "smooth",
           "radiusMeters": 12
@@ -1123,18 +2649,18 @@
             39.0990582
           ],
           [
-            -84.5332552,
-            39.0985632
+            -84.53333385912369,
+            39.098522187677986
           ]
         ]
       },
       "properties": {
         "streetcity": "segment",
-        "id": "s-b615d048",
+        "id": "s-dc3dd964",
         "name": "Street 9",
         "assetId": "imported-2",
-        "fromNodeId": "n-5e7a4dfd",
-        "toNodeId": "n-b9ce077b",
+        "fromNodeId": "n-bc08a5c6",
+        "toNodeId": "n-b83b1558",
         "curve": {
           "mode": "smooth",
           "radiusMeters": 12
@@ -1164,8 +2690,33 @@
             39.1019836
           ],
           [
-            -84.5335597,
-            39.1016992
+            -84.53356460989254,
+            39.101673474775914
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-f25c22b2",
+        "name": "Street 10",
+        "assetId": "imported-2",
+        "fromNodeId": "n-96ae4827",
+        "toNodeId": "n-ea52a262",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.53356460989254,
+            39.101673474775914
           ],
           [
             -84.5336048,
@@ -1203,11 +2754,11 @@
       },
       "properties": {
         "streetcity": "segment",
-        "id": "s-0fdc5d9a",
+        "id": "s-4762dca9",
         "name": "Street 10",
         "assetId": "imported-2",
-        "fromNodeId": "n-9ecee3a6",
-        "toNodeId": "n-09dcf26c",
+        "fromNodeId": "n-ea52a262",
+        "toNodeId": "n-6984af1a",
         "curve": {
           "mode": "smooth",
           "radiusMeters": 12
@@ -1218,32 +2769,2818 @@
     {
       "type": "Feature",
       "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52998751662035,
+            39.11383348353823
+          ],
+          [
+            -84.53082907614991,
+            39.11394200436635
+          ],
+          [
+            -84.5311675985157,
+            39.11410914959967
+          ],
+          [
+            -84.53142405485346,
+            39.11432405003188
+          ],
+          [
+            -84.53161896167025,
+            39.11454690904628
+          ],
+          [
+            -84.5318856762619,
+            39.114857318642635
+          ],
+          [
+            -84.53208684530266,
+            39.11511233302599
+          ],
+          [
+            -84.5323503784088,
+            39.11542633994162
+          ],
+          [
+            -84.53284450298203,
+            39.11576590398448
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-1cb41694",
+        "name": "Street 11",
+        "assetId": "imported-2",
+        "fromNodeId": "n-4c6df265",
+        "toNodeId": "n-64069315",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.53304215281148,
+            39.11567827471083
+          ],
+          [
+            -84.53303744686333,
+            39.11534236148458
+          ],
+          [
+            -84.53298568143173,
+            39.115134240530324
+          ],
+          [
+            -84.53286803272408,
+            39.114838488643386
+          ],
+          [
+            -84.53261391151025,
+            39.11439249058449
+          ],
+          [
+            -84.53231743676578,
+            39.113968939829306
+          ],
+          [
+            -84.53180413023668,
+            39.11375533170098
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-ef1d0b50",
+        "name": "Street 12",
+        "assetId": "imported-2",
+        "fromNodeId": "n-e107c2fb",
+        "toNodeId": "n-e45cff6a",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.53180413023668,
+            39.11375533170098
+          ],
+          [
+            -84.53133810653192,
+            39.11370483915667
+          ],
+          [
+            -84.53070598900361,
+            39.113694118780984
+          ],
+          [
+            -84.53029839409307,
+            39.11369411877649
+          ],
+          [
+            -84.52998751662017,
+            39.11369411877649
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-21316a84",
+        "name": "Street 12",
+        "assetId": "imported-2",
+        "fromNodeId": "n-e45cff6a",
+        "toNodeId": "n-f323fef5",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.53006129115042,
+            39.11376416054236
+          ],
+          [
+            -84.52938988054407,
+            39.11371998152785
+          ],
+          [
+            -84.5243117565404,
+            39.11340227529692
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-4b89a15d",
+        "name": "Street 13",
+        "assetId": "imported-3",
+        "fromNodeId": "n-fb9b5d56",
+        "toNodeId": "n-17f0198c",
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.53639553239488,
+            39.10690513828604
+          ],
+          [
+            -84.53512464160549,
+            39.106814571261964
+          ],
+          [
+            -84.53393804459341,
+            39.10670890958741
+          ],
+          [
+            -84.53209452284635,
+            39.10638742495573
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-b5498c77",
+        "name": "Street 14",
+        "assetId": "imported-4",
+        "fromNodeId": "n-fae962c0",
+        "toNodeId": "n-507d78af",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.53209452284635,
+            39.10638742495573
+          ],
+          [
+            -84.53162969193505,
+            39.106281229760924
+          ],
+          [
+            -84.52984356926815,
+            39.10583665380848
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-9a70f44c",
+        "name": "Street 14",
+        "assetId": "imported-4",
+        "fromNodeId": "n-507d78af",
+        "toNodeId": "n-08c021ad",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52984356926815,
+            39.10583665380848
+          ],
+          [
+            -84.52978464671021,
+            39.10582326355933
+          ],
+          [
+            -84.52830605235408,
+            39.10567509266181
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-bc4e1100",
+        "name": "Street 14",
+        "assetId": "imported-4",
+        "fromNodeId": "n-08c021ad",
+        "toNodeId": "n-24da422e",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52830605235408,
+            39.10567509266181
+          ],
+          [
+            -84.52741812966167,
+            39.105616791490945
+          ],
+          [
+            -84.52387451856094,
+            39.10539384640143
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-601a7206",
+        "name": "Street 14",
+        "assetId": "imported-4",
+        "fromNodeId": "n-24da422e",
+        "toNodeId": "n-a63bc297",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.53631829830121,
+            39.104604378413
+          ],
+          [
+            -84.53637539597608,
+            39.10420129653965
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-a8a75570",
+        "name": "Street 15",
+        "assetId": "imported-4",
+        "fromNodeId": "n-d623fafe",
+        "toNodeId": "n-73d82b52",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.53637539597608,
+            39.10420129653965
+          ],
+          [
+            -84.53639779212857,
+            39.104043190572604
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-0e1e2624",
+        "name": "Street 15",
+        "assetId": "imported-4",
+        "fromNodeId": "n-73d82b52",
+        "toNodeId": "n-b6de14d4",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.53639779212857,
+            39.104043190572604
+          ],
+          [
+            -84.53646913691202,
+            39.10353953102717
+          ],
+          [
+            -84.53648565270159,
+            39.10298842471815
+          ],
+          [
+            -84.53632049480584,
+            39.10257829629674
+          ],
+          [
+            -84.53598192111872,
+            39.10232196482221
+          ],
+          [
+            -84.53536257900831,
+            39.102123307287314
+          ],
+          [
+            -84.53456156321255,
+            39.101847749136
+          ],
+          [
+            -84.53356460989254,
+            39.101673474775914
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-13c20002",
+        "name": "Street 15",
+        "assetId": "imported-4",
+        "fromNodeId": "n-b6de14d4",
+        "toNodeId": "n-ea52a262",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.53356460989254,
+            39.101673474775914
+          ],
+          [
+            -84.53318663797974,
+            39.10163834700548
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-4e58b001",
+        "name": "Street 15",
+        "assetId": "imported-4",
+        "fromNodeId": "n-ea52a262",
+        "toNodeId": "n-9cbb3731",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.53318663797974,
+            39.10163834700548
+          ],
+          [
+            -84.53261270003885,
+            39.10158500663931
+          ],
+          [
+            -84.53026927849005,
+            39.10129767768212
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-123caa3f",
+        "name": "Street 15",
+        "assetId": "imported-4",
+        "fromNodeId": "n-9cbb3731",
+        "toNodeId": "n-0fc06f6c",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.53026927849005,
+            39.10129767768212
+          ],
+          [
+            -84.52834296205648,
+            39.10111282887712
+          ],
+          [
+            -84.52615751550525,
+            39.10111553596712
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-154b9465",
+        "name": "Street 15",
+        "assetId": "imported-4",
+        "fromNodeId": "n-0fc06f6c",
+        "toNodeId": "n-460e89b4",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52615751550525,
+            39.10111553596712
+          ],
+          [
+            -84.52450436224912,
+            39.1011948164782
+          ],
+          [
+            -84.51970077974303,
+            39.10164788334197
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-a06b013b",
+        "name": "Street 15",
+        "assetId": "imported-4",
+        "fromNodeId": "n-460e89b4",
+        "toNodeId": "n-ce54a2c1",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.51970077974303,
+            39.10164788334197
+          ],
+          [
+            -84.51813604298371,
+            39.10185526866104
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-31a67860",
+        "name": "Street 15",
+        "assetId": "imported-4",
+        "fromNodeId": "n-ce54a2c1",
+        "toNodeId": "n-b5d5bc96",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52576259743886,
+            39.105512084843404
+          ],
+          [
+            -84.52584531362461,
+            39.1047097713016
+          ],
+          [
+            -84.52599738406639,
+            39.10337478412058
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-80f4a1be",
+        "name": "Street 16",
+        "assetId": "imported-5",
+        "fromNodeId": "n-3df6431e",
+        "toNodeId": "n-3792065e",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52599738406639,
+            39.10337478412058
+          ],
+          [
+            -84.52606220018268,
+            39.10273235345506
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-11e5bfd7",
+        "name": "Street 16",
+        "assetId": "imported-5",
+        "fromNodeId": "n-3792065e",
+        "toNodeId": "n-875aa793",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52606220018268,
+            39.10273235345506
+          ],
+          [
+            -84.52610109052804,
+            39.10234688835962
+          ],
+          [
+            -84.52615751550525,
+            39.10111553596712
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-b741f8ec",
+        "name": "Street 16",
+        "assetId": "imported-5",
+        "fromNodeId": "n-875aa793",
+        "toNodeId": "n-460e89b4",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52615751550525,
+            39.10111553596712
+          ],
+          [
+            -84.5261299648144,
+            39.10055430236551
+          ],
+          [
+            -84.5260574468602,
+            39.09999129724616
+          ],
+          [
+            -84.52604350639795,
+            39.099256655531036
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-4bb8f2b3",
+        "name": "Street 16",
+        "assetId": "imported-5",
+        "fromNodeId": "n-460e89b4",
+        "toNodeId": "n-1ade45a6",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52604350639795,
+            39.099256655531036
+          ],
+          [
+            -84.526157408001,
+            39.09842623737822
+          ],
+          [
+            -84.52629794099465,
+            39.09753036066277
+          ],
+          [
+            -84.52652371893143,
+            39.09625848425679
+          ],
+          [
+            -84.52664378222873,
+            39.09576276685448
+          ],
+          [
+            -84.5266583387539,
+            39.095073398866205
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-59f9b65c",
+        "name": "Street 16",
+        "assetId": "imported-5",
+        "fromNodeId": "n-1ade45a6",
+        "toNodeId": "n-1788af13",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.5266583387539,
+            39.095073398866205
+          ],
+          [
+            -84.52655249886669,
+            39.09489804845293
+          ],
+          [
+            -84.52619709315564,
+            39.09464832176593
+          ],
+          [
+            -84.52573610369883,
+            39.09449179088321
+          ],
+          [
+            -84.52446350830789,
+            39.0944439593427
+          ],
+          [
+            -84.52249936191862,
+            39.09439915927364
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-d411eef6",
+        "name": "Street 16",
+        "assetId": "imported-5",
+        "fromNodeId": "n-1788af13",
+        "toNodeId": "n-11eae896",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52249936191862,
+            39.09439915927364
+          ],
+          [
+            -84.52203529287102,
+            39.09440676845088
+          ],
+          [
+            -84.52042018705475,
+            39.094544542478175
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-4501cd56",
+        "name": "Street 16",
+        "assetId": "imported-5",
+        "fromNodeId": "n-11eae896",
+        "toNodeId": "n-1a7244f4",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52042018705475,
+            39.094544542478175
+          ],
+          [
+            -84.52011371487828,
+            39.09456206631157
+          ],
+          [
+            -84.51965591414847,
+            39.09455246355412
+          ],
+          [
+            -84.51807624139913,
+            39.09418747620351
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-28b7677c",
+        "name": "Street 16",
+        "assetId": "imported-5",
+        "fromNodeId": "n-1a7244f4",
+        "toNodeId": "n-9f60b55b",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.53901934019886,
+            39.099996208488676
+          ],
+          [
+            -84.53783927798483,
+            39.099694338601324
+          ],
+          [
+            -84.53721607379964,
+            39.09949522501847
+          ],
+          [
+            -84.53658271798065,
+            39.09920031418525
+          ],
+          [
+            -84.53596429024564,
+            39.09890065205735
+          ],
+          [
+            -84.53461153268134,
+            39.09831862289565
+          ],
+          [
+            -84.53378914001065,
+            39.098123461356636
+          ],
+          [
+            -84.53265891248824,
+            39.09805210210302
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-27aea9b8",
+        "name": "Street 17",
+        "assetId": "imported-4",
+        "fromNodeId": "n-983ad79a",
+        "toNodeId": "n-c47c36d1",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.53265891248824,
+            39.09805210210302
+          ],
+          [
+            -84.53221232100604,
+            39.098049616308685
+          ],
+          [
+            -84.53157568702864,
+            39.098166429294224
+          ],
+          [
+            -84.53100464782533,
+            39.09835148673247
+          ],
+          [
+            -84.52990861754566,
+            39.09865279463352
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-cfc159f6",
+        "name": "Street 17",
+        "assetId": "imported-4",
+        "fromNodeId": "n-c47c36d1",
+        "toNodeId": "n-7c27167b",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52990861754566,
+            39.09865279463352
+          ],
+          [
+            -84.52990861754566,
+            39.09865279463352
+          ],
+          [
+            -84.52604350639795,
+            39.099256655531036
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-b6cc34fa",
+        "name": "Street 17",
+        "assetId": "imported-4",
+        "fromNodeId": "n-7c27167b",
+        "toNodeId": "n-1ade45a6",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52604350639795,
+            39.099256655531036
+          ],
+          [
+            -84.52197582888572,
+            39.09987075776899
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-7a665c8e",
+        "name": "Street 17",
+        "assetId": "imported-4",
+        "fromNodeId": "n-1ade45a6",
+        "toNodeId": "n-3abe31ec",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52197582888572,
+            39.09987075776899
+          ],
+          [
+            -84.51934790121496,
+            39.1002674992164
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-2b545a58",
+        "name": "Street 17",
+        "assetId": "imported-4",
+        "fromNodeId": "n-3abe31ec",
+        "toNodeId": "n-5654cfd0",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.51934790121496,
+            39.1002674992164
+          ],
+          [
+            -84.51620840775198,
+            39.100741472375745
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-3cd715d6",
+        "name": "Street 17",
+        "assetId": "imported-4",
+        "fromNodeId": "n-5654cfd0",
+        "toNodeId": "n-7f5cf82b",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.51992238251766,
+            39.09328611045265
+          ],
+          [
+            -84.52007458399507,
+            39.09375861549651
+          ],
+          [
+            -84.52042018705475,
+            39.094544542478175
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-9def3470",
+        "name": "Street 18",
+        "assetId": "imported-4",
+        "fromNodeId": "n-06372dca",
+        "toNodeId": "n-1a7244f4",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52042018705475,
+            39.094544542478175
+          ],
+          [
+            -84.52068338990364,
+            39.09507111289565
+          ],
+          [
+            -84.52102410258222,
+            39.095807258764125
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-3916ff1b",
+        "name": "Street 18",
+        "assetId": "imported-4",
+        "fromNodeId": "n-1a7244f4",
+        "toNodeId": "n-263fa04f",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52102410258222,
+            39.095807258764125
+          ],
+          [
+            -84.52130575789276,
+            39.09678842519849
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-8b4a095c",
+        "name": "Street 18",
+        "assetId": "imported-4",
+        "fromNodeId": "n-263fa04f",
+        "toNodeId": "n-4b28e71e",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52130575789276,
+            39.09678842519849
+          ],
+          [
+            -84.5213580113926,
+            39.0970273525766
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-74b20495",
+        "name": "Street 18",
+        "assetId": "imported-4",
+        "fromNodeId": "n-4b28e71e",
+        "toNodeId": "n-0cbda87b",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.5213580113926,
+            39.0970273525766
+          ],
+          [
+            -84.52142116519396,
+            39.09731612121827
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-65ef446e",
+        "name": "Street 18",
+        "assetId": "imported-4",
+        "fromNodeId": "n-0cbda87b",
+        "toNodeId": "n-b126add8",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52142116519396,
+            39.09731612121827
+          ],
+          [
+            -84.521649559175,
+            39.098341946649235
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-7008e8f1",
+        "name": "Street 18",
+        "assetId": "imported-4",
+        "fromNodeId": "n-b126add8",
+        "toNodeId": "n-47c5a034",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.521649559175,
+            39.098341946649235
+          ],
+          [
+            -84.52168831218262,
+            39.09851544444158
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-70553d3d",
+        "name": "Street 18",
+        "assetId": "imported-4",
+        "fromNodeId": "n-47c5a034",
+        "toNodeId": "n-099764d0",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52168831218262,
+            39.09851544444158
+          ],
+          [
+            -84.52197582888572,
+            39.09987075776899
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-0c275caa",
+        "name": "Street 18",
+        "assetId": "imported-4",
+        "fromNodeId": "n-099764d0",
+        "toNodeId": "n-3abe31ec",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52197582888572,
+            39.09987075776899
+          ],
+          [
+            -84.52226345700555,
+            39.101331746149214
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-f454a261",
+        "name": "Street 18",
+        "assetId": "imported-4",
+        "fromNodeId": "n-3abe31ec",
+        "toNodeId": "n-5c827d75",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.51582465972355,
+            39.09821305978451
+          ],
+          [
+            -84.51787013531775,
+            39.09789233282993
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-64e8651e",
+        "name": "Street 19",
+        "assetId": "imported-6",
+        "fromNodeId": "n-f5d31868",
+        "toNodeId": "n-a410504f",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.51787013531775,
+            39.09789233282993
+          ],
+          [
+            -84.51850627042948,
+            39.09779421040673
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-1705504d",
+        "name": "Street 19",
+        "assetId": "imported-6",
+        "fromNodeId": "n-a410504f",
+        "toNodeId": "n-c406920b",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.51850627042948,
+            39.09779421040673
+          ],
+          [
+            -84.51870769241839,
+            39.09776314151386
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-c5e94025",
+        "name": "Street 19",
+        "assetId": "imported-6",
+        "fromNodeId": "n-c406920b",
+        "toNodeId": "n-d41f01c7",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.51870769241839,
+            39.09776314151386
+          ],
+          [
+            -84.52142116519396,
+            39.09731612121827
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-9eedc2ac",
+        "name": "Street 19",
+        "assetId": "imported-6",
+        "fromNodeId": "n-d41f01c7",
+        "toNodeId": "n-b126add8",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52142116519396,
+            39.09731612121827
+          ],
+          [
+            -84.52229604517606,
+            39.09721535481569
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-08ad21d9",
+        "name": "Street 19",
+        "assetId": "imported-6",
+        "fromNodeId": "n-b126add8",
+        "toNodeId": "n-d9c9b393",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52229604517606,
+            39.09721535481569
+          ],
+          [
+            -84.52252361493504,
+            39.09719658376251
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-3fe91d01",
+        "name": "Street 19",
+        "assetId": "imported-6",
+        "fromNodeId": "n-d9c9b393",
+        "toNodeId": "n-59b0d5e4",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52252361493504,
+            39.09719658376251
+          ],
+          [
+            -84.5226420051438,
+            39.09718681836611
+          ],
+          [
+            -84.52394771234687,
+            39.097176654358805
+          ],
+          [
+            -84.52518114122296,
+            39.097168875438996
+          ],
+          [
+            -84.52579880705477,
+            39.0972373549198
+          ],
+          [
+            -84.52626995472262,
+            39.097390611023854
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-a7632c0d",
+        "name": "Street 19",
+        "assetId": "imported-6",
+        "fromNodeId": "n-59b0d5e4",
+        "toNodeId": "n-2c469f75",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52668430245238,
+            39.095070091604654
+          ],
+          [
+            -84.5266583387539,
+            39.095073398866205
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-66d65f37",
+        "name": "Street 20",
+        "assetId": "imported-6",
+        "fromNodeId": "n-9836233b",
+        "toNodeId": "n-1788af13",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.5266583387539,
+            39.095073398866205
+          ],
+          [
+            -84.52246995538414,
+            39.09561244692503
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-c7850df1",
+        "name": "Street 20",
+        "assetId": "imported-6",
+        "fromNodeId": "n-1788af13",
+        "toNodeId": "n-c58dbcb1",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52246995538414,
+            39.09561244692503
+          ],
+          [
+            -84.52102410258222,
+            39.095807258764125
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-1a1315e5",
+        "name": "Street 20",
+        "assetId": "imported-6",
+        "fromNodeId": "n-c58dbcb1",
+        "toNodeId": "n-263fa04f",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52102410258222,
+            39.095807258764125
+          ],
+          [
+            -84.518319057636,
+            39.09624288669086
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-3153914b",
+        "name": "Street 20",
+        "assetId": "imported-6",
+        "fromNodeId": "n-263fa04f",
+        "toNodeId": "n-3cf5b79b",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.518319057636,
+            39.09624288669086
+          ],
+          [
+            -84.51823058806005,
+            39.09625743155917
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-2f1ced1b",
+        "name": "Street 20",
+        "assetId": "imported-6",
+        "fromNodeId": "n-3cf5b79b",
+        "toNodeId": "n-48327b9d",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52158056045718,
+            39.10909180850908
+          ],
+          [
+            -84.51970077974303,
+            39.10164788334197
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-bc3ee9ed",
+        "name": "Street 21",
+        "assetId": "imported-4",
+        "fromNodeId": "n-d977f64b",
+        "toNodeId": "n-ce54a2c1",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.51970077974303,
+            39.10164788334197
+          ],
+          [
+            -84.51934790121496,
+            39.1002674992164
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-6e4726c9",
+        "name": "Street 21",
+        "assetId": "imported-4",
+        "fromNodeId": "n-ce54a2c1",
+        "toNodeId": "n-5654cfd0",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.51934790121496,
+            39.1002674992164
+          ],
+          [
+            -84.51881509551939,
+            39.09818327910755
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-2f25fabf",
+        "name": "Street 21",
+        "assetId": "imported-4",
+        "fromNodeId": "n-5654cfd0",
+        "toNodeId": "n-cc89586b",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.51881509551939,
+            39.09818327910755
+          ],
+          [
+            -84.51872940305763,
+            39.097848068817115
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-a178fffe",
+        "name": "Street 21",
+        "assetId": "imported-4",
+        "fromNodeId": "n-cc89586b",
+        "toNodeId": "n-646d6032",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.51872940305763,
+            39.097848068817115
+          ],
+          [
+            -84.51870769241839,
+            39.09776314151386
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-f06af3ff",
+        "name": "Street 21",
+        "assetId": "imported-4",
+        "fromNodeId": "n-646d6032",
+        "toNodeId": "n-d41f01c7",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.51870769241839,
+            39.09776314151386
+          ],
+          [
+            -84.51858631460269,
+            39.09728833787277
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-a1749cef",
+        "name": "Street 21",
+        "assetId": "imported-4",
+        "fromNodeId": "n-d41f01c7",
+        "toNodeId": "n-412908ec",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.51858631460269,
+            39.09728833787277
+          ],
+          [
+            -84.51851696932593,
+            39.097017074218
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-1a6981f0",
+        "name": "Street 21",
+        "assetId": "imported-4",
+        "fromNodeId": "n-412908ec",
+        "toNodeId": "n-ae80b3fd",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.51851696932593,
+            39.097017074218
+          ],
+          [
+            -84.518319057636,
+            39.09624288669086
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-5478861f",
+        "name": "Street 21",
+        "assetId": "imported-4",
+        "fromNodeId": "n-ae80b3fd",
+        "toNodeId": "n-3cf5b79b",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.518319057636,
+            39.09624288669086
+          ],
+          [
+            -84.51809914354945,
+            39.095382630568906
+          ],
+          [
+            -84.51800819645779,
+            39.09499408174085
+          ],
+          [
+            -84.5179730367578,
+            39.09477578143722
+          ],
+          [
+            -84.51796864179552,
+            39.09457794620306
+          ],
+          [
+            -84.51807624139913,
+            39.09418747620351
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-b173639c",
+        "name": "Street 21",
+        "assetId": "imported-4",
+        "fromNodeId": "n-3cf5b79b",
+        "toNodeId": "n-9f60b55b",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.51807624139913,
+            39.09418747620351
+          ],
+          [
+            -84.518111478074,
+            39.094100410592574
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-4da9a85f",
+        "name": "Street 21",
+        "assetId": "imported-4",
+        "fromNodeId": "n-9f60b55b",
+        "toNodeId": "n-62805684",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.53639779212857,
+            39.104043190572604
+          ],
+          [
+            -84.53510280660512,
+            39.103905756380755
+          ],
+          [
+            -84.53290262026913,
+            39.1036310302498
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-7f4a773b",
+        "name": "Street 22",
+        "assetId": "imported-7",
+        "fromNodeId": "n-b6de14d4",
+        "toNodeId": "n-a4cfa7fe",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.53290262026913,
+            39.1036310302498
+          ],
+          [
+            -84.53202530386604,
+            39.10350579935658
+          ],
+          [
+            -84.53106162310168,
+            39.103381161945634
+          ],
+          [
+            -84.5296541789722,
+            39.103255331822254
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-b36e20e7",
+        "name": "Street 22",
+        "assetId": "imported-7",
+        "fromNodeId": "n-a4cfa7fe",
+        "toNodeId": "n-9b36fc83",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.5296541789722,
+            39.103255331822254
+          ],
+          [
+            -84.52809328308638,
+            39.10313529685279
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-3a0b4c39",
+        "name": "Street 22",
+        "assetId": "imported-7",
+        "fromNodeId": "n-9b36fc83",
+        "toNodeId": "n-d8ef1718",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52809328308638,
+            39.10313529685279
+          ],
+          [
+            -84.52739522224873,
+            39.103051031828414
+          ],
+          [
+            -84.52606220018268,
+            39.10273235345506
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-66d588a8",
+        "name": "Street 22",
+        "assetId": "imported-7",
+        "fromNodeId": "n-d8ef1718",
+        "toNodeId": "n-875aa793",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52606220018268,
+            39.10273235345506
+          ],
+          [
+            -84.52563598752096,
+            39.10263507466706
+          ],
+          [
+            -84.52480741152984,
+            39.10251068144771
+          ],
+          [
+            -84.52400984995315,
+            39.102442187920616
+          ],
+          [
+            -84.52288324854617,
+            39.102425356448094
+          ],
+          [
+            -84.52185931895833,
+            39.102494683018705
+          ],
+          [
+            -84.51997826597358,
+            39.102730112809496
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-078a0289",
+        "name": "Street 22",
+        "assetId": "imported-7",
+        "fromNodeId": "n-875aa793",
+        "toNodeId": "n-75e75d4c",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52040689250875,
+            39.104421260318475
+          ],
+          [
+            -84.52094688600148,
+            39.104285398999025
+          ],
+          [
+            -84.52141731106113,
+            39.104134511716836
+          ],
+          [
+            -84.52179365110842,
+            39.104039598583256
+          ],
+          [
+            -84.52250869719919,
+            39.103908180187716
+          ],
+          [
+            -84.52461311256396,
+            39.10357963313635
+          ],
+          [
+            -84.52599738406639,
+            39.10337478412058
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-d6a84629",
+        "name": "Street 23",
+        "assetId": "imported-7",
+        "fromNodeId": "n-2c3e6f47",
+        "toNodeId": "n-3792065e",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52599738406639,
+            39.10337478412058
+          ],
+          [
+            -84.52649809222274,
+            39.103313108842514
+          ],
+          [
+            -84.52718106301222,
+            39.10326409221338
+          ],
+          [
+            -84.52808234452407,
+            39.103290211466664
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-3cea4211",
+        "name": "Street 23",
+        "assetId": "imported-7",
+        "fromNodeId": "n-3792065e",
+        "toNodeId": "n-f48fd09b",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52808234452407,
+            39.103290211466664
+          ],
+          [
+            -84.52958438442272,
+            39.10341781554073
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-c72abc9f",
+        "name": "Street 23",
+        "assetId": "imported-7",
+        "fromNodeId": "n-f48fd09b",
+        "toNodeId": "n-a5f9968f",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52958438442272,
+            39.10341781554073
+          ],
+          [
+            -84.53042223505184,
+            39.1034907938425
+          ],
+          [
+            -84.53111345790076,
+            39.10356610770222
+          ],
+          [
+            -84.53287339853324,
+            39.10379095172456
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-d6966cb1",
+        "name": "Street 23",
+        "assetId": "imported-7",
+        "fromNodeId": "n-a5f9968f",
+        "toNodeId": "n-927f2bf0",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.53287339853324,
+            39.10379095172456
+          ],
+          [
+            -84.53637539597608,
+            39.10420129653965
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-cba07e71",
+        "name": "Street 23",
+        "assetId": "imported-7",
+        "fromNodeId": "n-927f2bf0",
+        "toNodeId": "n-73d82b52",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.5278878427416,
+            39.10785183906731
+          ],
+          [
+            -84.52830605235408,
+            39.10567509266181
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-1888d71e",
+        "name": "Street 24",
+        "assetId": "imported-8",
+        "fromNodeId": "n-4e0daba1",
+        "toNodeId": "n-24da422e",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52830605235408,
+            39.10567509266181
+          ],
+          [
+            -84.52838196535153,
+            39.105400186415096
+          ],
+          [
+            -84.52852670833846,
+            39.104974148791314
+          ],
+          [
+            -84.52852670833846,
+            39.10473401735979
+          ],
+          [
+            -84.52843493737518,
+            39.10448334240675
+          ],
+          [
+            -84.52829250491335,
+            39.10429696300881
+          ],
+          [
+            -84.52815532648926,
+            39.10407827318349
+          ],
+          [
+            -84.52806438688458,
+            39.10386723947835
+          ],
+          [
+            -84.52808234452407,
+            39.103290211466664
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-348b6af8",
+        "name": "Street 24",
+        "assetId": "imported-8",
+        "fromNodeId": "n-24da422e",
+        "toNodeId": "n-f48fd09b",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52808234452407,
+            39.103290211466664
+          ],
+          [
+            -84.52809328308638,
+            39.10313529685279
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-531354ba",
+        "name": "Street 24",
+        "assetId": "imported-8",
+        "fromNodeId": "n-f48fd09b",
+        "toNodeId": "n-d8ef1718",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52809328308638,
+            39.10313529685279
+          ],
+          [
+            -84.52814120645976,
+            39.10245659423455
+          ],
+          [
+            -84.52829075786309,
+            39.10111735699246
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-f04be20a",
+        "name": "Street 24",
+        "assetId": "imported-8",
+        "fromNodeId": "n-d8ef1718",
+        "toNodeId": "n-98e7f200",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52990861754566,
+            39.09865279463352
+          ],
+          [
+            -84.5301338930547,
+            39.09936607537449
+          ],
+          [
+            -84.53031252920194,
+            39.099939081951106
+          ],
+          [
+            -84.53026927849005,
+            39.10129767768212
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-38d80fe9",
+        "name": "Street 25",
+        "assetId": "imported-8",
+        "fromNodeId": "n-7c27167b",
+        "toNodeId": "n-0fc06f6c",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.53026927849005,
+            39.10129767768212
+          ],
+          [
+            -84.53019343843698,
+            39.10170428261634
+          ],
+          [
+            -84.52999084166905,
+            39.10241611663838
+          ],
+          [
+            -84.5296541789722,
+            39.103255331822254
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-4a77002e",
+        "name": "Street 25",
+        "assetId": "imported-8",
+        "fromNodeId": "n-0fc06f6c",
+        "toNodeId": "n-9b36fc83",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.5296541789722,
+            39.103255331822254
+          ],
+          [
+            -84.52958438442272,
+            39.10341781554073
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-a18d41f2",
+        "name": "Street 25",
+        "assetId": "imported-8",
+        "fromNodeId": "n-9b36fc83",
+        "toNodeId": "n-a5f9968f",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52958438442272,
+            39.10341781554073
+          ],
+          [
+            -84.52947875138017,
+            39.10366373230181
+          ],
+          [
+            -84.52932840270005,
+            39.104124580840704
+          ],
+          [
+            -84.52930011523331,
+            39.10447698099418
+          ],
+          [
+            -84.5293596606156,
+            39.104985256662644
+          ],
+          [
+            -84.52984356926815,
+            39.10583665380848
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-9a442127",
+        "name": "Street 25",
+        "assetId": "imported-8",
+        "fromNodeId": "n-a5f9968f",
+        "toNodeId": "n-08c021ad",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.52984356926815,
+            39.10583665380848
+          ],
+          [
+            -84.53012475357808,
+            39.10619103698724
+          ],
+          [
+            -84.53052132833264,
+            39.106749636757144
+          ],
+          [
+            -84.53077102355014,
+            39.107399287989864
+          ],
+          [
+            -84.53088843374732,
+            39.107855511853074
+          ],
+          [
+            -84.53098989656263,
+            39.108440453619465
+          ],
+          [
+            -84.53095298833647,
+            39.10955577663095
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-cf18f57a",
+        "name": "Street 25",
+        "assetId": "imported-8",
+        "fromNodeId": "n-08c021ad",
+        "toNodeId": "n-e7f25652",
+        "curve": {
+          "mode": "smooth",
+          "radiusMeters": 12
+        },
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.53102176537774,
+            39.10956106257453
+          ],
+          [
+            -84.53095298833647,
+            39.10955577663095
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-5b57f38d",
+        "name": "Street 26",
+        "assetId": "imported-5",
+        "fromNodeId": "n-cfe927f3",
+        "toNodeId": "n-e7f25652",
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -84.53095298833647,
+            39.10955577663095
+          ],
+          [
+            -84.527712559479,
+            39.10930672950997
+          ],
+          [
+            -84.52344246922902,
+            39.109009382034714
+          ]
+        ]
+      },
+      "properties": {
+        "streetcity": "segment",
+        "id": "s-17d1c6c3",
+        "name": "Street 26",
+        "assetId": "imported-5",
+        "fromNodeId": "n-e7f25652",
+        "toNodeId": "n-632c32c0",
+        "visible": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
         "type": "Polygon",
         "coordinates": [
           [
             [
-              -84.5191079,
-              39.0985162
+              -84.5190062465687,
+              39.098429334969154
             ],
             [
-              -84.519889,
-              39.0988056
+              -84.51879463460459,
+              39.097555648615185
             ],
             [
-              -84.5206761,
-              39.0988791
+              -84.51847282533866,
+              39.096329604366446
             ],
             [
-              -84.5216289,
-              39.0987321
+              -84.51952601930029,
+              39.09619337591124
             ],
             [
-              -84.5221793,
-              39.0983279
+              -84.52132522565145,
+              39.09588686092604
             ],
             [
-              -84.5224752,
-              39.0978916
+              -84.52271485657288,
+              39.096817754167375
             ],
             [
               -84.5227237,
@@ -1406,60 +5743,60 @@
               39.1006996
             ],
             [
-              -84.5302213,
-              39.1007704
+              -84.5305048215374,
+              39.10088189059141
             ],
             [
-              -84.5300754,
-              39.1011382
+              -84.53046753413844,
+              39.101089267749074
             ],
             [
-              -84.5300101,
-              39.1014127
+              -84.53044885374209,
+              39.10142690901529
             ],
             [
-              -84.5293043,
-              39.1013235
+              -84.5294358877146,
+              39.10130631173914
             ],
             [
-              -84.5284261,
-              39.1012853
+              -84.52836698227568,
+              39.10121468032932
             ],
             [
-              -84.5276054,
-              39.1013172
+              -84.52830482829799,
+              39.10174038345471
             ],
             [
-              -84.526678,
-              39.1014382
+              -84.52827379216508,
+              39.10221782646357
             ],
             [
-              -84.5267188,
-              39.102329
+              -84.5282365047657,
+              39.102434844942735
             ],
             [
-              -84.5268758,
-              39.1026078
+              -84.5282365047657,
+              39.10267597580244
             ],
             [
-              -84.5273162,
-              39.1028985
+              -84.52821786106645,
+              39.10286887989676
             ],
             [
-              -84.5276711,
-              39.1030056
+              -84.52821786106645,
+              39.103032847961686
             ],
             [
-              -84.5281325,
-              39.1031348
+              -84.52820543193344,
+              39.103245041362186
             ],
             [
-              -84.5282767,
-              39.1035948
+              -84.52819300280046,
+              39.10360673318519
             ],
             [
-              -84.5283087,
-              39.1038869
+              -84.52821164649973,
+              39.10377552206825
             ],
             [
               -84.5290376,
@@ -1478,8 +5815,8 @@
               39.1058189
             ],
             [
-              -84.5328114,
-              39.1065037
+              -84.53282689741559,
+              39.10640298067173
             ],
             [
               -84.5319739,
@@ -1534,16 +5871,16 @@
               39.1065682
             ],
             [
-              -84.5294066,
-              39.1057643
+              -84.5297419765184,
+              39.105922596730636
             ],
             [
-              -84.5289556,
-              39.1054332
+              -84.52800306171468,
+              39.10577774946836
             ],
             [
-              -84.527951,
-              39.1048889
+              -84.52835673930193,
+              39.105084003190655
             ],
             [
               -84.5267159,
@@ -1590,49 +5927,49 @@
               39.101797
             ],
             [
-              -84.5200067,
-              39.1017522
+              -84.51989935966651,
+              39.101758297446054
             ],
             [
-              -84.5195646,
-              39.1001518
+              -84.51945956912304,
+              39.100141092400236
             ],
             [
-              -84.5191079,
-              39.0985162
+              -84.5190062465687,
+              39.098429334969154
             ]
           ]
         ]
       },
       "properties": {
         "streetcity": "area",
-        "id": "area-b0d38c95",
+        "id": "area-7ec869dd",
         "name": "Grass 1",
         "assetId": "builtin-area-grass",
         "ring": [
           [
-            -84.5191079,
-            39.0985162
+            -84.5190062465687,
+            39.098429334969154
           ],
           [
-            -84.519889,
-            39.0988056
+            -84.51879463460459,
+            39.097555648615185
           ],
           [
-            -84.5206761,
-            39.0988791
+            -84.51847282533866,
+            39.096329604366446
           ],
           [
-            -84.5216289,
-            39.0987321
+            -84.51952601930029,
+            39.09619337591124
           ],
           [
-            -84.5221793,
-            39.0983279
+            -84.52132522565145,
+            39.09588686092604
           ],
           [
-            -84.5224752,
-            39.0978916
+            -84.52271485657288,
+            39.096817754167375
           ],
           [
             -84.5227237,
@@ -1795,60 +6132,60 @@
             39.1006996
           ],
           [
-            -84.5302213,
-            39.1007704
+            -84.5305048215374,
+            39.10088189059141
           ],
           [
-            -84.5300754,
-            39.1011382
+            -84.53046753413844,
+            39.101089267749074
           ],
           [
-            -84.5300101,
-            39.1014127
+            -84.53044885374209,
+            39.10142690901529
           ],
           [
-            -84.5293043,
-            39.1013235
+            -84.5294358877146,
+            39.10130631173914
           ],
           [
-            -84.5284261,
-            39.1012853
+            -84.52836698227568,
+            39.10121468032932
           ],
           [
-            -84.5276054,
-            39.1013172
+            -84.52830482829799,
+            39.10174038345471
           ],
           [
-            -84.526678,
-            39.1014382
+            -84.52827379216508,
+            39.10221782646357
           ],
           [
-            -84.5267188,
-            39.102329
+            -84.5282365047657,
+            39.102434844942735
           ],
           [
-            -84.5268758,
-            39.1026078
+            -84.5282365047657,
+            39.10267597580244
           ],
           [
-            -84.5273162,
-            39.1028985
+            -84.52821786106645,
+            39.10286887989676
           ],
           [
-            -84.5276711,
-            39.1030056
+            -84.52821786106645,
+            39.103032847961686
           ],
           [
-            -84.5281325,
-            39.1031348
+            -84.52820543193344,
+            39.103245041362186
           ],
           [
-            -84.5282767,
-            39.1035948
+            -84.52819300280046,
+            39.10360673318519
           ],
           [
-            -84.5283087,
-            39.1038869
+            -84.52821164649973,
+            39.10377552206825
           ],
           [
             -84.5290376,
@@ -1867,8 +6204,8 @@
             39.1058189
           ],
           [
-            -84.5328114,
-            39.1065037
+            -84.53282689741559,
+            39.10640298067173
           ],
           [
             -84.5319739,
@@ -1923,16 +6260,16 @@
             39.1065682
           ],
           [
-            -84.5294066,
-            39.1057643
+            -84.5297419765184,
+            39.105922596730636
           ],
           [
-            -84.5289556,
-            39.1054332
+            -84.52800306171468,
+            39.10577774946836
           ],
           [
-            -84.527951,
-            39.1048889
+            -84.52835673930193,
+            39.105084003190655
           ],
           [
             -84.5267159,
@@ -1979,12 +6316,12 @@
             39.101797
           ],
           [
-            -84.5200067,
-            39.1017522
+            -84.51989935966651,
+            39.101758297446054
           ],
           [
-            -84.5195646,
-            39.1001518
+            -84.51945956912304,
+            39.100141092400236
           ]
         ],
         "visible": true
@@ -1994,7 +6331,7 @@
   "streetcity": {
     "version": 2,
     "name": "I-75 alternative",
-    "editor": "0.8.0",
+    "editor": "0.9.0",
     "assets": [
       {
         "id": "builtin-area-grass",
@@ -2014,91 +6351,91 @@
             "componentType": "soundWall",
             "widthMeters": 0.6,
             "direction": "none",
-            "id": "c-2a3c18e7"
+            "id": "c-d1abaedb"
           },
           {
             "componentType": "shoulder",
             "widthMeters": 3,
             "direction": "none",
-            "id": "c-3b7238af"
+            "id": "c-a548e3c9"
           },
           {
             "componentType": "freewayLane",
             "widthMeters": 3.65,
             "direction": "backward",
-            "id": "c-e3ae34d9"
+            "id": "c-d3124c2b"
           },
           {
             "componentType": "freewayLane",
             "widthMeters": 3.65,
             "direction": "backward",
-            "id": "c-9e97af9b"
+            "id": "c-4cecc972"
           },
           {
             "componentType": "freewayLane",
             "widthMeters": 3.65,
             "direction": "backward",
-            "id": "c-200eb7b0"
+            "id": "c-9cf95281"
           },
           {
             "componentType": "freewayLane",
             "widthMeters": 3.65,
             "direction": "backward",
-            "id": "c-11184152"
+            "id": "c-59f72839"
           },
           {
             "componentType": "shoulderInner",
             "widthMeters": 1.22,
             "direction": "none",
-            "id": "c-4644ccf4"
+            "id": "c-1e1fe28f"
           },
           {
             "componentType": "barrier",
             "widthMeters": 0.6,
             "direction": "none",
-            "id": "c-817b32b6"
+            "id": "c-cb12a6f8"
           },
           {
             "componentType": "shoulderInner",
             "widthMeters": 1.22,
             "direction": "none",
-            "id": "c-c7733987"
+            "id": "c-310993a0"
           },
           {
             "componentType": "freewayLane",
             "widthMeters": 3.65,
             "direction": "forward",
-            "id": "c-cded4c55"
+            "id": "c-c90acb43"
           },
           {
             "componentType": "freewayLane",
             "widthMeters": 3.65,
             "direction": "forward",
-            "id": "c-ea9e1212"
+            "id": "c-e39c8550"
           },
           {
             "componentType": "freewayLane",
             "widthMeters": 3.65,
             "direction": "forward",
-            "id": "c-387f88a7"
+            "id": "c-2ea59f9e"
           },
           {
             "componentType": "freewayLane",
             "widthMeters": 3.65,
             "direction": "forward",
-            "id": "c-dd8413f0"
+            "id": "c-7f73bdec"
           },
           {
             "componentType": "shoulder",
             "widthMeters": 3,
             "direction": "none",
-            "id": "c-fc0e27a1"
+            "id": "c-3e0067a3"
           },
           {
             "componentType": "soundWall",
             "widthMeters": 0.6,
             "direction": "none",
-            "id": "c-f2b477ea"
+            "id": "c-dc7a1dcf"
           }
         ],
         "anchorOffsetMeters": null
@@ -2113,37 +6450,295 @@
             "componentType": "guardrail",
             "widthMeters": 0.45,
             "direction": "none",
-            "id": "c-6825c87e"
+            "id": "c-d3d8230a"
           },
           {
             "componentType": "shoulder",
             "widthMeters": 1.2,
             "direction": "none",
-            "id": "c-dbeba770"
+            "id": "c-4d555a5a"
           },
           {
             "componentType": "rampLane",
             "widthMeters": 4.3,
             "direction": "forward",
-            "id": "c-af17d49d"
+            "id": "c-0b84edbe"
           },
           {
             "componentType": "rampLane",
             "widthMeters": 4.3,
             "direction": "forward",
-            "id": "c-86e9ae2b"
+            "id": "c-9002ea2a"
           },
           {
             "componentType": "shoulder",
             "widthMeters": 2.4,
             "direction": "none",
-            "id": "c-2fda8e21"
+            "id": "c-f93b850e"
           },
           {
             "componentType": "guardrail",
             "widthMeters": 0.45,
             "direction": "none",
-            "id": "c-f4c96b60"
+            "id": "c-4c78581f"
+          }
+        ],
+        "anchorOffsetMeters": null
+      },
+      {
+        "id": "imported-3",
+        "name": "Street 13",
+        "kind": "line",
+        "family": "street",
+        "components": [
+          {
+            "componentType": "sidewalk",
+            "widthMeters": 3,
+            "direction": "none",
+            "id": "c-594bdbf9"
+          },
+          {
+            "componentType": "travelLane",
+            "widthMeters": 3.35,
+            "direction": "backward",
+            "id": "c-e1efdaec"
+          },
+          {
+            "componentType": "travelLane",
+            "widthMeters": 3.35,
+            "direction": "backward",
+            "id": "c-d5f4c879"
+          },
+          {
+            "componentType": "turnLane",
+            "widthMeters": 3.35,
+            "direction": "both",
+            "id": "c-eca22884"
+          },
+          {
+            "componentType": "travelLane",
+            "widthMeters": 3.35,
+            "direction": "forward",
+            "id": "c-00568188"
+          },
+          {
+            "componentType": "travelLane",
+            "widthMeters": 3.35,
+            "direction": "forward",
+            "id": "c-b90f0b9f"
+          },
+          {
+            "componentType": "sidewalk",
+            "widthMeters": 3,
+            "direction": "none",
+            "id": "c-a2168378"
+          }
+        ],
+        "anchorOffsetMeters": null
+      },
+      {
+        "id": "imported-4",
+        "name": "Street 14",
+        "kind": "line",
+        "family": "street",
+        "components": [
+          {
+            "componentType": "sidewalk",
+            "widthMeters": 3,
+            "direction": "none",
+            "id": "c-12da23df"
+          },
+          {
+            "componentType": "travelLane",
+            "widthMeters": 3.35,
+            "direction": "backward",
+            "id": "c-a9783f27"
+          },
+          {
+            "componentType": "travelLane",
+            "widthMeters": 3.35,
+            "direction": "backward",
+            "id": "c-d7cdeef9"
+          },
+          {
+            "componentType": "travelLane",
+            "widthMeters": 3.35,
+            "direction": "forward",
+            "id": "c-1af60550"
+          },
+          {
+            "componentType": "travelLane",
+            "widthMeters": 3.35,
+            "direction": "forward",
+            "id": "c-b627a77f"
+          },
+          {
+            "componentType": "sidewalk",
+            "widthMeters": 3,
+            "direction": "none",
+            "id": "c-bae230d7"
+          }
+        ],
+        "anchorOffsetMeters": null
+      },
+      {
+        "id": "imported-5",
+        "name": "Street 16",
+        "kind": "line",
+        "family": "street",
+        "components": [
+          {
+            "componentType": "sidewalk",
+            "widthMeters": 3,
+            "direction": "none",
+            "id": "c-128d1f8c"
+          },
+          {
+            "componentType": "travelLane",
+            "widthMeters": 3.35,
+            "direction": "backward",
+            "id": "c-7c511a56"
+          },
+          {
+            "componentType": "travelLane",
+            "widthMeters": 3.35,
+            "direction": "backward",
+            "id": "c-52ef095c"
+          },
+          {
+            "componentType": "median",
+            "widthMeters": 2.4,
+            "direction": "none",
+            "id": "c-17a98243"
+          },
+          {
+            "componentType": "travelLane",
+            "widthMeters": 3.35,
+            "direction": "forward",
+            "id": "c-9aa53682"
+          },
+          {
+            "componentType": "travelLane",
+            "widthMeters": 3.35,
+            "direction": "forward",
+            "id": "c-409fe6fd"
+          },
+          {
+            "componentType": "sidewalk",
+            "widthMeters": 3,
+            "direction": "none",
+            "id": "c-e2729b2c"
+          }
+        ],
+        "anchorOffsetMeters": null
+      },
+      {
+        "id": "imported-6",
+        "name": "Street 19",
+        "kind": "line",
+        "family": "street",
+        "components": [
+          {
+            "componentType": "sidewalk",
+            "widthMeters": 3,
+            "direction": "none",
+            "id": "c-8238929f"
+          },
+          {
+            "componentType": "travelLane",
+            "widthMeters": 3.35,
+            "direction": "backward",
+            "id": "c-d0f9709c"
+          },
+          {
+            "componentType": "travelLane",
+            "widthMeters": 3.35,
+            "direction": "forward",
+            "id": "c-7e5b5ff4"
+          },
+          {
+            "componentType": "sidewalk",
+            "widthMeters": 3,
+            "direction": "none",
+            "id": "c-1fced3a8"
+          }
+        ],
+        "anchorOffsetMeters": null
+      },
+      {
+        "id": "imported-7",
+        "name": "Street 22",
+        "kind": "line",
+        "family": "street",
+        "components": [
+          {
+            "componentType": "sidewalk",
+            "widthMeters": 3,
+            "direction": "none",
+            "id": "c-5f6cb29f"
+          },
+          {
+            "componentType": "bikeLaneProtected",
+            "widthMeters": 3,
+            "direction": "backward",
+            "id": "c-b723eff6"
+          },
+          {
+            "componentType": "travelLane",
+            "widthMeters": 3,
+            "direction": "forward",
+            "id": "c-371cce25"
+          },
+          {
+            "componentType": "travelLane",
+            "widthMeters": 3,
+            "direction": "forward",
+            "id": "c-501a56f5"
+          },
+          {
+            "componentType": "sidewalk",
+            "widthMeters": 3,
+            "direction": "none",
+            "id": "c-f518c033"
+          }
+        ],
+        "anchorOffsetMeters": null
+      },
+      {
+        "id": "imported-8",
+        "name": "Street 24",
+        "kind": "line",
+        "family": "street",
+        "components": [
+          {
+            "componentType": "sidewalk",
+            "widthMeters": 3,
+            "direction": "none",
+            "id": "c-8537b54b"
+          },
+          {
+            "componentType": "travelLane",
+            "widthMeters": 3.35,
+            "direction": "backward",
+            "id": "c-6c4f4285"
+          },
+          {
+            "componentType": "turnLane",
+            "widthMeters": 3.35,
+            "direction": "both",
+            "id": "c-64764813"
+          },
+          {
+            "componentType": "travelLane",
+            "widthMeters": 3.35,
+            "direction": "forward",
+            "id": "c-0c3eec67"
+          },
+          {
+            "componentType": "sidewalk",
+            "widthMeters": 3,
+            "direction": "none",
+            "id": "c-4257e355"
           }
         ],
         "anchorOffsetMeters": null
