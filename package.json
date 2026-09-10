@@ -1,7 +1,7 @@
 {
   "name": "geostripe",
   "private": true,
-  "version": "0.9.0",
+  "version": "0.10.0",
   "type": "module",
   "description": "A free, browser-based editor for sketching street and intersection redesigns as real vector data (GeoJSON) on top of satellite imagery.",
   "license": "MIT",

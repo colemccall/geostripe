@@ -299,6 +299,65 @@ describe('grade separation', () => {
   });
 });
 
+describe('bridge shadows', () => {
+  it('casts nothing when everything is on the ground', () => {
+    const { doc, assets } = twoRoads();
+    const sources = paintDoc(doc, assets, { defaultRadiusMeters: 6 });
+    expect(sources.shadows.features).toHaveLength(0);
+  });
+
+  it('casts a flat shadow under a road raised at both ends', () => {
+    const { doc, assets } = twoRoads();
+    const segment = doc.segments[0]!;
+    let raised = setElevation(doc, segment.fromNodeId, 1);
+    raised = setElevation(raised, segment.toNodeId, 1);
+
+    const shadow = paintDoc(raised, assets, { defaultRadiusMeters: 6 }).shadows.features.find(
+      (f) => f.properties!.segmentId === segment.id,
+    )!;
+
+    expect(shadow.properties!.ramp).toBe(0);
+    expect(shadow.properties!.deck).toBe(1);
+  });
+
+  it('marks a road as a ramp when its two ends differ', () => {
+    const { doc, assets } = twoRoads();
+    const segment = doc.segments[0]!;
+    const raised = setElevation(doc, segment.toNodeId, 1);
+
+    const shadow = paintDoc(raised, assets, { defaultRadiusMeters: 6 }).shadows.features.find(
+      (f) => f.properties!.segmentId === segment.id,
+    )!;
+
+    expect(shadow.properties!.ramp).toBe(1);
+  });
+
+  it('emits a ramp low end first, because the fade cannot be reversed per feature', () => {
+    const { doc, assets } = twoRoads();
+    const segment = doc.segments[0]!;
+    const nodes = new Map(doc.nodes.map((n) => [n.id, n.position]));
+
+    // Raise the START, so the road runs downhill and the geometry must come back flipped.
+    const raised = setElevation(doc, segment.fromNodeId, 1);
+    const shadow = paintDoc(raised, assets, { defaultRadiusMeters: 6 }).shadows.features.find(
+      (f) => f.properties!.segmentId === segment.id,
+    )!;
+
+    // line-gradient runs from the start of the line, so the first coordinate has to be the
+    // end that is on the ground.
+    expect(shadow.geometry.coordinates[0]).toEqual(nodes.get(segment.toNodeId));
+  });
+
+  it('casts nothing for a tunnel, which has no ground to fall on', () => {
+    const { doc, assets } = twoRoads();
+    const segment = doc.segments[0]!;
+    let sunk = setElevation(doc, segment.fromNodeId, -1);
+    sunk = setElevation(sunk, segment.toNodeId, -1);
+
+    expect(paintDoc(sunk, assets, { defaultRadiusMeters: 6 }).shadows.features).toHaveLength(0);
+  });
+});
+
 describe('decks', () => {
   it('files every level onto one of three decks', () => {
     expect(deckOf(undefined)).toBe(0);

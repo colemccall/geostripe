@@ -27,6 +27,7 @@ function styleWith(layers: unknown[]) {
       bands: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
       stripes: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
       stamps: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
+      shadows: { type: 'geojson', lineMetrics: true, data: { type: 'FeatureCollection', features: [] } },
       preview: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
       snap: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
       plates: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
@@ -44,7 +45,7 @@ describe('the design style is one MapLibre will accept', () => {
   });
 
   it('names every source it draws from', () => {
-    const sources = new Set(['areas', 'bands', 'stripes', 'stamps', 'plates', 'preview', 'guides', 'handles', 'snap']);
+    const sources = new Set(['areas', 'bands', 'stripes', 'stamps', 'shadows', 'plates', 'preview', 'guides', 'handles', 'snap']);
     for (const layer of designLayers(LAT)) {
       if ('source' in layer) expect(sources.has(layer.source as string)).toBe(true);
     }
@@ -93,6 +94,20 @@ describe('the design style is one MapLibre will accept', () => {
     expect(ids.indexOf('snap-guide')).toBeLessThan(ids.indexOf('snap-ring'));
     // Handles sit just under it: a node has to stay grabbable through everything built.
     expect(ids.indexOf('handle-point')).toBeGreaterThan(ids.indexOf('plate-1'));
+  });
+
+  it('drops a raised road’s shadow before the road itself, and after the ground below', () => {
+    const ids = designLayers(LAT).map((l) => l.id);
+    // The shadow has to land on what is underneath and be covered by what casts it.
+    expect(ids.indexOf('shadow-flat-1')).toBeGreaterThan(ids.indexOf('plate-0'));
+    expect(ids.indexOf('shadow-flat-1')).toBeLessThan(ids.indexOf('band-1'));
+    expect(ids.indexOf('shadow-ramp-1')).toBeLessThan(ids.indexOf('band-1'));
+  });
+
+  it('casts no shadow at or below ground, where there is nothing to cast one onto', () => {
+    const ids = designLayers(LAT).map((l) => l.id);
+    expect(ids).not.toContain('shadow-flat-0');
+    expect(ids).not.toContain('shadow-flat--1');
   });
 
   it('draws the road under construction over the design but under the handles', () => {

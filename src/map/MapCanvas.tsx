@@ -104,10 +104,20 @@ const SOURCE_KEYS: (keyof PaintSources)[] = [
   'bands',
   'stripes',
   'stamps',
+  'shadows',
   'plates',
   'guides',
   'handles',
 ];
+
+/**
+ * Sources that need MapLibre to measure distance along the line.
+ *
+ * `line-gradient` is expressed against `line-progress`, and MapLibre only computes that when
+ * the source asks for it. Without this the ramp shadow silently renders as nothing — the
+ * layer is valid, so neither the style validator nor the console has anything to say.
+ */
+const LINE_METRICS_SOURCES: ReadonlySet<string> = new Set(['shadows']);
 
 /** The rubber band: what the road under construction would look like if you clicked now. */
 const DRAFT_SOURCE = 'draft';
@@ -142,7 +152,11 @@ function addDesign(map: MapLibreMap, latDeg: number) {
 
   for (const id of [...SOURCE_KEYS, ...LIVE_SOURCES, DRAFT_SOURCE]) {
     if (!map.getSource(id)) {
-      map.addSource(id, { type: 'geojson', data: emptyFC() });
+      map.addSource(id, {
+        type: 'geojson',
+        data: emptyFC(),
+        lineMetrics: LINE_METRICS_SOURCES.has(id) || undefined,
+      });
     }
   }
 

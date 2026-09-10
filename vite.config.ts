@@ -18,7 +18,7 @@ import react from '@vitejs/plugin-react';
  * No absolute domain appears anywhere in this project, so pointing GeoStripe at a custom
  * domain later is a config change, never a code change.
  */
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ mode, command }) => {
   // '' as the third argument loads every var, not just the VITE_-prefixed ones.
   const env = loadEnv(mode, process.cwd(), '');
   const base = env.VITE_BASE || '/geostripe/';
@@ -61,7 +61,13 @@ export default defineConfig(({ mode }) => {
       // Full ISO, formatted for reading at the point of display. The timestamp is the part
       // that answers "is this newer than what I pushed" — a commit hash cannot be ordered
       // by eye, and that was the whole question the build stamp existed to settle.
-      __BUILT_AT__: JSON.stringify(new Date().toISOString()),
+      //
+      // Empty in dev, deliberately. This value is baked once when the config is evaluated,
+      // which for `vite dev` is when the SERVER started — so during a session it freezes
+      // while the code under it keeps hot-reloading, and the stamp ends up asserting a
+      // freshness it cannot know. An empty value makes version.ts fall back to when the page
+      // was loaded, which is a thing that is actually true.
+      __BUILT_AT__: JSON.stringify(command === 'serve' ? '' : new Date().toISOString()),
     },
     // MapLibre instantiates its worker with `{ type: 'module' }`, so the bundle it loads
     // has to actually be an ES module. Vite's default worker format is 'iife', which

@@ -47,6 +47,12 @@ them. Putting height on the road lets the document state a contradiction — one
 heights — and the only thing to do with a contradiction is suppress something. There used to
 be a rule for that. There is no longer anything for it to suppress.
 
+**A raised road throws a shadow.** A plan view has no way to show height: two roads crossing
+at different levels are drawn one over the other, and nothing says why one is on top. A
+shadow says it, with the one cue that works without perspective. A ramp's shadow fades in
+along its length, from nothing where it leaves the ground to full where it meets the deck —
+which is the only thing in the renderer that shows a road climbing.
+
 **A stretch of road that differs is a different road.** There is no mechanism for varying a
 cross-section along a street, because there does not need to be one: split the segment fifty
 metres back and give the stub an asset with a turn lane in it. That is how it is built in
@@ -275,7 +281,7 @@ the renderer:
 
 ## Testing
 
-634 tests. The ones worth knowing about:
+641 tests. The ones worth knowing about:
 
 - **`map/paint.test.ts`** — that a 3.6 m lane measures 3.6 m at every zoom, at 39°N and
   69°N. Widths are no longer computed into polygons; they are an expression MapLibre
@@ -337,15 +343,30 @@ Recorded because these are the calls that would otherwise be quietly re-litigate
 
 ---
 
+## Which build am I looking at?
+
+The header carries the version and a stamp, because "I cannot see my change" is
+indistinguishable from a failed deploy, a stale `index.html` in the browser cache, and a
+build that never ran — and GitHub Pages serves `index.html` with a ten-minute cache, so the
+middle one is common.
+
+In a production build the stamp is when the bundle was built. **In dev it is when the page
+was loaded**, and says `dev`. That distinction had to be made explicit: the build time is
+baked when Vite evaluates its config, which under `vite dev` is when the *server* started,
+so it froze while the code under it kept hot-reloading and spent whole sessions asserting a
+freshness it had no way to know.
+
+The version comes from `package.json` and nowhere else, so `npm version` moves the header,
+every exported project, and the reload notice together.
+
+---
+
 ## Known gaps
 
 Recorded so they are not rediscovered as bugs.
 
 - **Two stacked flyovers share a draw deck.** Heights are authored freely and clamped to
   under / at grade / over for drawing order, because MapLibre layers are created once.
-- **A ramp is drawn flat, on the deck of its higher end.** The model knows it climbs — its
-  two nodes differ — but the plan view has no way to show a slope, so it is drawn above what
-  it climbs from rather than fading between the two.
 - **A lane-spanning pavement symbol is rasterised at a 3.3 m reference width** and scaled,
   rather than rebuilt per lane.
 - **No taper where two different assets meet end to end.** The joint is a step, which is

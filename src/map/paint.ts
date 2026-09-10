@@ -70,6 +70,24 @@ const WORLD_PIXELS_AT_Z0 = 512;
 const MIN_ZOOM = 0;
 const MAX_ZOOM = 24;
 
+/**
+ * How far the shadow sits from the road, in screen pixels.
+ *
+ * Pixels rather than metres on purpose: it stands for height, and height is the one thing
+ * this projection does not have. A shadow that grew with zoom would look like a widening
+ * road; a constant few pixels reads as elevation at every scale.
+ */
+const SHADOW_DROP_PX = 4;
+
+/**
+ * How dark the shadow gets.
+ *
+ * Tuned by looking at it over real imagery rather than picked as a plausible number. At the
+ * first value the effect was technically present and practically invisible against a tan
+ * carriageway on green ground, which is the same as not having it.
+ */
+const SHADOW_OPACITY = 0.45;
+
 export function pixelsPerMetre(latDeg: number, zoom: number): number {
   const ground = EQUATOR_METRES * Math.cos((latDeg * Math.PI) / 180);
   return (WORLD_PIXELS_AT_Z0 * Math.pow(2, zoom)) / ground;
@@ -124,6 +142,8 @@ export interface PaintSources {
   stripes: FeatureCollection<LineString>;
   /** Pavement symbols: one point per placement, rotated to the road. */
   stamps: FeatureCollection<Point>;
+  /** What a raised road casts on the ground beneath it. */
+  shadows: FeatureCollection<LineString>;
   /** Junction plates, drawn over the road ends they cover. */
   plates: FeatureCollection<Polygon>;
   /** Parks, plazas, water — the ground under everything. */
@@ -328,6 +348,53 @@ function stripeFeatures(resolved: readonly Resolved[]): Feature<LineString>[] {
   return out.sort((a, b) => (a.properties!.deck as number) - (b.properties!.deck as number));
 }
 
+
+/**
+ * What a raised road throws on the ground under it.
+ *
+ * A plan view has no way to show height. Two roads crossing at different levels are drawn
+ * one over the other and that is all the information there is — which reads as a mess rather
+ * than as a flyover, because nothing says WHY one is on top. A shadow says it, using the one
+ * cue that works without perspective.
+ *
+ * A ramp gets a shadow that fades in along its length, from nothing where it leaves the
+ * ground to full where it arrives at the deck. That is the only thing in the whole renderer
+ * that shows a road climbing, and it costs one line: the model has always known the two ends
+ * differ, and the plan view finally says so.
+ *
+ * Ramp geometry is emitted low end first, because `line-gradient` runs from the start of the
+ * line and cannot be told to run the other way per feature.
+ */
+function shadowFeatures(
+  resolved: readonly Resolved[],
+  nodes: ReadonlyMap<string, { elevation?: number }>,
+): Feature<LineString>[] {
+  const out: Feature<LineString>[] = [];
+
+  for (const { segment, asset, line } of resolved) {
+    const from = nodes.get(segment.fromNodeId)?.elevation ?? 0;
+    const to = nodes.get(segment.toNodeId)?.elevation ?? 0;
+    if (from <= 0 && to <= 0) continue;
+
+    const extent = sectionExtent(asset);
+    const ramp = from !== to;
+    // Low end first, so the fade always runs from ground to deck.
+    const coordinates = ramp && from > to ? [...line].reverse() : line;
+
+    out.push({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates },
+      properties: {
+        segmentId: segment.id,
+        widthM: extent.left + extent.right,
+        ramp: ramp ? 1 : 0,
+        deck: deckOf(Math.max(from, to)),
+      },
+    });
+  }
+
+  return out;
+}
 
 /**
  * Pavement symbols along a band.
@@ -677,6 +744,10 @@ export function paintDoc(
     bands: { type: 'FeatureCollection', features: bandFeatures(resolved) },
     stripes: { type: 'FeatureCollection', features: stripeFeatures(resolved) },
     stamps: { type: 'FeatureCollection', features: stampFeatures(resolved) },
+    shadows: {
+      type: 'FeatureCollection',
+      features: shadowFeatures(resolved, nodeMap(doc)),
+    },
     plates: {
       type: 'FeatureCollection',
       features: plateFeatures(doc, resolved, plane, options.defaultRadiusMeters),
@@ -732,6 +803,7 @@ export const emptySources = (): PaintSources => ({
   bands: empty<LineString>(),
   stripes: empty<LineString>(),
   stamps: empty<Point>(),
+  shadows: empty<LineString>(),
   plates: empty<Polygon>(),
   areas: empty<Polygon>(),
   handles: empty<Point>(),
@@ -751,6 +823,11 @@ export const emptySources = (): PaintSources => ({
 export function designLayers(latDeg: number): LayerSpecification[] {
   const width = metresToPixels(latDeg, ['get', 'widthM'] as ExpressionSpecification);
   const offset = metresToPixels(latDeg, ['get', 'offsetM'] as ExpressionSpecification);
+  // A little wider than the road, so the shadow shows either side rather than hiding under it.
+  const shadowWidth = metresToPixels(
+    latDeg,
+    ['+', ['*', ['get', 'widthM'], 1.05], 1.5] as ExpressionSpecification,
+  );
   const layers: LayerSpecification[] = [];
 
   layers.push({
@@ -764,6 +841,50 @@ export function designLayers(latDeg: number): LayerSpecification[] {
   });
 
   for (const deck of DECKS) {
+    // Above ground, the road's shadow goes down first — under its own deck, over whatever
+    // is beneath. Without it a flyover and the road it crosses are just two roads drawn in
+    // an arbitrary order.
+    if (deck > 0) {
+      layers.push({
+        id: `shadow-flat-${deck}`,
+        type: 'line',
+        source: 'shadows',
+        filter: ['all', ['==', ['get', 'deck'], deck], ['==', ['get', 'ramp'], 0]],
+        layout: { 'line-cap': 'butt' },
+        paint: {
+          'line-color': '#0A0E10',
+          'line-width': shadowWidth,
+          'line-offset': SHADOW_DROP_PX,
+          'line-opacity': SHADOW_OPACITY,
+          'line-blur': 4,
+        },
+      });
+
+      layers.push({
+        id: `shadow-ramp-${deck}`,
+        type: 'line',
+        source: 'shadows',
+        filter: ['all', ['==', ['get', 'deck'], deck], ['==', ['get', 'ramp'], 1]],
+        layout: { 'line-cap': 'butt' },
+        paint: {
+          // Fades in along the road, from the ground end to the raised one. The geometry is
+          // emitted low end first so this always runs the right way round.
+          'line-gradient': [
+            'interpolate',
+            ['linear'],
+            ['line-progress'],
+            0,
+            'rgba(10,14,16,0)',
+            1,
+            `rgba(10,14,16,${SHADOW_OPACITY})`,
+          ],
+          'line-width': shadowWidth,
+          'line-offset': SHADOW_DROP_PX,
+          'line-blur': 4,
+        },
+      });
+    }
+
     layers.push({
       id: `band-${deck}`,
       type: 'line',
@@ -924,5 +1045,5 @@ export function designLayers(latDeg: number): LayerSpecification[] {
   return layers;
 }
 
-export const SOURCE_IDS = ['areas', 'bands', 'stripes', 'stamps', 'plates', 'preview', 'guides', 'handles', 'snap'] as const;
+export const SOURCE_IDS = ['areas', 'bands', 'stripes', 'stamps', 'shadows', 'plates', 'preview', 'guides', 'handles', 'snap'] as const;
 export type SourceId = (typeof SOURCE_IDS)[number];
