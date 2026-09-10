@@ -1,7 +1,7 @@
 import { useEditorStore } from '../store/useEditorStore';
 import { isLineAsset } from '../model/asset';
 import type { LineAsset } from '../model/asset';
-import { endsAt } from '../model/doc';
+import { endsAt, joinCandidate } from '../model/doc';
 import { totalWidth } from '../model/section';
 import { displayToMetres, formatWidth, metresToDisplay } from '../lib/units';
 import type { DisplayUnits } from '../lib/units';
@@ -29,10 +29,17 @@ interface Props {
   units: DisplayUnits;
 }
 
+/**
+ * What a height means, in words.
+ *
+ * On the junction rather than on the road, because that is where height lives now. Raising
+ * a junction lifts every road that meets it, and a road whose two ends differ is a ramp
+ * between them — which is the same thing a game does when you drag a road up onto a bridge.
+ */
 const LEVEL_LABELS: Record<number, string> = {
   [-2]: 'Deep tunnel',
   [-1]: 'Tunnel',
-  0: 'At grade',
+  0: 'Ground',
   1: 'Bridge',
   2: 'High bridge',
 };
@@ -74,21 +81,7 @@ export default function Inspector({ units }: Props) {
             </select>
           </label>
 
-          <label>
-            Level
-            <select
-              value={segment.level ?? 0}
-              onChange={(event) =>
-                store.setSegmentLevel(segment.id, Number(event.target.value))
-              }
-            >
-              {[-2, -1, 0, 1, 2].map((level) => (
-                <option key={level} value={level}>
-                  {LEVEL_LABELS[level]}
-                </option>
-              ))}
-            </select>
-          </label>
+          <RoadHeight segment={segment} />
 
           <div className="inspector-actions">
             <button type="button" onClick={() => store.reverseSegment(segment.id)}>
@@ -127,6 +120,20 @@ export default function Inspector({ units }: Props) {
           </label>
 
           <label>
+            Height
+            <select
+              value={node.elevation ?? 0}
+              onChange={(event) => store.setNodeElevation(node.id, Number(event.target.value))}
+            >
+              {[-2, -1, 0, 1, 2].map((level) => (
+                <option key={level} value={level}>
+                  {LEVEL_LABELS[level]}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label>
             Kerb radius
             <input
               type="number"
@@ -143,6 +150,8 @@ export default function Inspector({ units }: Props) {
             {endsAt(node.id, doc.segments).length} road(s) meet here.
             {node.radiusMeters === undefined && ' Radius comes from the roads that arrive.'}
           </p>
+
+          <LooseEnd nodeId={node.id} units={units} />
 
           <div className="inspector-actions">
             {node.radiusMeters !== undefined && (
@@ -254,6 +263,78 @@ export default function Inspector({ units }: Props) {
         </section>
       )}
     </div>
+  );
+}
+
+/**
+ * A road that stops next to another road, and the offer to join them.
+ *
+ * The old model did this silently, with a tolerance that scaled to the widest street
+ * involved, and called ends seventeen metres apart a junction. Offering the join instead of
+ * making it is the whole difference: the distance is stated, and somebody agrees to it.
+ *
+ * Dragging the node onto its neighbour does the same thing, and is quicker. This exists
+ * because a project converted from the old format can arrive with dozens of these, and
+ * hunting for them by dragging is not a way to spend an afternoon.
+ */
+function LooseEnd({ nodeId, units }: { nodeId: string; units: DisplayUnits }) {
+  const doc = useEditorStore((s) => s.doc);
+  const store = useEditorStore.getState();
+
+  const roads = endsAt(nodeId, doc.segments).length;
+  if (roads !== 1) return null;
+
+  const candidate = joinCandidate(doc, nodeId);
+  if (!candidate) return null;
+
+  return (
+    <div className="inspector-loose">
+      <p className="inspector-note">
+        This road stops {formatWidth(candidate.metres, units, { withUnit: true })} from
+        another end. Nothing is joined until you say so.
+      </p>
+      <button type="button" onClick={() => store.joinNodes(candidate.nodeId, nodeId)}>
+        Join them
+      </button>
+    </div>
+  );
+}
+
+/**
+ * What height a road runs at, which it no longer owns.
+ *
+ * Read-only on purpose: the answer comes from its two ends, and offering to set it here
+ * would be offering to make the document contradict itself. A road that climbs is one whose
+ * ends differ, and the way to make one is to raise the junction at one end.
+ */
+function RoadHeight({ segment }: { segment: { fromNodeId: string; toNodeId: string } }) {
+  const doc = useEditorStore((s) => s.doc);
+  const store = useEditorStore.getState();
+  const from = doc.nodes.find((n) => n.id === segment.fromNodeId);
+  const to = doc.nodes.find((n) => n.id === segment.toNodeId);
+  const a = from?.elevation ?? 0;
+  const b = to?.elevation ?? 0;
+
+  if (a === b) {
+    return (
+      <p className="inspector-note">
+        Runs at <b>{LEVEL_LABELS[a] ?? a}</b>. Height belongs to the junctions at either end —
+        select one to change it.
+      </p>
+    );
+  }
+
+  return (
+    <p className="inspector-note">
+      A ramp, from <b>{LEVEL_LABELS[a] ?? a}</b> to <b>{LEVEL_LABELS[b] ?? b}</b>.{' '}
+      <button
+        type="button"
+        className="link-btn"
+        onClick={() => from && store.selectNode(from.id)}
+      >
+        Select the low end
+      </button>
+    </p>
   );
 }
 

@@ -14,7 +14,7 @@ import { metresPerDegreeLat, metresPerDegreeLng } from '../geo/projection';
 import { LANDCOVERS } from '../library/landcover';
 import { PRIMITIVES } from '../library/primitives';
 import { boundaryOffsets, componentStarts, resolveAnchorOffset, sectionExtent } from '../model/section';
-import { endsAt, nodeMap, segmentControlPoints } from '../model/doc';
+import { endsAt, joinCandidate, nodeMap, segmentControlPoints, segmentElevation } from '../model/doc';
 import type { Doc, Node, Segment } from '../model/doc';
 import { isLineAsset } from '../model/asset';
 import type { Asset, LineAsset } from '../model/asset';
@@ -70,6 +70,24 @@ const WORLD_PIXELS_AT_Z0 = 512;
 const MIN_ZOOM = 0;
 const MAX_ZOOM = 24;
 
+/**
+ * How far the shadow sits from the road, in screen pixels.
+ *
+ * Pixels rather than metres on purpose: it stands for height, and height is the one thing
+ * this projection does not have. A shadow that grew with zoom would look like a widening
+ * road; a constant few pixels reads as elevation at every scale.
+ */
+const SHADOW_DROP_PX = 4;
+
+/**
+ * How dark the shadow gets.
+ *
+ * Tuned by looking at it over real imagery rather than picked as a plausible number. At the
+ * first value the effect was technically present and practically invisible against a tan
+ * carriageway on green ground, which is the same as not having it.
+ */
+const SHADOW_OPACITY = 0.45;
+
 export function pixelsPerMetre(latDeg: number, zoom: number): number {
   const ground = EQUATOR_METRES * Math.cos((latDeg * Math.PI) / 180);
   return (WORLD_PIXELS_AT_Z0 * Math.pow(2, zoom)) / ground;
@@ -124,6 +142,8 @@ export interface PaintSources {
   stripes: FeatureCollection<LineString>;
   /** Pavement symbols: one point per placement, rotated to the road. */
   stamps: FeatureCollection<Point>;
+  /** What a raised road casts on the ground beneath it. */
+  shadows: FeatureCollection<LineString>;
   /** Junction plates, drawn over the road ends they cover. */
   plates: FeatureCollection<Polygon>;
   /** Parks, plazas, water — the ground under everything. */
@@ -168,6 +188,8 @@ interface Resolved {
   segment: Segment;
   asset: LineAsset;
   line: LngLat[];
+  /** Taken from the segment's nodes, because height is a property of the place. */
+  elevation: number;
 }
 
 /** The line a segment is drawn along: its start node, its shape, its end node. */
@@ -188,7 +210,7 @@ function resolveSegments(doc: Doc, assets: ReadonlyMap<string, Asset>): Resolved
     );
     if (line.length < 2) continue;
 
-    out.push({ segment, asset, line });
+    out.push({ segment, asset, line, elevation: segmentElevation(segment, nodes) });
   }
 
   return out;
@@ -216,7 +238,7 @@ function bandOffsets(asset: LineAsset, reversed: boolean): { offset: number; wid
 function bandFeatures(resolved: readonly Resolved[]): Feature<LineString>[] {
   const out: Feature<LineString>[] = [];
 
-  for (const { segment, asset, line } of resolved) {
+  for (const { segment, asset, line, elevation } of resolved) {
     const geometry: LineString = { type: 'LineString', coordinates: line };
     const bands = bandOffsets(asset, segment.reversed === true);
 
@@ -234,7 +256,7 @@ function bandFeatures(resolved: readonly Resolved[]): Feature<LineString>[] {
           widthM: band.width,
           offsetM: band.offset,
           color: component.colorOverride ?? primitive.color,
-          deck: deckOf(segment.level),
+          deck: deckOf(elevation),
           // Raised bands last within a segment, so a kerb reads above the asphalt beside it.
           raised: primitive.isRaised ? 1 : 0,
         },
@@ -281,12 +303,12 @@ const DASHED: ReadonlySet<StripeStyle> = new Set<StripeStyle>([
 function stripeFeatures(resolved: readonly Resolved[]): Feature<LineString>[] {
   const out: Feature<LineString>[] = [];
 
-  for (const { segment, asset, line } of resolved) {
+  for (const { segment, asset, line, elevation } of resolved) {
     if (asset.components.length < 2) continue;
     const geometry: LineString = { type: 'LineString', coordinates: line };
     const offsets = boundaryOffsets(asset);
     const sign = segment.reversed === true ? -1 : 1;
-    const deck = deckOf(segment.level);
+    const deck = deckOf(elevation);
 
     for (let i = 1; i < asset.components.length; i++) {
       const before = asset.components[i - 1]!;
@@ -328,6 +350,53 @@ function stripeFeatures(resolved: readonly Resolved[]): Feature<LineString>[] {
 
 
 /**
+ * What a raised road throws on the ground under it.
+ *
+ * A plan view has no way to show height. Two roads crossing at different levels are drawn
+ * one over the other and that is all the information there is — which reads as a mess rather
+ * than as a flyover, because nothing says WHY one is on top. A shadow says it, using the one
+ * cue that works without perspective.
+ *
+ * A ramp gets a shadow that fades in along its length, from nothing where it leaves the
+ * ground to full where it arrives at the deck. That is the only thing in the whole renderer
+ * that shows a road climbing, and it costs one line: the model has always known the two ends
+ * differ, and the plan view finally says so.
+ *
+ * Ramp geometry is emitted low end first, because `line-gradient` runs from the start of the
+ * line and cannot be told to run the other way per feature.
+ */
+function shadowFeatures(
+  resolved: readonly Resolved[],
+  nodes: ReadonlyMap<string, { elevation?: number }>,
+): Feature<LineString>[] {
+  const out: Feature<LineString>[] = [];
+
+  for (const { segment, asset, line } of resolved) {
+    const from = nodes.get(segment.fromNodeId)?.elevation ?? 0;
+    const to = nodes.get(segment.toNodeId)?.elevation ?? 0;
+    if (from <= 0 && to <= 0) continue;
+
+    const extent = sectionExtent(asset);
+    const ramp = from !== to;
+    // Low end first, so the fade always runs from ground to deck.
+    const coordinates = ramp && from > to ? [...line].reverse() : line;
+
+    out.push({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates },
+      properties: {
+        segmentId: segment.id,
+        widthM: extent.left + extent.right,
+        ramp: ramp ? 1 : 0,
+        deck: deckOf(Math.max(from, to)),
+      },
+    });
+  }
+
+  return out;
+}
+
+/**
  * Pavement symbols along a band.
  *
  * One point per placement, carrying which symbol and which way it faces. The points are the
@@ -342,9 +411,9 @@ function stripeFeatures(resolved: readonly Resolved[]): Feature<LineString>[] {
 function stampFeatures(resolved: readonly Resolved[]): Feature<Point>[] {
   const out: Feature<Point>[] = [];
 
-  for (const { segment, asset, line } of resolved) {
+  for (const { segment, asset, line, elevation } of resolved) {
     const bands = bandOffsets(asset, segment.reversed === true);
-    const deck = deckOf(segment.level);
+    const deck = deckOf(elevation);
 
     asset.components.forEach((component, i) => {
       if (component.glyph === 'none') return;
@@ -447,6 +516,7 @@ function arrivalFor(
   resolved: Resolved,
   end: 'from' | 'to',
   plane: LocalPlane,
+  elevation: number,
 ): Arrival | null {
   const { segment, asset, line } = resolved;
   const outward = end === 'from' ? line : [...line].reverse();
@@ -476,7 +546,9 @@ function arrivalFor(
     halfRight: flip ? extent.left : extent.right,
     pavedLeft: flip ? paved.right : paved.left,
     pavedRight: flip ? paved.left : paved.right,
-    level: segment.level ?? 0,
+    // The height AT THIS NODE, not the road's own. A ramp climbing to a bridge still meets
+    // the street at its low end, and taking the road's higher end here would say it does not.
+    level: elevation,
   };
 }
 
@@ -530,7 +602,7 @@ function plateFeatures(
     for (const { segment, end } of ends) {
       const item = byId.get(segment.id);
       if (!item) continue;
-      const arrival = arrivalFor(item, end, plane);
+      const arrival = arrivalFor(item, end, plane, node.elevation ?? 0);
       if (arrival) {
         arrivals.push(arrival);
         involved.push(item);
@@ -546,7 +618,7 @@ function plateFeatures(
     );
     if (!plates) continue;
 
-    const deck = deckOf(plates.level);
+    const deck = deckOf(node.elevation ?? 0);
     out.push({
       type: 'Feature',
       geometry: { type: 'Polygon', coordinates: [closeRing(plates.footprint)] },
@@ -603,16 +675,25 @@ function handleFeatures(doc: Doc, options: PaintOptions): Feature<Point>[] {
     degree.set(segment.toNodeId, (degree.get(segment.toNodeId) ?? 0) + 1);
   }
 
-  const out: Feature<Point>[] = doc.nodes.map((node) => ({
-    type: 'Feature',
-    geometry: { type: 'Point', coordinates: node.position },
-    properties: {
-      nodeId: node.id,
-      kind: 'node',
-      degree: degree.get(node.id) ?? 0,
-      selected: node.id === options.selectedNodeId ? 1 : 0,
-    },
-  }));
+  const out: Feature<Point>[] = doc.nodes.map((node) => {
+    const count = degree.get(node.id) ?? 0;
+    // A road that stops next to another road is usually a road that was meant to reach it.
+    // Flagged rather than joined: the old model made that decision silently and was wrong
+    // about it, so this only says "there is something here" and waits to be told.
+    const loose = count === 1 && joinCandidate(doc, node.id) !== null;
+
+    return {
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: node.position },
+      properties: {
+        nodeId: node.id,
+        kind: 'node',
+        degree: count,
+        loose: loose ? 1 : 0,
+        selected: node.id === options.selectedNodeId ? 1 : 0,
+      },
+    };
+  });
 
   // Shape points belong to the selected road only. Every bend in the project drawn at once
   // is a field of dots you cannot click through to the design underneath.
@@ -663,6 +744,10 @@ export function paintDoc(
     bands: { type: 'FeatureCollection', features: bandFeatures(resolved) },
     stripes: { type: 'FeatureCollection', features: stripeFeatures(resolved) },
     stamps: { type: 'FeatureCollection', features: stampFeatures(resolved) },
+    shadows: {
+      type: 'FeatureCollection',
+      features: shadowFeatures(resolved, nodeMap(doc)),
+    },
     plates: {
       type: 'FeatureCollection',
       features: plateFeatures(doc, resolved, plane, options.defaultRadiusMeters),
@@ -673,10 +758,52 @@ export function paintDoc(
   };
 }
 
+/**
+ * The road under construction, painted with the real renderer.
+ *
+ * Not a dashed line standing in for a road. It is the same band stack the finished road
+ * gets, built from a throwaway document holding one segment, so the preview is the thing
+ * itself at the width it will really be. A tool that previews a hairline and then lays a
+ * forty-metre freeway is a tool you have to learn to compensate for.
+ *
+ * Cheap enough to run on every pointer move because it paints one segment, not the project.
+ */
+export function paintPreview(
+  assets: ReadonlyMap<string, Asset>,
+  assetId: string,
+  controls: readonly LngLat[],
+  curved: boolean,
+  elevation: number,
+): FeatureCollection<LineString> {
+  if (controls.length < 2) return empty<LineString>();
+
+  const doc: Doc = {
+    nodes: [
+      { id: 'preview-a', position: controls[0]!, elevation },
+      { id: 'preview-b', position: controls[controls.length - 1]!, elevation },
+    ],
+    segments: [
+      {
+        id: 'preview-s',
+        assetId,
+        fromNodeId: 'preview-a',
+        toNodeId: 'preview-b',
+        shape: controls.slice(1, -1) as LngLat[],
+        curve: curved ? { mode: 'bezier', radiusMeters: 12 } : undefined,
+        visible: true,
+      },
+    ],
+    areas: [],
+  };
+
+  return { type: 'FeatureCollection', features: bandFeatures(resolveSegments(doc, assets)) };
+}
+
 export const emptySources = (): PaintSources => ({
   bands: empty<LineString>(),
   stripes: empty<LineString>(),
   stamps: empty<Point>(),
+  shadows: empty<LineString>(),
   plates: empty<Polygon>(),
   areas: empty<Polygon>(),
   handles: empty<Point>(),
@@ -696,6 +823,11 @@ export const emptySources = (): PaintSources => ({
 export function designLayers(latDeg: number): LayerSpecification[] {
   const width = metresToPixels(latDeg, ['get', 'widthM'] as ExpressionSpecification);
   const offset = metresToPixels(latDeg, ['get', 'offsetM'] as ExpressionSpecification);
+  // A little wider than the road, so the shadow shows either side rather than hiding under it.
+  const shadowWidth = metresToPixels(
+    latDeg,
+    ['+', ['*', ['get', 'widthM'], 1.05], 1.5] as ExpressionSpecification,
+  );
   const layers: LayerSpecification[] = [];
 
   layers.push({
@@ -709,6 +841,50 @@ export function designLayers(latDeg: number): LayerSpecification[] {
   });
 
   for (const deck of DECKS) {
+    // Above ground, the road's shadow goes down first — under its own deck, over whatever
+    // is beneath. Without it a flyover and the road it crosses are just two roads drawn in
+    // an arbitrary order.
+    if (deck > 0) {
+      layers.push({
+        id: `shadow-flat-${deck}`,
+        type: 'line',
+        source: 'shadows',
+        filter: ['all', ['==', ['get', 'deck'], deck], ['==', ['get', 'ramp'], 0]],
+        layout: { 'line-cap': 'butt' },
+        paint: {
+          'line-color': '#0A0E10',
+          'line-width': shadowWidth,
+          'line-offset': SHADOW_DROP_PX,
+          'line-opacity': SHADOW_OPACITY,
+          'line-blur': 4,
+        },
+      });
+
+      layers.push({
+        id: `shadow-ramp-${deck}`,
+        type: 'line',
+        source: 'shadows',
+        filter: ['all', ['==', ['get', 'deck'], deck], ['==', ['get', 'ramp'], 1]],
+        layout: { 'line-cap': 'butt' },
+        paint: {
+          // Fades in along the road, from the ground end to the raised one. The geometry is
+          // emitted low end first so this always runs the right way round.
+          'line-gradient': [
+            'interpolate',
+            ['linear'],
+            ['line-progress'],
+            0,
+            'rgba(10,14,16,0)',
+            1,
+            `rgba(10,14,16,${SHADOW_OPACITY})`,
+          ],
+          'line-width': shadowWidth,
+          'line-offset': SHADOW_DROP_PX,
+          'line-blur': 4,
+        },
+      });
+    }
+
     layers.push({
       id: `band-${deck}`,
       type: 'line',
@@ -771,6 +947,21 @@ export function designLayers(latDeg: number): LayerSpecification[] {
     });
   }
 
+  // The road under construction, over everything built but under the handles. Translucent,
+  // because it is a proposal rather than a thing that exists.
+  layers.push({
+    id: 'preview-band',
+    type: 'line',
+    source: 'preview',
+    layout: { 'line-cap': 'butt', 'line-join': 'round' },
+    paint: {
+      'line-color': ['get', 'color'],
+      'line-width': width,
+      'line-offset': offset,
+      'line-opacity': 0.65,
+    },
+  });
+
   layers.push({
     id: 'guide-line',
     type: 'line',
@@ -805,13 +996,54 @@ export function designLayers(latDeg: number): LayerSpecification[] {
         '#FFFFFF',
         '#1B1F27',
       ],
-      'circle-stroke-width': 1.5,
-      'circle-stroke-color': '#FFFFFF',
+      // A loose end near something joinable is ringed, so the places worth a second look
+      // are visible without hunting for them.
+      'circle-stroke-width': ['case', ['==', ['get', 'loose'], 1], 3, 1.5],
+      'circle-stroke-color': [
+        'case',
+        ['==', ['get', 'loose'], 1],
+        '#E4823C',
+        '#FFFFFF',
+      ],
+    },
+  });
+
+  // The direction the road has been pulled onto, drawn past the cursor on both sides so it
+  // reads as a relationship rather than as part of the road.
+  layers.push({
+    id: 'snap-guide',
+    type: 'line',
+    source: 'snap',
+    filter: ['==', ['geometry-type'], 'LineString'],
+    paint: {
+      'line-color': ['case', ['==', ['get', 'kind'], 'continue'], '#3FB5AA', '#F2C14E'],
+      'line-width': 1.5,
+      'line-dasharray': [4, 3],
+      'line-opacity': 0.9,
+    },
+  });
+
+  // What the next click will attach to. Drawn last so it is never hidden by the design.
+  layers.push({
+    id: 'snap-ring',
+    type: 'circle',
+    source: 'snap',
+    filter: ['==', ['geometry-type'], 'Point'],
+    paint: {
+      'circle-radius': 9,
+      'circle-color': 'rgba(0,0,0,0)',
+      'circle-stroke-width': 2.5,
+      'circle-stroke-color': [
+        'case',
+        ['==', ['get', 'kind'], 'node'],
+        '#F2C14E',
+        '#3FB5AA',
+      ],
     },
   });
 
   return layers;
 }
 
-export const SOURCE_IDS = ['areas', 'bands', 'stripes', 'stamps', 'plates', 'guides', 'handles'] as const;
+export const SOURCE_IDS = ['areas', 'bands', 'stripes', 'stamps', 'shadows', 'plates', 'preview', 'guides', 'handles', 'snap'] as const;
 export type SourceId = (typeof SOURCE_IDS)[number];

@@ -7,7 +7,6 @@ import type { Asset, AssetFamily, LineAsset } from '../model/asset';
 import {
   addArea,
   addNode,
-  addSegment,
   emptyDoc,
   mergeNodes,
   moveNode,
@@ -17,7 +16,9 @@ import {
   splitPointFor,
   splitSegment,
 } from '../model/doc';
+import { setElevation } from '../model/doc';
 import type { Doc, Segment, Snap } from '../model/doc';
+import { layRoad } from '../model/build';
 import { newId } from '../model/types';
 import type { SectionComponent } from '../model/types';
 import { autoAnchorOffset, geometricCentreOffset, totalWidth } from '../model/section';
@@ -58,7 +59,25 @@ const HISTORY_LIMIT = 100;
  * a tool to place intersections the detector had missed, and one to measure a road so the
  * fit check had a number.
  */
-export type Tool = 'select' | 'build' | 'area' | 'bulldoze';
+export type Tool = 'select' | 'build' | 'upgrade' | 'area' | 'bulldoze';
+
+/**
+ * How the road being laid gets its shape.
+ *
+ * Straight from the games, and the names are theirs. The distinction that matters is what a
+ * click in the MIDDLE of a road means: in `straight` there is no middle, and in the other
+ * two the middle clicks are bezier handles rather than places the road passes through. A
+ * handle is not a node and does not appear in the document — it is a way of saying which
+ * direction the road leaves in.
+ */
+export type BuildMode = 'straight' | 'curved' | 'freeform';
+
+/** How many handles each mode collects between the two ends. */
+export const HANDLES_FOR: Record<BuildMode, number> = {
+  straight: 0,
+  curved: 1,
+  freeform: 2,
+};
 
 export interface Notice {
   kind: 'error' | 'success' | 'warning';
@@ -87,7 +106,6 @@ export interface EditorState extends Snapshot {
   arcgisApiKey: string;
   layerVisibility: Record<LayerGroupId, boolean>;
   imageryOpacity: number;
-  railOpen: boolean;
   swipe: number | null;
   notice: Notice | null;
 
@@ -104,9 +122,21 @@ export interface EditorState extends Snapshot {
    * the shape points collected since. Null means nothing is being built.
    */
   buildFromNodeId: string | null;
-  /** Bends placed since the last node, which become the new segment's shape. */
-  buildShape: LngLat[];
-  /** Level the build tool lays at — Page Up and Page Down, as in the games. */
+  /**
+   * Bezier handles clicked since the start node.
+   *
+   * NOT nodes, and not points the road passes through. They pull the road toward them and
+   * fix the direction it leaves in, which is what makes a ramp peel off a mainline pointing
+   * the right way. They become the segment's `shape` when the road is committed.
+   */
+  buildHandles: LngLat[];
+  buildMode: BuildMode;
+  /**
+   * Height the build tool works at — Page Up and Page Down, as in the games.
+   *
+   * It is the height NEW NODES get. Landing on a node that already exists uses that node's
+   * height instead, because the node is the place and the place has one height.
+   */
   buildLevel: number;
   curve: CurveSettings;
   /** Kerb radius for a node whose roads ask for nothing. */
@@ -134,13 +164,13 @@ export interface EditorState extends Snapshot {
   setArcgisApiKey: (key: string) => void;
   setLayerVisible: (id: LayerGroupId, visible: boolean) => void;
   setImageryOpacity: (value: number) => void;
-  setRailOpen: (open: boolean) => void;
   setSwipe: (value: number | null) => void;
   setNotice: (notice: Notice | null) => void;
 
   setTool: (tool: Tool) => void;
   setActiveAsset: (assetId: string) => void;
   setCurve: (curve: Partial<CurveSettings>) => void;
+  setBuildMode: (mode: BuildMode) => void;
   setBuildLevel: (level: number) => void;
   setDefaultRadius: (metres: number) => void;
   setShowAllCenterlines: (value: boolean) => void;
@@ -153,9 +183,8 @@ export interface EditorState extends Snapshot {
 
   // building
   buildTo: (position: LngLat, snap?: Snap) => void;
-  addBend: (position: LngLat) => void;
+  undoLastPoint: () => void;
   cancelBuild: () => void;
-  finishBuild: () => void;
 
   // editing what is there
   beginGesture: () => void;
@@ -169,7 +198,8 @@ export interface EditorState extends Snapshot {
   joinNodes: (keepId: string, absorbId: string) => void;
   splitAt: (segmentId: string, position: LngLat) => string | null;
   setSegmentAsset: (segmentId: string, assetId: string) => void;
-  setSegmentLevel: (segmentId: string, level: number) => void;
+  setNodeElevation: (nodeId: string, elevation: number) => void;
+  upgradeSegment: (segmentId: string) => void;
   reverseSegment: (segmentId: string) => void;
   setSegmentCurve: (segmentId: string, curve: CurveSettings) => void;
   bulldoze: (target: { segmentId?: string; nodeId?: string; areaId?: string }) => void;
@@ -288,7 +318,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
     arcgisApiKey: '',
     layerVisibility: allLayersVisible(),
     imageryOpacity: 1,
-    railOpen: true,
     swipe: null,
     notice: null,
 
@@ -296,7 +325,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
     activeLineAssetId: defaultLineAssetId(startingAssets),
     activeAreaAssetId: defaultAreaAssetId(startingAssets),
     buildFromNodeId: null,
-    buildShape: [],
+    buildHandles: [],
+    buildMode: 'straight',
     buildLevel: 0,
     curve: DEFAULT_CURVE,
     defaultRadiusMeters: 6,
@@ -322,7 +352,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
     setLayerVisible: (id, visible) =>
       set({ layerVisibility: { ...get().layerVisibility, [id]: visible } }),
     setImageryOpacity: (imageryOpacity) => set({ imageryOpacity }),
-    setRailOpen: (railOpen) => set({ railOpen }),
     setSwipe: (swipe) => set({ swipe }),
     setNotice: (notice) => set({ notice }),
 
@@ -330,7 +359,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     setTool: (tool) => {
       // Leaving the build tool abandons whatever was half-drawn. Keeping it would mean the
       // next click on a different tool silently finished a road the user had moved on from.
-      set({ tool, buildFromNodeId: null, buildShape: [] });
+      set({ tool, buildFromNodeId: null, buildHandles: [] });
     },
 
     setActiveAsset: (assetId) => {
@@ -345,6 +374,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     setCurve: (patch) => set({ curve: { ...get().curve, ...patch } }),
+    // Switching mode mid-road abandons the handles, which belonged to the old mode's shape.
+    setBuildMode: (buildMode) => set({ buildMode, buildHandles: [] }),
     setBuildLevel: (buildLevel) => set({ buildLevel }),
     setDefaultRadius: (defaultRadiusMeters) => set({ defaultRadiusMeters }),
     setShowAllCenterlines: (showAllCenterlines) => set({ showAllCenterlines }),
@@ -362,64 +393,107 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
     // ----------------------------------------------------------------- building
     /**
-     * Extend the road under construction to here.
+     * The next click of the road being laid.
      *
-     * One call covers every case, because in this model they are the same case: land on a
-     * node and use it, land on a road and split it, land on open ground and make a node.
-     * The old editor needed a separate tool for placing intersections precisely because
-     * clicking on a road could not mean "join here".
+     * One entry point for every click, because in a game they are all the same gesture and
+     * the tool decides what the click meant from where it landed and how far along you are:
+     *
+     *   nothing started yet   this is the start. Land on a node and use it, land on a road
+     *                         and split it there, land on open ground and make one.
+     *   handles still wanted  this is a handle. It creates NOTHING in the document — it only
+     *                         says which way the road bends.
+     *   handles complete      this is the end, and the road is built.
+     *
+     * The end of a finished road becomes the start of the next, so a run of blocks is one
+     * continuous gesture rather than a click-pair per block.
      */
     buildTo: (position, snap) => {
-      const { doc, buildFromNodeId, buildShape, activeLineAssetId, buildLevel, curve } = get();
-      let next = doc;
-      let nodeId: string;
+      const {
+        doc,
+        buildFromNodeId,
+        buildHandles,
+        buildMode,
+        activeLineAssetId,
+        buildLevel,
+      } = get();
 
-      if (snap?.kind === 'node') {
-        nodeId = snap.nodeId;
-      } else if (snap?.kind === 'segment') {
-        const split = splitSegment(next, snap.segmentId, snap.position, snap.shapeIndex);
-        if (!split) return;
-        next = split.doc;
-        nodeId = split.nodeId;
-      } else {
-        const added = addNode(next, position);
-        next = added.doc;
-        nodeId = added.nodeId;
-      }
+      /** Resolve a click to a node, making or splitting as needed. */
+      const nodeAt = (source: Doc): { doc: Doc; nodeId: string } | null => {
+        if (snap?.kind === 'node') return { doc: source, nodeId: snap.nodeId };
+        if (snap?.kind === 'segment') {
+          const split = splitSegment(source, snap.segmentId, snap.position, snap.shapeIndex);
+          return split ? { doc: split.doc, nodeId: split.nodeId } : null;
+        }
+        const added = addNode(source, position);
+        // A node made while building at height carries that height. One landed on keeps its
+        // own, because the place already has one and a road cannot disagree with it.
+        return {
+          doc: buildLevel ? setElevation(added.doc, added.nodeId, buildLevel) : added.doc,
+          nodeId: added.nodeId,
+        };
+      };
 
-      // The first click of a road only sets where it starts.
       if (!buildFromNodeId) {
-        commit({ doc: next });
-        set({ buildFromNodeId: nodeId, buildShape: [] });
+        const start = nodeAt(doc);
+        if (!start) return;
+        commit({ doc: start.doc });
+        set({ buildFromNodeId: start.nodeId, buildHandles: [] });
         return;
       }
 
-      // A road from a node to itself is nothing. Keep the click as a restart rather than
-      // silently doing nothing, which reads as the tool being broken.
-      if (buildFromNodeId === nodeId) {
-        set({ buildShape: [] });
+      // A handle is not a place. Collect it and wait for the end.
+      if (buildHandles.length < HANDLES_FOR[buildMode]) {
+        set({ buildHandles: [...buildHandles, position] });
         return;
       }
 
-      const built = addSegment(next, {
+      const end = nodeAt(doc);
+      if (!end) return;
+
+      // A road from a node to itself is nothing. Treat the click as a restart rather than
+      // doing nothing, which reads as the tool being broken.
+      if (end.nodeId === buildFromNodeId) {
+        set({ buildHandles: [] });
+        return;
+      }
+
+      // Lay it through whatever is in the way rather than over it: a road drawn across
+      // another splits both and shares a node, with no click needed at the crossing.
+      const laid = layRoad(end.doc, {
         assetId: activeLineAssetId,
         fromNodeId: buildFromNodeId,
-        toNodeId: nodeId,
-        shape: buildShape,
-        curve: curve.mode === 'straight' ? undefined : curve,
-        level: buildLevel || undefined,
+        toNodeId: end.nodeId,
+        handles: buildHandles,
+        curved: buildMode !== 'straight',
+        elevation: buildLevel,
       });
 
-      commit({ doc: built.doc });
-      // Chain: the end of this road is the start of the next, which is how a run of blocks
-      // gets drawn without re-clicking every junction.
-      set({ buildFromNodeId: nodeId, buildShape: [], selectedSegmentId: built.segmentId });
+      commit({ doc: laid.doc });
+      set({
+        buildFromNodeId: end.nodeId,
+        buildHandles: [],
+        selectedSegmentId: laid.segmentIds[laid.segmentIds.length - 1] ?? null,
+      });
       noteRecent(activeLineAssetId);
     },
 
-    addBend: (position) => set({ buildShape: [...get().buildShape, position] }),
-    cancelBuild: () => set({ buildFromNodeId: null, buildShape: [] }),
-    finishBuild: () => set({ buildFromNodeId: null, buildShape: [] }),
+    /**
+     * Step back one click, the way Backspace does in every drawing tool.
+     *
+     * Drops the most recent handle, or lets go of the start if there are none. It does not
+     * unbuild the previous road — that is what undo is for, and conflating the two makes
+     * Backspace unpredictable at exactly the moment you are using it to recover.
+     */
+    undoLastPoint: () => {
+      const { buildHandles } = get();
+      if (buildHandles.length > 0) {
+        set({ buildHandles: buildHandles.slice(0, -1) });
+        return;
+      }
+      set({ buildFromNodeId: null });
+    },
+
+    cancelBuild: () => set({ buildFromNodeId: null, buildHandles: [] }),
 
     // ------------------------------------------------------------------ editing
     /**
@@ -509,13 +583,24 @@ export const useEditorStore = create<EditorState>((set, get) => {
       noteRecent(assetId);
     },
 
-    setSegmentLevel: (segmentId, level) =>
-      editSegment(segmentId, (s) => {
-        const next = { ...s };
-        if (level === 0) delete next.level;
-        else next.level = level;
-        return next;
-      }),
+    setNodeElevation: (nodeId, elevation) => commit({ doc: setElevation(get().doc, nodeId, elevation) }),
+
+    /**
+     * Retype a road to whatever is armed, which is the upgrade tool.
+     *
+     * The move a game gives you for "this street should have been an arterial", and it is
+     * one click because a road is an instance of its asset rather than a copy of one.
+     */
+    upgradeSegment: (segmentId) => {
+      const { activeLineAssetId } = get();
+      const segment = get().doc.segments.find((s) => s.id === segmentId);
+      if (!segment || segment.assetId === activeLineAssetId) return;
+      editSegment(segmentId, (s) => ({ ...s, assetId: activeLineAssetId }));
+      // Show what was just changed. Leaving an older selection on screen while a different
+      // road visibly changes is the panel describing something you are not looking at.
+      set({ selectedSegmentId: segmentId, selectedNodeId: null, selectedAreaId: null });
+      noteRecent(activeLineAssetId);
+    },
 
     reverseSegment: (segmentId) =>
       editSegment(segmentId, (s) => {
@@ -745,7 +830,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         selectedNodeId: null,
         selectedAreaId: null,
         buildFromNodeId: null,
-        buildShape: [],
+        buildHandles: [],
         activeLineAssetId: defaultLineAssetId(assets),
         activeAreaAssetId: defaultAreaAssetId(assets),
       });
@@ -763,7 +848,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         selectedNodeId: null,
         selectedAreaId: null,
         buildFromNodeId: null,
-        buildShape: [],
+        buildHandles: [],
       });
     },
 

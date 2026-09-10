@@ -12,13 +12,14 @@ import type { FeatureCollection } from 'geojson';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { basemapById, tileUrlsFor } from './basemaps';
 import type { BasemapId, TileSourceOptions } from './basemaps';
-import { designLayers, emptySources, paintDoc, projectCentre } from './paint';
+import { designLayers, emptySources, paintDoc, paintPreview, projectCentre } from './paint';
 import { renderAllGlyphs } from './glyphImages';
 import type { PaintSources } from './paint';
 import { useEditorStore } from '../store/useEditorStore';
 import { assetMap } from '../library/assets';
-import { splitPointFor } from '../model/doc';
+import { joinCandidate, splitPointFor } from '../model/doc';
 import type { Snap } from '../model/doc';
+import { directionGuidesAt, guideLine, snapToGuides } from '../geo/snapping';
 import type { LngLat } from '../geo/projection';
 import { LAYER_GROUPS } from './layerGroups';
 import type { LayerGroupId } from './layerGroups';
@@ -55,6 +56,14 @@ const SNAP_PX = 14;
 /** Angle snapping increments while Shift is held. */
 const SNAP_ANGLE_DEGREES = 15;
 
+/**
+ * How near a node has to be dropped on another to merge with it, in metres.
+ *
+ * Tighter than the reach used to SUGGEST a join, because dropping is an action and being
+ * wrong about it costs an undo, while suggesting is only ever an offer.
+ */
+const MERGE_DROP_METRES = 12;
+
 function buildStyle(basemapId: BasemapId, options: TileSourceOptions): StyleSpecification {
   const basemap = basemapById(basemapId);
   const tiles = tileUrlsFor(basemapId, options);
@@ -87,15 +96,28 @@ function buildStyle(basemapId: BasemapId, options: TileSourceOptions): StyleSpec
   } as StyleSpecification;
 }
 
+/** Sources the preview and the snap ring own, which are not part of a paint of the document. */
+const LIVE_SOURCES = ['preview', 'snap'] as const;
+
 const SOURCE_KEYS: (keyof PaintSources)[] = [
   'areas',
   'bands',
   'stripes',
   'stamps',
+  'shadows',
   'plates',
   'guides',
   'handles',
 ];
+
+/**
+ * Sources that need MapLibre to measure distance along the line.
+ *
+ * `line-gradient` is expressed against `line-progress`, and MapLibre only computes that when
+ * the source asks for it. Without this the ramp shadow silently renders as nothing — the
+ * layer is valid, so neither the style validator nor the console has anything to say.
+ */
+const LINE_METRICS_SOURCES: ReadonlySet<string> = new Set(['shadows']);
 
 /** The rubber band: what the road under construction would look like if you clicked now. */
 const DRAFT_SOURCE = 'draft';
@@ -128,9 +150,13 @@ function addDesign(map: MapLibreMap, latDeg: number) {
     }
   }
 
-  for (const id of [...SOURCE_KEYS, DRAFT_SOURCE]) {
+  for (const id of [...SOURCE_KEYS, ...LIVE_SOURCES, DRAFT_SOURCE]) {
     if (!map.getSource(id)) {
-      map.addSource(id, { type: 'geojson', data: emptyFC() });
+      map.addSource(id, {
+        type: 'geojson',
+        data: emptyFC(),
+        lineMetrics: LINE_METRICS_SOURCES.has(id) || undefined,
+      });
     }
   }
 
@@ -186,7 +212,7 @@ export function MapCanvas({ className }: MapCanvasProps) {
   const showAllCenterlines = useEditorStore((s) => s.showAllCenterlines);
   const defaultRadiusMeters = useEditorStore((s) => s.defaultRadiusMeters);
   const buildFromNodeId = useEditorStore((s) => s.buildFromNodeId);
-  const buildShape = useEditorStore((s) => s.buildShape);
+  const buildHandles = useEditorStore((s) => s.buildHandles);
   const basemapId = useEditorStore((s) => s.basemapId);
   const customTileUrl = useEditorStore((s) => s.customTileUrl);
   const waybackRelease = useEditorStore((s) => s.waybackRelease);
@@ -211,6 +237,15 @@ export function MapCanvas({ className }: MapCanvasProps) {
   >(null);
 
   const areaRing = useRef<LngLat[]>([]);
+
+  /**
+   * The palette, indexed, for the preview to paint with.
+   *
+   * A ref because the preview runs on every pointer move and rebuilding a map of a hundred
+   * and eighty assets at pointer rate is real work for no reason. Refreshed whenever the
+   * palette actually changes.
+   */
+  const assetMapRef = useRef(assetMap(assets));
 
   /**
    * The most recent paint, kept so the style can be refilled without waiting for the
@@ -353,6 +388,14 @@ export function MapCanvas({ className }: MapCanvasProps) {
         return;
       }
 
+      // Retype a road to whatever is armed. The click that would have selected it instead
+      // changes it, which is what a game's upgrade tool does.
+      if (state.tool === 'upgrade') {
+        const hit = pick(map, event);
+        if (hit.segmentId) state.upgradeSegment(hit.segmentId);
+        return;
+      }
+
       if (state.tool === 'bulldoze') {
         if (snap?.kind === 'node') {
           state.bulldoze({ nodeId: snap.nodeId });
@@ -423,31 +466,95 @@ export function MapCanvas({ className }: MapCanvasProps) {
         const point: LngLat = [event.lngLat.lng, event.lngLat.lat];
         if (drag.current.kind === 'node') {
           state.moveNodeLive(drag.current.nodeId, point);
+          // Ring what letting go would merge into, so a join is never a surprise.
+          const target = joinCandidate(
+            useEditorStore.getState().doc,
+            drag.current.nodeId,
+            MERGE_DROP_METRES,
+          );
+          const at = target
+            ? useEditorStore.getState().doc.nodes.find((n) => n.id === target.nodeId)?.position
+            : null;
+          showSnap(map, at ? { kind: 'node', nodeId: target!.nodeId } : undefined, at ?? null);
         } else {
           state.moveShapePointLive(drag.current.segmentId, drag.current.index, point);
         }
         return;
       }
 
-      if (state.tool === 'build' && state.buildFromNodeId) {
+      // What the next click would attach to, shown before it is spent. Snapping that is
+      // invisible is snapping you have to trust rather than see, which is what made the
+      // build tool feel like guesswork.
+      const snap = state.tool === 'build' ? snapAt(event) : undefined;
+      if (state.tool !== 'build' || !state.buildFromNodeId) {
+        showSnap(map, snap, snap ? resolvePoint(event, snap) : null);
+      }
+
+      if (state.tool === 'build') {
         const from = state.doc.nodes.find((n) => n.id === state.buildFromNodeId);
         if (from) {
-          drawDraft(
+          // Landing on something wins: an explicit target beats a direction.
+          let cursor = snap
+            ? resolvePoint(event, snap)
+            : snapAngle(event, state.buildHandles, from.position);
+          let guide: LngLat[] = [];
+          let guideKind = '';
+
+          // Otherwise pull onto what the junction implies — carry straight on, or turn
+          // square. Alt lets go of it, the way it lets go of everything else.
+          if (!snap && !event.originalEvent.altKey && !event.originalEvent.shiftKey) {
+            const anchor = state.buildHandles.length
+              ? state.buildHandles[state.buildHandles.length - 1]!
+              : from.position;
+            const guides =
+              state.buildHandles.length === 0 ? directionGuidesAt(state.doc, from.id) : [];
+            const pulled = snapToGuides(anchor, cursor, guides);
+            if (pulled) {
+              cursor = pulled.point;
+              guide = guideLine(anchor, pulled.point);
+              guideKind = pulled.guide.kind;
+            }
+          }
+
+          showGuide(map, guide, guideKind, snap, snap ? cursor : null);
+          const controls = [from.position, ...state.buildHandles, cursor];
+          setData(
             map,
-            [from.position, ...state.buildShape, snapAngle(event, state.buildShape, from.position)],
-            null,
+            'preview',
+            paintPreview(
+              assetMapRef.current,
+              state.activeLineAssetId,
+              controls,
+              state.buildMode !== 'straight',
+              state.buildLevel,
+            ) as FeatureCollection,
           );
+        } else {
+          setData(map, 'preview', emptyFC());
         }
-      } else if (state.tool === 'area' && areaRing.current.length > 0) {
+        return;
+      }
+
+      if (state.tool === 'area' && areaRing.current.length > 0) {
         drawDraft(map, [...areaRing.current, [event.lngLat.lng, event.lngLat.lat]], null);
       }
     };
 
     const onMouseUp = () => {
-      if (!drag.current) return;
+      const dragged = drag.current;
+      if (!dragged) return;
       drag.current = null;
-      useEditorStore.getState().endGesture();
+      const state = useEditorStore.getState();
+      state.endGesture();
       map.dragPan.enable();
+      showSnap(map, undefined, null);
+
+      // Dropping a node onto another merges them, which is how two roads drawn separately
+      // become connected. The model always had the operation; there was no way to ask for it.
+      if (dragged.kind === 'node') {
+        const target = joinCandidate(state.doc, dragged.nodeId, MERGE_DROP_METRES);
+        if (target) state.joinNodes(target.nodeId, dragged.nodeId);
+      }
     };
 
     map.on('click', onClick);
@@ -499,8 +606,22 @@ export function MapCanvas({ className }: MapCanvasProps) {
         return;
       }
 
+      if (event.key === 'Backspace' && state.tool === 'build') {
+        state.undoLastPoint();
+        event.preventDefault();
+        return;
+      }
+
       if (event.key === 'Delete' || event.key === 'Backspace') {
         if (state.tool === 'select') state.deleteSelection();
+        return;
+      }
+
+      // Road modes, on the number row, the way a game does it.
+      if (state.tool === 'build' && ['1', '2', '3'].includes(event.key)) {
+        state.setBuildMode(
+          event.key === '1' ? 'straight' : event.key === '2' ? 'curved' : 'freeform',
+        );
         return;
       }
 
@@ -522,7 +643,13 @@ export function MapCanvas({ className }: MapCanvasProps) {
     if (!map || !ready) return;
     const canvas = map.getCanvas();
     canvas.style.cursor =
-      tool === 'build' || tool === 'area' ? 'crosshair' : tool === 'bulldoze' ? 'not-allowed' : '';
+      tool === 'build' || tool === 'area'
+        ? 'crosshair'
+        : tool === 'bulldoze'
+          ? 'not-allowed'
+          : tool === 'upgrade'
+            ? 'cell'
+            : '';
     // Double click places a point in the shape tools; zooming would fight it.
     if (tool === 'area') map.doubleClickZoom.disable();
     else map.doubleClickZoom.enable();
@@ -559,7 +686,8 @@ export function MapCanvas({ className }: MapCanvasProps) {
     const map = mapRef.current;
     if (!map || !ready) return;
 
-    const sources = paintDoc(doc, assetMap(assets), {
+    assetMapRef.current = assetMap(assets);
+    const sources = paintDoc(doc, assetMapRef.current, {
       selectedSegmentId,
       selectedNodeId,
       selectedAreaId,
@@ -580,17 +708,14 @@ export function MapCanvas({ className }: MapCanvasProps) {
     showAllCenterlines,
   ]);
 
-  // The rubber band follows the document too — finishing a road has to clear it.
+  // Clear the preview when the road in progress ends, whether it was finished or abandoned.
+  // The preview itself is driven by the pointer, so there is nothing to redraw here.
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !ready) return;
-    if (!buildFromNodeId) {
-      drawDraft(map, [], null);
-      return;
-    }
-    const from = doc.nodes.find((n) => n.id === buildFromNodeId);
-    if (from) drawDraft(map, [from.position, ...buildShape], null);
-  }, [buildFromNodeId, buildShape, doc, ready]);
+    if (!map || !ready || buildFromNodeId) return;
+    setData(map, 'preview', emptyFC());
+    setData(map, 'snap', emptyFC());
+  }, [buildFromNodeId, buildHandles, ready]);
 
   // ------------------------------------------------------------- layer visibility
 
@@ -626,6 +751,58 @@ function pick(map: MapLibreMap, event: MapMouseEvent): {
     if (onArea?.properties?.areaId) return { areaId: String(onArea.properties.areaId) };
   }
   return {};
+}
+
+/**
+ * Ring whatever the next click would attach to.
+ *
+ * Two colours, because the two answers mean different things: landing on a node JOINS there,
+ * landing on a road SPLITS it. Those have different consequences and the tool should say
+ * which one is about to happen.
+ */
+function showSnap(map: MapLibreMap, snap: Snap | undefined, at: LngLat | null) {
+  if (!snap || !at) {
+    setData(map, 'snap', emptyFC());
+    return;
+  }
+  setData(map, 'snap', {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: at },
+        properties: { kind: snap.kind },
+      },
+    ],
+  });
+}
+
+/** The guide line and the snap ring together: both say where the next click lands. */
+function showGuide(
+  map: MapLibreMap,
+  guide: readonly LngLat[],
+  kind: string,
+  snap: Snap | undefined,
+  at: LngLat | null,
+) {
+  const features: FeatureCollection['features'] = [];
+
+  if (guide.length === 2) {
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: guide as LngLat[] },
+      properties: { kind },
+    });
+  }
+  if (snap && at) {
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: at },
+      properties: { kind: snap.kind },
+    });
+  }
+
+  setData(map, 'snap', { type: 'FeatureCollection', features });
 }
 
 /** The rubber band and its points, as one collection. */

@@ -116,6 +116,7 @@ export function toProjectGeoJSON(
         streetcity: 'node',
         id: node.id,
         name: node.name,
+        elevation: node.elevation,
         radiusMeters: node.radiusMeters,
       },
     });
@@ -138,7 +139,6 @@ export function toProjectGeoJSON(
         assetId: segment.assetId,
         fromNodeId: segment.fromNodeId,
         toNodeId: segment.toNodeId,
-        level: segment.level,
         reversed: segment.reversed,
         curve: segment.curve,
         visible: segment.visible,
@@ -342,6 +342,10 @@ function readNative(features: readonly Feature[], warnings: string[]): Doc {
         id: String(feature.properties!.id ?? newNodeId()),
         name: feature.properties!.name || undefined,
         position: position.data.slice(0, 2) as LngLat,
+        elevation:
+          typeof feature.properties!.elevation === 'number'
+            ? feature.properties!.elevation
+            : undefined,
         radiusMeters:
           typeof feature.properties!.radiusMeters === 'number'
             ? feature.properties!.radiusMeters
@@ -367,7 +371,6 @@ function readNative(features: readonly Feature[], warnings: string[]): Doc {
         // The two ends are the nodes and are not stored on the segment.
         shape: coordinates.slice(1, -1).map((p) => [p[0], p[1]] as LngLat),
         curve: curve?.success ? curve.data : undefined,
-        level: typeof props.level === 'number' ? props.level : undefined,
         reversed: props.reversed === true ? true : undefined,
         visible: props.visible !== false,
       });
@@ -394,6 +397,11 @@ function readNative(features: readonly Feature[], warnings: string[]): Doc {
     }
   }
 
+  // A file written before height moved onto the node says it per road. Lift it: the node
+  // takes the height of the highest road that meets there, which is the only reading that
+  // does not lower a bridge onto the ground beneath it.
+  liftLevelsOntoNodes(features, nodes);
+
   // Drop roads whose nodes did not survive, rather than leaving the document referring to
   // places that are not there.
   const nodeIds = new Set(nodes.map((n) => n.id));
@@ -403,6 +411,30 @@ function readNative(features: readonly Feature[], warnings: string[]): Doc {
   }
 
   return { nodes, segments: kept, areas };
+}
+
+/**
+ * Move a per-road height onto the places the road meets.
+ *
+ * Both the old street model and the first version of this one put height on the road, which
+ * lets a document say that one point is at two heights at once. Reading it back onto the
+ * nodes is lossy in exactly one case — a road that climbs from ground to a bridge becomes a
+ * road whose two ends differ, which is a ramp, which is what it was.
+ */
+function liftLevelsOntoNodes(features: readonly Feature[], nodes: Node[]): void {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+
+  for (const feature of features) {
+    const props = feature.properties;
+    if (props?.streetcity !== 'segment' || typeof props.level !== 'number' || props.level === 0) {
+      continue;
+    }
+    for (const key of ['fromNodeId', 'toNodeId'] as const) {
+      const node = byId.get(String(props[key]));
+      if (!node) continue;
+      if (Math.abs(props.level) > Math.abs(node.elevation ?? 0)) node.elevation = props.level;
+    }
+  }
 }
 
 // -------------------------------------------------------------------- legacy import
@@ -471,7 +503,7 @@ interface Track {
  * between streets at different levels are skipped, which is what keeps a freeway flying over
  * a road rather than landing on it.
  */
-function splitAtCrossings(tracks: Track[], nodeAt: (p: LngLat) => string): void {
+function splitAtCrossings(tracks: Track[], nodeAt: (p: LngLat, elevation?: number) => string): void {
   if (tracks.length < 2) return;
   const scale = Math.cos(((tracks[0]!.points[0]?.[1] ?? 0) * Math.PI) / 180);
 
@@ -500,7 +532,7 @@ function splitAtCrossings(tracks: Track[], nodeAt: (p: LngLat) => string): void 
           ];
           // One node, shared: this is the same place on both roads, which is the entire
           // reason to do this at import rather than leaving them overlapping.
-          const nodeId = nodeAt(point);
+          const nodeId = nodeAt(point, a.level ?? 0);
           a.cuts.push({ edge: ai, t: hit.t, point, nodeId });
           b.cuts.push({ edge: bi, t: hit.u, point, nodeId });
         }
@@ -523,13 +555,13 @@ const MIN_PIECE_METRES = 2;
  * Two streets crossing at a shallow angle can produce a pair of crossings a few centimetres
  * apart, and a road between them would be a sliver nobody could select or delete.
  */
-function cutTrack(track: Track, nodeAt: (p: LngLat) => string): Segment[] {
+function cutTrack(track: Track, nodeAt: (p: LngLat, elevation?: number) => string): Segment[] {
   const ordered = [...track.cuts].sort((a, b) => a.edge - b.edge || a.t - b.t);
   const out: Segment[] = [];
 
   // Each boundary is a node plus the index of the point that follows it on the line.
   const boundaries: { nodeId: string; point: LngLat; after: number }[] = [
-    { nodeId: nodeAt(track.points[0]!), point: track.points[0]!, after: 1 },
+    { nodeId: nodeAt(track.points[0]!, track.level ?? 0), point: track.points[0]!, after: 1 },
   ];
 
   for (const cut of ordered) {
@@ -541,7 +573,11 @@ function cutTrack(track: Track, nodeAt: (p: LngLat) => string): Segment[] {
   const lastPoint = track.points[track.points.length - 1]!;
   const previous = boundaries[boundaries.length - 1]!;
   if (distanceMeters(previous.point, lastPoint) >= MIN_PIECE_METRES) {
-    boundaries.push({ nodeId: nodeAt(lastPoint), point: lastPoint, after: track.points.length });
+    boundaries.push({
+      nodeId: nodeAt(lastPoint, track.level ?? 0),
+      point: lastPoint,
+      after: track.points.length,
+    });
   }
 
   for (let i = 0; i < boundaries.length - 1; i++) {
@@ -561,7 +597,6 @@ function cutTrack(track: Track, nodeAt: (p: LngLat) => string): Segment[] {
       toNodeId: to.nodeId,
       shape,
       curve: track.curve,
-      level: track.level,
       visible: true,
     });
   }
@@ -579,13 +614,22 @@ function convertLegacy(
   const areas: AreaShape[] = [];
   const tracks: Track[] = [];
 
-  /** Reuse a node when an end lands on one already placed. */
-  const nodeAt = (position: LngLat): string => {
+  /**
+   * Reuse a node when an end lands on one already placed.
+   *
+   * Height comes in per street and belongs to the place, so a node takes the highest of
+   * whatever meets there — the only reading that does not lower a bridge onto the ground
+   * running underneath it.
+   */
+  const nodeAt = (position: LngLat, elevation = 0): string => {
     for (const node of nodes) {
-      if (distanceMeters(node.position, position) <= WELD_METRES) return node.id;
+      if (distanceMeters(node.position, position) <= WELD_METRES) {
+        if (Math.abs(elevation) > Math.abs(node.elevation ?? 0)) node.elevation = elevation;
+        return node.id;
+      }
     }
     const id = newNodeId();
-    nodes.push({ id, position });
+    nodes.push(elevation ? { id, position, elevation } : { id, position });
     return id;
   };
 

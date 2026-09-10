@@ -36,6 +36,20 @@ export interface Node {
   name?: string;
   position: LngLat;
   /**
+   * How high this place is: 0 at ground, +1 an overpass, -1 a tunnel.
+   *
+   * On the NODE rather than on the road, which is the way a road-building game models it and
+   * is a genuine correctness fix rather than a preference. Height on the segment lets the
+   * document state a contradiction — two roads meeting at one point while disagreeing about
+   * how high that point is — and the only thing to do with a contradiction is suppress
+   * something. Here it cannot be written down: everything meeting at a node is at the node's
+   * height, by construction.
+   *
+   * A road between nodes of different heights is therefore a ramp, and slopes. Which of the
+   * two ends it is drawn above is a rendering question, not a modelling one.
+   */
+  elevation?: number;
+  /**
    * Kerb radius here, in metres, overriding what the roads arriving ask for.
    *
    * On the node rather than per corner because a corner has no identity that survives
@@ -66,16 +80,6 @@ export interface Segment {
   /** Interior shape points, WGS84. Empty for a straight road. */
   shape: LngLat[];
   curve?: CurveSettings;
-  /**
-   * Grade separation: 0 at grade, +1 an overpass, -1 a tunnel, and so on.
-   *
-   * Per segment rather than per road, which is the point. A road that climbs, crosses and
-   * comes back down is three segments at three levels — the same way you build one in a
-   * road-building game, and the same way one is actually built. There is no separate
-   * profile to keep in step with the alignment, because the alignment is already cut into
-   * the pieces that differ.
-   */
-  level?: number;
   /** Drawn against the from-to direction, which flips one-way markings and lane order. */
   reversed?: boolean;
   visible: boolean;
@@ -236,6 +240,27 @@ export function splitSegment(
   };
 }
 
+/** How high a road runs, taken from its ends. A ramp is drawn above the ground it climbs from. */
+export function segmentElevation(segment: Segment, nodes: ReadonlyMap<string, Node>): number {
+  const from = nodes.get(segment.fromNodeId)?.elevation ?? 0;
+  const to = nodes.get(segment.toNodeId)?.elevation ?? 0;
+  return Math.abs(from) >= Math.abs(to) ? from : to;
+}
+
+/** Raise or lower a place. Every road that meets there follows, which is the point. */
+export function setElevation(doc: Doc, nodeId: string, elevation: number): Doc {
+  return {
+    ...doc,
+    nodes: doc.nodes.map((node) => {
+      if (node.id !== nodeId) return node;
+      const next = { ...node };
+      if (elevation === 0) delete next.elevation;
+      else next.elevation = elevation;
+      return next;
+    }),
+  };
+}
+
 /** Move a node. Every road touching it follows, because their ends ARE the node. */
 export function moveNode(doc: Doc, nodeId: string, position: LngLat): Doc {
   return {
@@ -264,6 +289,57 @@ export function removeNode(doc: Doc, nodeId: string): Doc {
     ...doc,
     segments: doc.segments.filter((s) => s.fromNodeId !== nodeId && s.toNodeId !== nodeId),
   });
+}
+
+/**
+ * How far a loose end will reach to find something to join to, in metres.
+ *
+ * Generous, because this is not a detector deciding on its own that two roads meet — it is
+ * offering a candidate for a join the user then makes. The old model's mistake was doing
+ * this silently and calling the result a junction; suggesting it and letting somebody agree
+ * is a different act, and can afford to look further.
+ */
+export const JOIN_REACH_METRES = 30;
+
+/**
+ * The nearest node a loose end could sensibly be joined to.
+ *
+ * Only ends are offered — a node with two or more roads is a place that already works, and
+ * dragging it into its neighbour is nearly always a slip rather than an intention.
+ */
+export function joinCandidate(
+  doc: Doc,
+  nodeId: string,
+  reachMetres = JOIN_REACH_METRES,
+): { nodeId: string; metres: number } | null {
+  const node = doc.nodes.find((n) => n.id === nodeId);
+  if (!node) return null;
+
+  const scale = Math.cos((node.position[1] * Math.PI) / 180);
+  const metresPerDegree = 111132;
+  let best: { nodeId: string; metres: number } | null = null;
+
+  for (const other of doc.nodes) {
+    if (other.id === nodeId) continue;
+    // Two places at different heights are not the same place, whatever the plan view says.
+    if ((other.elevation ?? 0) !== (node.elevation ?? 0)) continue;
+
+    const dx = (other.position[0] - node.position[0]) * scale * metresPerDegree;
+    const dy = (other.position[1] - node.position[1]) * metresPerDegree;
+    const metres = Math.hypot(dx, dy);
+    if (metres > reachMetres) continue;
+    if (!best || metres < best.metres) best = { nodeId: other.id, metres };
+  }
+
+  return best;
+}
+
+/** Every node with exactly one road, which is a road that stops rather than a place. */
+export function looseEnds(doc: Doc): Set<string> {
+  const counts = degrees(doc);
+  const out = new Set<string>();
+  for (const [id, count] of counts) if (count === 1) out.add(id);
+  return out;
 }
 
 /**

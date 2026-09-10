@@ -30,11 +30,28 @@ LineString emitted eight times over, each copy carrying the width and sideways o
 band. MapLibre does the offsetting and the joins on the GPU, at metre-exact scale, every
 frame. Nothing is turned into a polygon to be looked at.
 
-**Nothing is detected and nothing is cut out of anything.** Two roads are joined when they
-share a node, and not otherwise. A junction is not subtracted from the roads that meet it —
-the roads run into the node, and the junction's paved ground is drawn *on top of* them. The
-stacking order does the work a polygon boolean used to do, which is both faster and the
+**Nothing is cut out of anything.** A junction is not subtracted from the roads that meet
+it — the roads run into the node, and the junction's paved ground is drawn *on top of* them.
+The stacking order does the work a polygon boolean used to do, which is both faster and the
 reason a fork is drawn as a fork rather than as a hole.
+
+**A road drawn across another splits both.** No click at the crossing, the way a
+road-building game does it. This is not the old detector returning: the crossing point is
+computed from the two lines and lies exactly on both, which is the difference between "these
+two lines cross" — a fact — and "these two roads were probably meant to meet", which is what
+the old model guessed at. Roads at different heights pass each other untouched.
+
+**Height belongs to the node, not the road.** A place has one height, so everything meeting
+there is at that height by construction, and a road whose two ends differ is a ramp between
+them. Putting height on the road lets the document state a contradiction — one point at two
+heights — and the only thing to do with a contradiction is suppress something. There used to
+be a rule for that. There is no longer anything for it to suppress.
+
+**A raised road throws a shadow.** A plan view has no way to show height: two roads crossing
+at different levels are drawn one over the other, and nothing says why one is on top. A
+shadow says it, with the one cue that works without perspective. A ramp's shadow fades in
+along its length, from nothing where it leaves the ground to full where it meets the deck —
+which is the only thing in the renderer that shows a road climbing.
 
 **A stretch of road that differs is a different road.** There is no mechanism for varying a
 cross-section along a street, because there does not need to be one: split the segment fifty
@@ -69,17 +86,53 @@ npm run dev        # http://localhost:5173/geostripe/
 
 ## Using it
 
+Everything lives in a hotbar along the bottom of the map, the way a city-builder's build
+menu does. Picking a family opens a drawer of assets upward; picking one arms the tool and
+closes the drawer again, so the map has the window for the whole of the time you are
+actually building. Nothing takes a permanent column, and the inspector only exists while
+something is selected.
+
 | Tool | What it does |
 | --- | --- |
-| **Select** | Click a road, junction or ground shape. Drag a node to move it and everything attached follows; drag a bend to reshape one road. |
-| **Build** | Click to place the active asset, node to node. Landing on a node joins there; landing on a road splits it; landing on open ground makes a new node. The end of one road is the start of the next, so a run of blocks is one gesture. |
+| **Select** | Click a road, junction or ground shape. Drag a node to move it and everything attached follows; drag a handle to reshape one road. **Drop a node onto another and they merge**, which is how two roads drawn separately become connected. |
+| **Roads** | Click to lay the armed asset. Landing on a node joins there; landing on a road splits it; landing on open ground makes a new node — and running *across* a road splits both without any click at the crossing. The end of one road is the start of the next, so a run of blocks is one gesture. |
+| **Upgrade** | Arm a road type and click an existing road to make it that type. One click, because a road is an instance of its asset rather than a copy of one. |
 | **Ground** | Click a shape for a park, plaza or water. Double-click or Enter closes it. |
 | **Bulldoze** | Click to remove. |
 
+The road tool has the three modes the games have, and the difference between them is what a
+click in the MIDDLE of a road means:
+
+| Mode | Clicks | |
+| --- | --- | --- |
+| **Straight** | start, end | No middle. |
+| **Curved** | start, handle, end | The handle is a bezier control — the road bends *toward* it and leaves the start tangent to it, rather than passing through it. |
+| **Freeform** | start, two handles, end | The same, with a cubic. |
+
+A handle is not a node and never appears in the document. The road under construction is
+previewed at its **real width**, with its bands, by the same renderer that draws the
+finished thing — and whatever the next click will attach to is ringed as you pass it, in
+amber for a node you would join and teal for a road you would split.
+
+Leaving a junction, the road is pulled onto the directions that junction already implies —
+**carry straight on through a road, or turn square off it** — with a dashed guide showing
+which. The guides come from the roads actually there rather than from a global grid, because
+a real downtown grid is rarely aligned to north and a fixed angular snap therefore helps
+with nothing. Hold `Alt` to ignore them.
+
+A road that stops within 30 m of another end is **ringed in orange**. Nothing is joined
+until you say so: select it and the inspector states the distance and offers the join, or
+just drag it onto its neighbour. The old model made that decision on its own, with a
+tolerance that scaled to the widest street involved, and called ends seventeen metres apart
+a junction — offering it instead is the whole difference.
+
 | Key | |
 | --- | --- |
-| `Page Up` / `Page Down` | Raise or lower what you are about to build — bridges and tunnels |
-| `Shift` while building | Snap to 15° |
+| `1` `2` `3` | Straight / Curved / Freeform |
+| `Page Up` / `Page Down` | Raise or lower what you are about to build. It sets the height NEW junctions get; landing on one that exists uses its height, because the place already has one |
+| `Shift` while building | Snap to 15° instead of to the junction's own directions |
+| `Alt` while building | Ignore snapping entirely |
+| `Backspace` | Step back one click — drops the last handle, then lets go of the start |
 | `Esc` | Abandon the road in progress |
 | `Delete` | Remove what is selected |
 | `Ctrl` + `Z` / `Shift` + `Ctrl` + `Z` | Undo / redo |
@@ -126,6 +179,7 @@ build runs correctly at any base path or domain.
 src/
   model/                  The document. Everything here is authored; nothing is inferred.
     doc.ts                Nodes, segments, areas — and the edits: split, join, merge, move
+    build.ts              Laying a road through whatever it crosses, splitting both
     asset.ts              What the palette holds: a line asset, or a ground material
     section.ts            Cross-section arithmetic — widths, anchor, boundary offsets
     io.ts                 GeoJSON in and out, plus conversion from the old street model
@@ -135,6 +189,7 @@ src/
     projection.ts         Local metric tangent plane — the cos(latitude) fix
     curve.ts              Control points -> the line everything is drawn along
     junction.ts           The ground a junction owns: where the kerbs meet, rounded
+    snapping.ts           The directions a junction implies, and pulling the cursor onto them
     bands.ts              Band polygons. Export only — the map never calls this
     offset.ts             Polyline offsetting, for the same
     markings.ts           Which stripe belongs on which boundary
@@ -152,7 +207,7 @@ src/
     templates.ts          157 cross-section presets; systematic families are generated
     landcover.ts          Ground materials
   components/
-    AssetPalette.tsx      Pick what to build with
+    HotBar.tsx            The build menu: tools, road modes, families, the asset drawer
     Inspector.tsx         What is selected, and the asset editor
     CrossSectionSvg.tsx   The section elevation
     ComponentStack.tsx    The editable band stack
@@ -226,7 +281,7 @@ the renderer:
 
 ## Testing
 
-613 tests. The ones worth knowing about:
+641 tests. The ones worth knowing about:
 
 - **`map/paint.test.ts`** — that a 3.6 m lane measures 3.6 m at every zoom, at 39°N and
   69°N. Widths are no longer computed into polygons; they are an expression MapLibre
@@ -237,6 +292,13 @@ the renderer:
   and the map renders as bare imagery with the design silently missing.
 - **`map/worker.guard.test.ts`** — a source-level guard on the worker URL, for a failure
   that has happened twice and is silent in the same way.
+- **`geo/snapping.test.ts`** — that the guides are carry-on plus the two square turns; that
+  snapping changes direction without changing how far out the cursor is; and that it lets go
+  once the cursor is clearly off, because 45° is a direction somebody meant.
+- **`model/build.test.ts`** — that a road drawn across another splits both and shares one
+  node; that three crossings in one stroke produce ten roads; that a curved road split at a
+  crossing keeps its exact shape on both sides; and that a road at a different height passes
+  over untouched.
 - **`model/io.test.ts`** — the round trip, and the conversion, run against the real
   Cincinnati project.
 - **`library/dimensions.test.ts`** — every primitive and preset rendered and measured back
@@ -281,15 +343,29 @@ Recorded because these are the calls that would otherwise be quietly re-litigate
 
 ---
 
+## Which build am I looking at?
+
+The header carries the version and a stamp, because "I cannot see my change" is
+indistinguishable from a failed deploy, a stale `index.html` in the browser cache, and a
+build that never ran — and GitHub Pages serves `index.html` with a ten-minute cache, so the
+middle one is common.
+
+In a production build the stamp is when the bundle was built. **In dev it is when the page
+was loaded**, and says `dev`. That distinction had to be made explicit: the build time is
+baked when Vite evaluates its config, which under `vite dev` is when the *server* started,
+so it froze while the code under it kept hot-reloading and spent whole sessions asserting a
+freshness it had no way to know.
+
+The version comes from `package.json` and nowhere else, so `npm version` moves the header,
+every exported project, and the reload notice together.
+
+---
+
 ## Known gaps
 
 Recorded so they are not rediscovered as bugs.
 
-- **No way to join two nodes by hand.** The importer welds ends within 1.5 m and leaves the
-  rest apart, which is honest, but there is no gesture for saying "these two are the same
-  place" afterwards. The model has `mergeNodes` and undo covers it; only the UI is missing.
-  Forty-seven ends in the I-75 example are waiting on it.
-- **Two stacked flyovers share a draw deck.** Levels are authored freely and clamped to
+- **Two stacked flyovers share a draw deck.** Heights are authored freely and clamped to
   under / at grade / over for drawing order, because MapLibre layers are created once.
 - **A lane-spanning pavement symbol is rasterised at a 3.3 m reference width** and scaled,
   rather than rebuilt per lane.
