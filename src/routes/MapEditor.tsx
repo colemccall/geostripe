@@ -10,12 +10,41 @@ import { LAYER_GROUPS } from '../map/layerGroups';
 import { DEMOS } from '../demo';
 
 /**
- * The editor.
+ * The editor page: a map, with everything else floating on it.
  *
- * One page now, where there were two. The Asset Builder was a separate route because a
- * cross-section used to be a thing you made BEFORE you had anywhere to put it; an asset is
- * a thing the roads on screen are already made of, so editing one belongs beside them. The
- * split also cost a round trip through the router every time somebody wanted a lane wider.
+ * ---------------------------------------------------------------------------------------
+ * HOW THE FRONT END FITS TOGETHER
+ *
+ * There is one source of truth — the Zustand store in `store/useEditorStore.ts` — and
+ * everything on screen is a function of it. Nothing owns a private copy of the design.
+ *
+ *     store  ──►  MapCanvas  ──►  paint.ts  ──►  MapLibre sources
+ *       ▲              (turns the document into GeoJSON features + style expressions)
+ *       │
+ *       ├──────  HotBar      what you are about to build: tool, road mode, height, asset
+ *       ├──────  Inspector   what you have selected: a road, a junction, or an asset
+ *       └──────  this file   the project itself: name, save, open, examples, layers
+ *
+ * Every component subscribes to the slices it needs and calls actions on the store; none of
+ * them talk to each other. That is why the hotbar can arm an asset and the map immediately
+ * previews it without either knowing the other exists.
+ *
+ * The four pieces of chrome are deliberately all `position: absolute` over the map rather
+ * than laid out beside it:
+ *
+ *   top-left      the project — name, save, open, examples
+ *   bottom        the hotbar, which is the build menu
+ *   top-right     the inspector, which EXISTS ONLY while something is selected
+ *   bottom-right  the view switches and imagery fade
+ *
+ * A panel that is always there is a panel taking space from the map even when it has
+ * nothing to say. The inspector is mounted from `hasSelection`, so there is no empty column
+ * and nothing to dismiss.
+ *
+ * One page, where there were two. The Asset Builder used to be its own route because a
+ * cross-section was something you made BEFORE you had anywhere to put it; an asset is what
+ * the roads on screen are already made of, so editing one belongs beside them.
+ * ---------------------------------------------------------------------------------------
  */
 
 export default function MapEditor() {
@@ -64,10 +93,8 @@ export default function MapEditor() {
 
     store.loadProject(result.doc, result.assets, name);
     store.setNotice({
-      kind: result.converted ? 'warning' : 'success',
-      title: result.converted
-        ? `Converted ${name} from the old street model`
-        : `Opened ${name}`,
+      kind: result.warnings.length ? 'warning' : 'success',
+      title: `Opened ${name}`,
       details: result.warnings,
     });
   };

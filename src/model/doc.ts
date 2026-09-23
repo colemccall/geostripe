@@ -364,6 +364,91 @@ export function mergeNodes(doc: Doc, keepId: string, absorbId: string): Doc {
   return { ...doc, nodes: doc.nodes.filter((node) => node.id !== absorbId), segments };
 }
 
+/**
+ * Remove a node that is not doing anything, joining the two roads it sat between.
+ *
+ * The inverse of a split, and a road-building game's "remove node". Without it the graph is
+ * a ratchet: every crossing, every retype, every accidental click leaves a node behind that
+ * can only be got rid of by deleting both roads and drawing them again. A node with two
+ * roads is only a place if something happens there, and when nothing does it is just a seam.
+ *
+ * Refused in three cases, each for a different reason:
+ *
+ *   not exactly two roads   one road means it is a terminus and three means it is a
+ *                           junction; neither is a seam to be dissolved.
+ *   different assets        the seam is where the road changes type, which is the whole
+ *                           mechanism for a turn lane before a junction. Dissolving it would
+ *                           silently throw one of the two away.
+ *   a loop back on itself   joining a road to itself produces a ring with no ends, which
+ *                           nothing downstream is prepared for.
+ *
+ * The surviving road runs from the far end of the first to the far end of the second, and
+ * takes the node's own position as an interior shape point — so the line keeps the corner it
+ * had rather than springing straight.
+ */
+export function dissolveNode(doc: Doc, nodeId: string): Doc | null {
+  const node = doc.nodes.find((n) => n.id === nodeId);
+  if (!node) return null;
+
+  const arriving = endsAt(nodeId, doc.segments);
+  if (arriving.length !== 2) return null;
+
+  const [a, b] = arriving as [
+    { segment: Segment; end: 'from' | 'to' },
+    { segment: Segment; end: 'from' | 'to' },
+  ];
+  if (a.segment.id === b.segment.id) return null;
+  if (a.segment.assetId !== b.segment.assetId) return null;
+
+  const farOf = (entry: { segment: Segment; end: 'from' | 'to' }) =>
+    entry.end === 'from' ? entry.segment.toNodeId : entry.segment.fromNodeId;
+
+  const startNode = farOf(a);
+  const endNode = farOf(b);
+  if (startNode === endNode) return null;
+
+  // Each half's shape, oriented to run start -> node -> end.
+  const shapeOf = (entry: { segment: Segment; end: 'from' | 'to' }, towardNode: boolean) => {
+    const shape = entry.segment.shape;
+    // `from` end at the node means the stored shape runs node -> far, so reading it toward
+    // the node means reading it backwards.
+    const runsFromNode = entry.end === 'from';
+    const ordered = runsFromNode ? [...shape].reverse() : [...shape];
+    return towardNode ? ordered : [...ordered].reverse();
+  };
+
+  const merged: Segment = {
+    ...a.segment,
+    id: newSegmentId(),
+    fromNodeId: startNode,
+    toNodeId: endNode,
+    // The node's own position survives as a bend, so the road keeps its shape.
+    shape: [...shapeOf(a, true), node.position, ...shapeOf(b, false)],
+    // A merged road is a polyline through the points it kept. Preserving the two halves'
+    // bezier handles would mean re-fitting one curve to two, which moves the road.
+    curve: undefined,
+  };
+
+  return {
+    ...doc,
+    nodes: doc.nodes.filter((n) => n.id !== nodeId),
+    segments: [
+      ...doc.segments.filter((s) => s.id !== a.segment.id && s.id !== b.segment.id),
+      merged,
+    ],
+  };
+}
+
+/** Whether `dissolveNode` would do anything, for deciding whether to offer it. */
+export function canDissolve(doc: Doc, nodeId: string): boolean {
+  const arriving = endsAt(nodeId, doc.segments);
+  return (
+    arriving.length === 2 &&
+    arriving[0]!.segment.id !== arriving[1]!.segment.id &&
+    arriving[0]!.segment.assetId === arriving[1]!.segment.assetId
+  );
+}
+
 export function addArea(
   doc: Doc,
   area: Omit<AreaShape, 'id' | 'visible'> & { id?: string; visible?: boolean },

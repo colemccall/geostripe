@@ -56,7 +56,7 @@ export const LAYER_GROUPS = [
     id: 'handles',
     label: 'Editing handles',
     hint: 'Nodes, shape points and centerlines — the parts that are not on the ground.',
-    layers: ['guide-line', 'handle-point'],
+    layers: ['plate-selected', 'guide-line', 'handle-point'],
   },
 ] as const;
 

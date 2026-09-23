@@ -16,7 +16,7 @@ import {
   splitPointFor,
   splitSegment,
 } from '../model/doc';
-import { setElevation } from '../model/doc';
+import { dissolveNode, setElevation } from '../model/doc';
 import type { Doc, Segment, Snap } from '../model/doc';
 import { layRoad } from '../model/build';
 import { newId } from '../model/types';
@@ -34,18 +34,40 @@ import { allLayersVisible } from '../map/layerGroups';
 import type { LayerGroupId } from '../map/layerGroups';
 
 /**
- * Editor state.
+ * Editor state: the single source of truth the whole front end reads from.
  *
- * One document, one palette, and undo over both. The previous store carried two models at
- * once — long polyline streets with detected junctions, and a node-and-segment graph — plus
- * the overrides, near-miss reports and mode switches needed to keep them from contradicting
- * each other. Most of what is gone from this file is not a feature; it is the cost of
- * having had two answers to the same question.
+ * ---------------------------------------------------------------------------------------
+ * WHAT IS IN HERE, AND WHY IT IS SPLIT THE WAY IT IS
  *
- * Undo is snapshots rather than patches. A document is a few thousand small objects and
- * copying the arrays is free, while a mis-applied patch drifts silently. The snapshot
- * covers the ASSETS as well as the geometry, because editing an asset changes every road
- * using it — an undo that put the road back but not its width would be worse than none.
+ * Three kinds of state, and the difference between them is what undo does:
+ *
+ *   THE SNAPSHOT     `doc` and `assets`. This is the design. Every edit goes through
+ *                    `commit`, which is the only place history is recorded.
+ *
+ *   WHAT YOU ARE     tool, buildMode, buildLevel, the armed asset, the road in progress.
+ *   ABOUT TO DO      Not in history: undo should take back a road, not un-press a button.
+ *
+ *   WHAT YOU ARE     selection, which asset is open for editing, the notice.
+ *   LOOKING AT       Also not in history. An undo that spends itself restoring a selection
+ *                    is an undo you have to press twice.
+ *
+ * `assets` is inside the snapshot with `doc`, and that pairing is not incidental: a road is
+ * an INSTANCE of its asset, so widening an asset changes every road built from it. An undo
+ * that put the road back but not its width would be worse than no undo at all.
+ *
+ * WHY SNAPSHOTS RATHER THAN PATCHES
+ *
+ * A document is a few thousand small objects and copying the arrays is free. A mis-applied
+ * patch drifts silently, and a drifted undo stack is unrecoverable; a stale snapshot is
+ * merely old. Nothing in `model/` mutates, so each operation already returns a new
+ * document — the snapshot is whatever the last one was.
+ *
+ * GESTURES
+ *
+ * Dragging a node calls `moveNodeLive` per mouse-move, which does NOT commit. `beginGesture`
+ * captures the snapshot up front and `endGesture` records it once at the end, so a drag
+ * across the map is one undo step rather than a hundred.
+ * ---------------------------------------------------------------------------------------
  */
 
 const HISTORY_LIMIT = 100;
@@ -199,6 +221,7 @@ export interface EditorState extends Snapshot {
   splitAt: (segmentId: string, position: LngLat) => string | null;
   setSegmentAsset: (segmentId: string, assetId: string) => void;
   setNodeElevation: (nodeId: string, elevation: number) => void;
+  dissolveNode: (nodeId: string) => void;
   upgradeSegment: (segmentId: string) => void;
   reverseSegment: (segmentId: string) => void;
   setSegmentCurve: (segmentId: string, curve: CurveSettings) => void;
@@ -584,6 +607,20 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     setNodeElevation: (nodeId, elevation) => commit({ doc: setElevation(get().doc, nodeId, elevation) }),
+
+    /**
+     * Remove a node that is only a seam, joining the two roads it sat between.
+     *
+     * The inverse of a split. Without it the graph only ever gains nodes: a crossing, a
+     * retype, a stray click all leave one behind that could previously be got rid of only
+     * by deleting both roads and drawing them again.
+     */
+    dissolveNode: (nodeId) => {
+      const next = dissolveNode(get().doc, nodeId);
+      if (!next) return;
+      commit({ doc: next });
+      set({ selectedNodeId: null });
+    },
 
     /**
      * Retype a road to whatever is armed, which is the upgrade tool.

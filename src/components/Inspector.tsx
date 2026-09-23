@@ -1,7 +1,7 @@
 import { useEditorStore } from '../store/useEditorStore';
 import { isLineAsset } from '../model/asset';
 import type { LineAsset } from '../model/asset';
-import { endsAt, joinCandidate } from '../model/doc';
+import { canDissolve, endsAt, joinCandidate } from '../model/doc';
 import { totalWidth } from '../model/section';
 import { displayToMetres, formatWidth, metresToDisplay } from '../lib/units';
 import type { DisplayUnits } from '../lib/units';
@@ -157,6 +157,15 @@ export default function Inspector({ units }: Props) {
             {node.radiusMeters !== undefined && (
               <button type="button" onClick={() => store.setNodeRadius(node.id, undefined)}>
                 Use the roads&rsquo; radius
+              </button>
+            )}
+            {canDissolve(doc, node.id) && (
+              <button
+                type="button"
+                onClick={() => store.dissolveNode(node.id)}
+                title="Nothing happens here — join the two roads back into one"
+              >
+                Remove junction, keep the road
               </button>
             )}
             <button type="button" onClick={() => store.bulldoze({ nodeId: node.id })}>

@@ -23,40 +23,223 @@ actually argue about it: not "this block", but "streets like this one".
 The output is real GeoJSON — centerlines, nodes and the polygons derived from them — so a
 design can be measured, reopened and edited parametrically, or pulled into QGIS.
 
-### The three things it is built on
+---
 
-**A road is its centerline, drawn many times.** A four-lane street with footways is one
-LineString emitted eight times over, each copy carrying the width and sideways offset of one
-band. MapLibre does the offsetting and the joins on the GPU, at metre-exact scale, every
-frame. Nothing is turned into a polygon to be looked at.
+## How it works
 
-**Nothing is cut out of anything.** A junction is not subtracted from the roads that meet
-it — the roads run into the node, and the junction's paved ground is drawn *on top of* them.
-The stacking order does the work a polygon boolean used to do, which is both faster and the
-reason a fork is drawn as a fork rather than as a hole.
+Three ideas carry the whole program. Everything else follows from them.
 
-**A road drawn across another splits both.** No click at the crossing, the way a
-road-building game does it. This is not the old detector returning: the crossing point is
-computed from the two lines and lies exactly on both, which is the difference between "these
-two lines cross" — a fact — and "these two roads were probably meant to meet", which is what
-the old model guessed at. Roads at different heights pass each other untouched.
+### 1 · A node is a place. A segment is a road between exactly two of them.
 
-**Height belongs to the node, not the road.** A place has one height, so everything meeting
-there is at that height by construction, and a road whose two ends differ is a ramp between
-them. Putting height on the road lets the document state a contradiction — one point at two
-heights — and the only thing to do with a contradiction is suppress something. There used to
-be a rule for that. There is no longer anything for it to suppress.
+```
+        n2
+        ●                    nodes    n1 n2 n3 n4
+        │                    segments s1 = n1→n2
+     s2 │                             s2 = n2→n3
+        │                             s3 = n2→n4
+  n1 ●──●──● n3
+     s1 │  s3
+        ● n4
+```
 
-**A raised road throws a shadow.** A plan view has no way to show height: two roads crossing
-at different levels are drawn one over the other, and nothing says why one is on top. A
-shadow says it, with the one cue that works without perspective. A ramp's shadow fades in
-along its length, from nothing where it leaves the ground to full where it meets the deck —
-which is the only thing in the renderer that shows a road climbing.
+A **node** owns a position, a height, and optionally a kerb radius. A **segment** owns which
+two nodes it runs between, the bends in the middle, and which asset it is made of — and
+nothing else. Note what a segment does *not* have: any width, any material, and crucially
+**no ends of its own**. Its ends *are* its nodes. That single invariant is why dragging a
+node moves every road that touches it, and why a road can never be left behind.
 
-**A stretch of road that differs is a different road.** There is no mechanism for varying a
-cross-section along a street, because there does not need to be one: split the segment fifty
-metres back and give the stub an asset with a turn lane in it. That is how it is built in
-the real world, and how it is built in a game.
+Two roads are joined when they share a node, and not otherwise. There is no tolerance, no
+proximity rule, and nothing to tune.
+
+### 2 · Nodes are placed, never detected
+
+Every node in the document got there because something explicit put it there. There are
+exactly four ways:
+
+| How | What happens |
+| --- | --- |
+| **You click open ground** | A node is created at the click, at the height you are building at |
+| **You click on a road** | That road is **split** at the click, and the new node is shared by both halves |
+| **Your road crosses another** | Both are split at the crossing, and share the node — no click needed |
+| **You drop a node on another** | They merge, and everything that met at either now meets at one |
+
+…and one way for a node to leave: **dissolve**, the inverse of a split. A node with exactly
+two roads of the same asset is a seam rather than a place, and removing it joins the two
+roads back into one, keeping its position as a bend so nothing springs straight.
+
+Without dissolve the graph is a ratchet — every crossing, retype and stray click leaves a
+node that could only be removed by deleting both roads and drawing them again.
+
+The crossing case is the one worth being precise about, because an earlier version of this
+program got it badly wrong. The crossing point is **computed** from the two lines and lies
+exactly on both. That is a fact about two lines, not a guess about intent. The old model
+instead asked "were these two roads *probably meant* to meet?" with a tolerance that scaled
+to the widest street involved — and answered yes for ends seventeen metres apart, inventing
+junctions at places no road actually reached.
+
+So: crossings are inferred, because a crossing is a fact. **Nearness is never inferred.** A
+road that stops 4 m from another is ringed in orange and left alone until you say so.
+
+### 3 · A junction is not cut out of anything
+
+This is where most road editors get slow and wrong, and it is worth showing the difference.
+
+**The way it is usually done** — build each road as a ribbon, work out the junction's shape,
+then subtract it from every road that touches it:
+
+```
+   ribbon  ────────────────      junction shape     result
+           ────────────────   −      ▒▒▒▒       =   ────┐  ┌────
+                                     ▒▒▒▒            ────┘  └────
+```
+
+Every junction is a polygon boolean against geometry hundreds of points long. It is slow, it
+needs the junction classified first (crossroads? fork? merge?) because the shape to subtract
+depends on the answer, and a fork subtracted as a crossroads comes out as a hole.
+
+**The way it is done here** — the roads run all the way into the node and overlap, and the
+junction's paved ground is drawn *on top of* them:
+
+```
+   roads run in, overlapping     plate drawn over      what you see
+        ────────────                ┌────┐              ────┐  ┌────
+        ─────┼┼─────                │▒▒▒▒│              ────┘  └────
+             ││                     └────┘                  ││
+```
+
+The **stacking order is the boolean.** Nothing is subtracted, nothing is classified, and a
+fork is drawn as a fork for the same reason a crossroads is drawn as a crossroads: nobody
+asked which one it was.
+
+#### The shape of the plate
+
+Two plates, and their order does real work:
+
+1. the **footprint**, as wide as the widest thing arriving, in footway colour;
+2. the **paved area**, carriageways only, in asphalt, drawn over it.
+
+What shows between them at the corners is the footway turning the corner — computed as a
+per-corner polygon by the old model, and free here.
+
+The outline itself is the **corner-return construction**: sort the arriving roads by
+bearing, and for each neighbouring pair find where one road's left kerb crosses the next
+road's right kerb. That point is the corner. Rounding those corners is the kerb return.
+
+The obvious alternative — take the convex hull of the roads' rectangles — was tried and is
+visibly wrong. The convex hull of a cross is a **square**, so the plate bulges into the four
+quadrants where there is no pavement, and a wide road meeting a narrow one reads as a
+roundabout.
+
+#### When there is no junction
+
+Two cases, and an interchange hits both:
+
+- **Everything is heading the same way.** If every road at the node lies within 40° of one
+  line, nothing is crossing anything — a ramp joining a mainline is a *merge*, and a plate
+  there is a lozenge painted across the carriageway at every ramp.
+- **The roads are at different heights.** They never share a node in the first place, so
+  there is nothing to draw.
+
+That second one used to need a rule. It does not any more, which is the next idea.
+
+### Height belongs to the node
+
+A place has one height. Everything meeting there is at that height *by construction*, and a
+road whose two ends differ is a **ramp** between them.
+
+Putting height on the road instead lets the document state a contradiction — one point at
+two heights at once — and the only thing you can do with a contradiction is suppress
+something. There used to be a rule doing exactly that. There is no longer anything for it to
+suppress.
+
+`Page Up` and `Page Down` set the height that **new** nodes get. Landing on a node that
+already exists uses *its* height, because the place already has one and a road does not get
+to disagree with it.
+
+Since a plan view cannot show height, a raised road **casts a shadow** on the ground beneath
+it — the one depth cue that works without perspective. A ramp's shadow fades in along its
+length, from nothing where it leaves the ground to full where it meets the deck, which is
+the only thing in the renderer that shows a road climbing.
+
+---
+
+## How the front end works
+
+One source of truth, and everything on screen is a function of it:
+
+```
+                    ┌──────────────────────────────┐
+                    │   store/useEditorStore.ts    │
+                    │   doc · assets · tool · …    │
+                    └───┬───────────────────┬──────┘
+          subscribes    │                   │    actions
+        ┌───────────────┼───────────────────┼───────────────┐
+        ▼               ▼                   ▼               ▼
+    HotBar          Inspector           MapEditor       MapCanvas
+   build menu     what's selected     project + view    ──► paint.ts ──► MapLibre
+```
+
+No component talks to another. Each subscribes to the slices it needs and calls actions.
+That is why arming an asset in the hotbar immediately changes what the map previews without
+either one knowing the other exists.
+
+### The chrome floats over the map
+
+| Where | What | |
+| --- | --- | --- |
+| top-left | project name, save, open, examples | always |
+| bottom | the **hotbar** — tools, road modes, height, asset families | always |
+| top-right | the **inspector** | only while something is selected |
+| bottom-right | layer switches, imagery fade | always |
+
+A panel that is always there takes space from the map even when it has nothing to say, so
+the inspector is mounted from `hasSelection` — no empty column, nothing to dismiss.
+
+### The rendering path
+
+`paint.ts` is the whole renderer, and it computes **no polygons for roads at all**:
+
+```
+doc + assets  ──►  paint.ts  ──►  one LineString per segment, emitted once per band,
+                                  each copy carrying { widthM, offsetM, color, deck }
+                                          │
+                                          ▼
+                              MapLibre line layers, width and
+                              offset as zoom expressions in metres
+```
+
+A four-lane street with footways is one line drawn eight times over. MapLibre does the
+offsetting and the joins on the GPU. The widths stay metre-exact because Web Mercator scales
+by two per zoom level and an `['exponential', 2]` interpolation reproduces exactly that
+curve — so a 3.6 m lane measures 3.6 m at every zoom, at 39°N and 69°N alike.
+
+The only polygons anywhere are junction plates (a handful of points each) and the band
+polygons written into an exported file, generated once at save.
+
+### What the map shows before a click is spent
+
+All three on pointer move, because a tool you have to trust is worse than one you can see:
+
+| | |
+| --- | --- |
+| **the preview** | the road under construction at its **real width**, painted by the same renderer that draws finished roads |
+| **the snap ring** | what the next click attaches to — amber for a node you would *join*, teal for a road you would *split* |
+| **the guide** | the direction the road has been pulled onto when leaving a junction |
+
+### Layer order is load-bearing
+
+`designLayers()` emits, per deck, in this order:
+
+```
+ground  →  shadow  →  bands  →  stripes  →  symbols  →  junction plates
+                                                        └─ covers the markings
+                                                           that run through it
+```
+
+then, above every deck: the preview, the selected junction's outline, centerlines, handles,
+and the snap ring last of all. A guard test checks this against MapLibre's own style
+validator, because a malformed expression is not an exception — MapLibre logs it, drops the
+layer, and the map renders as bare imagery with the design silently missing.
 
 ---
 
@@ -94,11 +277,16 @@ something is selected.
 
 | Tool | What it does |
 | --- | --- |
-| **Select** | Click a road, junction or ground shape. Drag a node to move it and everything attached follows; drag a handle to reshape one road. **Drop a node onto another and they merge**, which is how two roads drawn separately become connected. |
+| **Select** | Click a road, junction or ground shape. Drag a node to move it and everything attached follows; drag a handle to reshape one road. **Drop a node onto another and they merge**, which is how two roads drawn separately become connected. Selecting a junction outlines the ground it owns. |
 | **Roads** | Click to lay the armed asset. Landing on a node joins there; landing on a road splits it; landing on open ground makes a new node — and running *across* a road splits both without any click at the crossing. The end of one road is the start of the next, so a run of blocks is one gesture. |
 | **Upgrade** | Arm a road type and click an existing road to make it that type. One click, because a road is an instance of its asset rather than a copy of one. |
 | **Ground** | Click a shape for a park, plaza or water. Double-click or Enter closes it. |
 | **Bulldoze** | Click to remove. |
+
+A junction with exactly two roads of the same type is a **seam**, not a place — the inspector
+offers *Remove junction, keep the road*, which is the inverse of a split. It keeps the node's
+position as a bend, so the road does not spring straight when the node goes. Without it the
+graph only ever gains nodes.
 
 The road tool has the three modes the games have, and the difference between them is what a
 click in the MIDDLE of a road means:
@@ -178,7 +366,8 @@ build runs correctly at any base path or domain.
 ```text
 src/
   model/                  The document. Everything here is authored; nothing is inferred.
-    doc.ts                Nodes, segments, areas — and the edits: split, join, merge, move
+    doc.ts                Nodes, segments, areas — and the edits: split, join, merge,
+                          move, dissolve
     build.ts              Laying a road through whatever it crosses, splitting both
     asset.ts              What the palette holds: a line asset, or a ground material
     section.ts            Cross-section arithmetic — widths, anchor, boundary offsets
@@ -238,50 +427,21 @@ The palette rides in a `streetcity` foreign member on the collection. GeoJSON pe
 members it does not define and readers ignore them, so the file stays valid GeoJSON while
 carrying the asset definitions its segments refer to.
 
-### Opening a project from the old street model
+### A note on older files
 
-Files written by the previous editor are converted on load. That editor had no nodes at
-all — a street was a long polyline and whether two of them met was decided afresh by a
-detector every time — so the conversion has to invent what was never recorded, and it is
-deliberately strict about it:
+Projects written by the street-based editor are **no longer read**. Those files contain no
+nodes at all — a street was a long polyline and whether two of them met was decided afresh
+on every load — so anything produced from one would be an invention rather than a
+conversion, and the editor used to make exactly that mistake. Opening one now says so
+plainly instead of half-reading it.
 
-- Where two streets genuinely **cross**, they are split and share a node. The crossing point
-  is computed and lies exactly on both lines, so this is not a guess.
-- Two **ends** within 1.5 m of each other are welded. That is a tracing slip.
-- Everything else comes in unjoined, and joining it is one click.
-
-The old detector scaled its tolerance to the widest street involved and would call ends
-seventeen metres apart joined. Roads that were only ever connected by that guess arrive
-disconnected, which is the truth about what was drawn.
-
-Each distinct cross-section becomes one asset, shared by every street that carried it —
-which is the thing the old model had no way to say.
-
-The two projects the editor ships with, in `src/demo/`, have been converted on disk and are
-stored in the native format, so opening one costs a parse rather than a conversion.
-
-The I-75 example is the one worth opening first, because it exercises everything at once.
-Twenty-six drawn streets convert into **119 roads across 96 nodes**, and the eight distinct
-cross-sections in the file become eight assets — a 39 m freeway, a 13 m ramp, and six
-surface street types — each shared by every road that carried it. Forty-nine of those nodes
-are junctions.
-
-Two things about it are worth knowing, and both are properties of the data rather than of
-the renderer:
-
-- Every street in it is at grade with no grade profile, so ramps that cross the mainline
-  convert into genuine at-grade crossings and are drawn as such. Setting one to **Bridge**
-  is what turns it back into the flyover it is, and is the clearest demonstration that
-  levels do real work: the junction disappears the moment the two roads stop sharing a deck.
-- Forty-seven ends are unjoined, because the weld is strict. Those are the places the old
-  detector was guessing about, and there is currently no gesture for joining two nodes by
-  hand — see the gaps below.
+The two bundled examples were converted once, on disk, and are stored in the native format.
 
 ---
 
 ## Testing
 
-641 tests. The ones worth knowing about:
+640 tests. The ones worth knowing about:
 
 - **`map/paint.test.ts`** — that a 3.6 m lane measures 3.6 m at every zoom, at 39°N and
   69°N. Widths are no longer computed into polygons; they are an expression MapLibre
@@ -295,6 +455,9 @@ the renderer:
 - **`geo/snapping.test.ts`** — that the guides are carry-on plus the two square turns; that
   snapping changes direction without changing how far out the cursor is; and that it lets go
   once the cursor is clearly off, because 45° is a direction somebody meant.
+- **`model/dissolve.test.ts`** — that removing a seam joins the two roads and keeps the
+  bend; and that it refuses at a junction, at a terminus, where the road changes type, and
+  where it would close a ring with no ends.
 - **`model/build.test.ts`** — that a road drawn across another splits both and shares one
   node; that three crossings in one stroke produce ten roads; that a curved road split at a
   crossing keeps its exact shape on both sides; and that a road at a different height passes

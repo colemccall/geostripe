@@ -590,6 +590,7 @@ function plateFeatures(
   resolved: readonly Resolved[],
   plane: LocalPlane,
   defaultRadius: number,
+  selectedNodeId?: string | null,
 ): Feature<Polygon>[] {
   const byId = new Map(resolved.map((r) => [r.segment.id, r]));
   const out: Feature<Polygon>[] = [];
@@ -622,13 +623,25 @@ function plateFeatures(
     out.push({
       type: 'Feature',
       geometry: { type: 'Polygon', coordinates: [closeRing(plates.footprint)] },
-      properties: { nodeId: node.id, kind: 'footprint', deck, color: PRIMITIVES.sidewalk.color },
+      properties: {
+        nodeId: node.id,
+        kind: 'footprint',
+        deck,
+        color: PRIMITIVES.sidewalk.color,
+        selected: node.id === selectedNodeId ? 1 : 0,
+      },
     });
     if (plates.paved) {
       out.push({
         type: 'Feature',
         geometry: { type: 'Polygon', coordinates: [closeRing(plates.paved)] },
-        properties: { nodeId: node.id, kind: 'paved', deck, color: PRIMITIVES.travelLane.color },
+        properties: {
+          nodeId: node.id,
+          kind: 'paved',
+          deck,
+          color: PRIMITIVES.travelLane.color,
+          selected: node.id === selectedNodeId ? 1 : 0,
+        },
       });
     }
   }
@@ -750,7 +763,13 @@ export function paintDoc(
     },
     plates: {
       type: 'FeatureCollection',
-      features: plateFeatures(doc, resolved, plane, options.defaultRadiusMeters),
+      features: plateFeatures(
+        doc,
+        resolved,
+        plane,
+        options.defaultRadiusMeters,
+        options.selectedNodeId,
+      ),
     },
     areas: { type: 'FeatureCollection', features: areaFeatures(doc, assets) },
     handles: { type: 'FeatureCollection', features: handleFeatures(doc, options) },
@@ -959,6 +978,23 @@ export function designLayers(latDeg: number): LayerSpecification[] {
       'line-width': width,
       'line-offset': offset,
       'line-opacity': 0.65,
+    },
+  });
+
+  // The ground a selected junction owns, outlined. A junction is the least visible thing in
+  // the design — it is the ABSENCE of road markings and a slightly different grey — so
+  // selecting one has to say which ground is actually being talked about before any of the
+  // numbers in the inspector mean anything.
+  layers.push({
+    id: 'plate-selected',
+    type: 'line',
+    source: 'plates',
+    filter: ['all', ['==', ['get', 'selected'], 1], ['==', ['get', 'kind'], 'footprint']],
+    layout: { 'line-join': 'round' },
+    paint: {
+      'line-color': '#4DA3FF',
+      'line-width': 2,
+      'line-dasharray': [3, 2],
     },
   });
 

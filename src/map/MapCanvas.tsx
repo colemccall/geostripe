@@ -39,15 +39,46 @@ setWorkerUrl(`${import.meta.env.BASE_URL}maplibre/maplibre-gl-worker.mjs`);
 /**
  * The map, and every pointer gesture on it.
  *
- * The interaction model is a road-building game's, and the change from what came before is
- * not cosmetic. Drawing used to mean tracing a whole street as a polyline, finishing it, and
- * then hoping the junction detector agreed with where you had aimed. Here a click is
- * unambiguous: it lands on a node, on a road, or on open ground, and each of those means
- * exactly one thing. Nothing is inferred afterwards, so nothing can be inferred wrongly.
+ * ---------------------------------------------------------------------------------------
+ * WHAT THIS FILE DOES
  *
- * What the map draws comes entirely from `paint.ts`, which turns the document into offset
- * lines rather than polygons. This file's job is therefore small: keep the sources fed, and
- * translate pointer events into document edits.
+ * Two jobs, and deliberately no others:
+ *
+ *   1. Keep MapLibre's sources fed from the store. Everything drawn comes out of
+ *      `paint.ts`; this file never computes geometry, it only pushes what paint produced.
+ *   2. Turn pointer events into store actions. It decides WHAT a click meant, never what
+ *      the document should become — that is the store's and the model's business.
+ *
+ * WHAT A CLICK MEANS
+ *
+ * The whole interaction model rests on a click being unambiguous. `snapAt` asks the
+ * RENDERED map what is under the cursor, in that order of preference:
+ *
+ *   a node      → use it. Building here JOINS.
+ *   a road      → use the point on it. Building here SPLITS it at that point.
+ *   open ground → make a new node.
+ *
+ * Asked of the rendered map rather than of the model on purpose: "what is under the cursor"
+ * is a question about pixels, and a tolerance in metres would be right at exactly one zoom.
+ *
+ * WHAT IS SHOWN BEFORE THE CLICK IS SPENT
+ *
+ * Three things, all on pointer move, because a tool you have to trust is worse than one you
+ * can see:
+ *
+ *   the preview   the road under construction, at its REAL width, painted by the same
+ *                 renderer that draws finished roads (`paintPreview`)
+ *   the snap ring what the next click will attach to — amber for a node you would join,
+ *                 teal for a road you would split
+ *   the guide     the direction the road has been pulled onto, when leaving a junction
+ *
+ * WHY SO MANY REFS
+ *
+ * `hover`, `drag`, `areaRing`, `painted`, `styleKey` and `assetMapRef` are refs rather than
+ * state because they change at pointer rate. Re-rendering React sixty times a second to
+ * move a dashed line is how an editor starts feeling heavy for no reason; the map's sources
+ * are updated directly instead.
+ * ---------------------------------------------------------------------------------------
  */
 
 /** How near, in screen pixels, a click has to be to snap to a node or a road. */
@@ -274,9 +305,15 @@ export function MapCanvas({ className }: MapCanvasProps) {
   /**
    * What a click at this point should attach to.
    *
-   * Asked of the rendered map rather than of the model, because the question is "what is
-   * under the cursor", and a tolerance in metres would be right at one zoom and wrong at
-   * every other. Nodes win over roads: if both are within reach you meant the junction.
+   * Asked of the RENDERED map rather than of the model, because the question is "what is
+   * under the cursor" — a question about pixels. A tolerance in metres would be right at
+   * exactly one zoom and wrong at every other.
+   *
+   * Nodes win over roads. If both are within reach you meant the junction: joining at a
+   * place that already exists is nearly always the intent, and splitting a road a metre
+   * from its own end produces a sliver nobody wanted.
+   *
+   * Returning `undefined` means open ground, which is a real answer and not a failure.
    */
   const snapAt = useCallback(
     (event: MapMouseEvent): Snap | undefined => {
