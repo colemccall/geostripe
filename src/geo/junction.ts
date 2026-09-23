@@ -309,11 +309,11 @@ export function junctionPlates(
 ): JunctionPlates | null {
   if (arrivals.length < MIN_ENDS) return null;
 
-  // Roads at different levels do not meet, whatever the plan view says. This is what makes
-  // an interchange buildable out of parts that already exist: raise the road that crosses
-  // and the junction stops existing, the decks order themselves, and the flyover reads as a
-  // flyover. Without it, an overpass carves a paved slab through the carriageway beneath it.
-  if (arrivals.some((a) => a.level !== arrivals[0]!.level)) return null;
+  // There is deliberately no check here for roads at different heights. There cannot be
+  // any: height belongs to the node, so everything arriving is at the node's height by
+  // construction, and two roads at different heights simply never share a node. That used
+  // to need a rule, and a rule is what you write when the model lets you say something
+  // false.
 
   // Nothing crosses anything here — a ramp meeting a mainline, or one road continuing into
   // the next. The roads overlap and run together, which is what a merge looks like, and a

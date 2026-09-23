@@ -1,7 +1,6 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { parseProject, serializeProject, toProjectGeoJSON } from './io';
-import { addNode, addSegment, emptyDoc } from './doc';
+import { addNode, addSegment, emptyDoc, setElevation } from './doc';
 import type { Doc } from './doc';
 import { builtInAssets, defaultLineAssetId } from '../library/assets';
 import type { LineAsset } from './asset';
@@ -23,6 +22,8 @@ function project(): { doc: Doc; assets: ReturnType<typeof builtInAssets> } {
   doc = b.doc;
   const c = addNode(doc, [-84.51, 39.11]);
   doc = c.doc;
+  // Height is a property of the place now, so a bridge is a raised junction.
+  doc = setElevation(doc, c.nodeId, 1);
 
   doc = addSegment(doc, {
     assetId,
@@ -36,7 +37,6 @@ function project(): { doc: Doc; assets: ReturnType<typeof builtInAssets> } {
     fromNodeId: b.nodeId,
     toNodeId: c.nodeId,
     shape: [],
-    level: 1,
   }).doc;
 
   return { doc, assets };
@@ -65,10 +65,30 @@ describe('round trip', () => {
     expect(curved?.shape).toHaveLength(1);
   });
 
-  it('keeps a segment at its level, which is how bridges survive a save', () => {
+  it('keeps a junction at its height, which is how bridges survive a save', () => {
     const { doc, assets } = project();
     const back = parseProject(serializeProject(doc, assets, { name: 'Test' }), builtInAssets());
-    expect(back.doc.segments.some((s) => s.level === 1)).toBe(true);
+    expect(back.doc.nodes.some((n) => n.elevation === 1)).toBe(true);
+  });
+
+  it('refuses a file from the old street format rather than inventing a graph from it', () => {
+    // Those files have no nodes in them at all. Anything produced from one would be an
+    // invention, and the editor used to do exactly that with a tolerance that called ends
+    // seventeen metres apart a junction.
+    const old = {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          geometry: { type: 'LineString', coordinates: [[-84.52, 39.1], [-84.51, 39.1]] },
+          properties: { geostripe: 'street', name: 'Street 1' },
+        },
+      ],
+    };
+
+    const back = parseProject(JSON.stringify(old), builtInAssets());
+    expect(back.doc.segments).toEqual([]);
+    expect(back.warnings.join(' ')).toMatch(/old street format/);
   });
 
   it('carries the palette, so the roads still know what they are made of', () => {
@@ -125,97 +145,5 @@ describe('reading files that are not ours', () => {
   it('reports a file that is not a FeatureCollection', () => {
     const back = parseProject('{"type":"Feature"}', builtInAssets());
     expect(back.warnings[0]).toMatch(/FeatureCollection/);
-  });
-});
-
-describe('converting a project from the street model', () => {
-  const source = readFileSync('cinci.geojson', 'utf8');
-
-  it('turns every street into a road between two nodes', () => {
-    const back = parseProject(source, builtInAssets());
-
-    expect(back.converted).toBe(true);
-    expect(back.doc.segments.length).toBeGreaterThan(0);
-    for (const segment of back.doc.segments) {
-      expect(segment.fromNodeId).toBeTruthy();
-      expect(segment.toNodeId).toBeTruthy();
-      expect(segment.fromNodeId).not.toBe(segment.toNodeId);
-    }
-  });
-
-  it('leaves no road pointing at a node that is not there', () => {
-    const back = parseProject(source, builtInAssets());
-    const ids = new Set(back.doc.nodes.map((n) => n.id));
-    for (const segment of back.doc.segments) {
-      expect(ids.has(segment.fromNodeId)).toBe(true);
-      expect(ids.has(segment.toNodeId)).toBe(true);
-    }
-  });
-
-  it('gives every road an asset that exists in the palette', () => {
-    const back = parseProject(source, builtInAssets());
-    const ids = new Set(back.assets.map((a) => a.id));
-    for (const segment of back.doc.segments) {
-      expect(ids.has(segment.assetId)).toBe(true);
-    }
-  });
-
-  it('makes one asset per distinct cross-section, not one per street', () => {
-    const back = parseProject(source, builtInAssets());
-    const imported = back.assets.filter((a) => a.id.startsWith('imported-'));
-
-    // The point of the conversion: streets that were the same street get the same type,
-    // which the old model had no way to say.
-    expect(imported.length).toBeGreaterThan(0);
-    expect(imported.length).toBeLessThanOrEqual(back.doc.segments.length);
-  });
-
-  it('discards the old model’s derived bands', () => {
-    const back = parseProject(source, builtInAssets());
-    const original = JSON.parse(source) as { features: { properties?: { geostripe?: string } }[] };
-    const bands = original.features.filter((f) => f.properties?.geostripe === 'band');
-
-    expect(bands.length).toBeGreaterThan(0);
-    expect(back.doc.segments.length).toBeLessThan(bands.length);
-  });
-
-  it('splits streets where they genuinely cross, and shares the node', () => {
-    const back = parseProject(source, builtInAssets());
-    const degree = new Map<string, number>();
-    for (const segment of back.doc.segments) {
-      degree.set(segment.fromNodeId, (degree.get(segment.fromNodeId) ?? 0) + 1);
-      degree.set(segment.toNodeId, (degree.get(segment.toNodeId) ?? 0) + 1);
-    }
-
-    // A crossing is the one thing the conversion is allowed to infer, because the point is
-    // computed and lies exactly on both lines. Ten long streets come in as a network rather
-    // than as ten roads that merely overlap.
-    const junctions = [...degree.values()].filter((d) => d >= 3).length;
-    expect(junctions).toBeGreaterThan(5);
-    expect(back.doc.segments.length).toBeGreaterThan(20);
-  });
-
-  it('never leaves a road with no length between two crossings', () => {
-    const back = parseProject(source, builtInAssets());
-    for (const segment of back.doc.segments) {
-      expect(segment.fromNodeId).not.toBe(segment.toNodeId);
-    }
-  });
-
-  it('says what it did, including what it refused to join', () => {
-    const back = parseProject(source, builtInAssets());
-    expect(back.warnings.join(' ')).toMatch(/Converted \d+ street/);
-  });
-
-  it('re-saves as a native file that needs no conversion next time', () => {
-    const back = parseProject(source, builtInAssets());
-    const again = parseProject(
-      serializeProject(back.doc, back.assets, { name: 'Cincinnati', includeBands: false }),
-      builtInAssets(),
-    );
-
-    expect(again.converted).toBe(false);
-    expect(again.doc.segments).toHaveLength(back.doc.segments.length);
-    expect(again.doc.nodes).toHaveLength(back.doc.nodes.length);
   });
 });

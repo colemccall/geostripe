@@ -44,17 +44,28 @@ export const BUILD_ID: string = typeof __BUILD_ID__ === 'string' ? __BUILD_ID__ 
 export const BUILT_AT: string = typeof __BUILT_AT__ === 'string' ? __BUILT_AT__ : '';
 
 /**
+ * When this page was loaded, for the dev case where there is no build to stamp.
+ *
+ * The build time is baked when Vite's config is evaluated, which under `vite dev` is when
+ * the server started — so it froze while the code kept hot-reloading, and the header spent
+ * a whole session asserting a freshness it had no way to know. Reload time is a smaller
+ * claim and a true one: it tells you which load of the page you are looking at, which is
+ * the question being asked when somebody says they cannot see their change.
+ */
+const LOADED_AT = new Date();
+
+/**
  * The build, as something a person can compare against their own clock.
  *
  * Local time, not UTC: the question is always "is this from before or after I pushed", and
  * that is asked against the clock on the wall.
  */
 export function buildStamp(): string {
-  if (!BUILT_AT) return 'dev';
-  const built = new Date(BUILT_AT);
+  const built = BUILT_AT ? new Date(BUILT_AT) : LOADED_AT;
   if (Number.isNaN(built.getTime())) return 'dev';
 
-  return built.toLocaleString(undefined, {
+  const prefix = BUILT_AT ? '' : 'dev · ';
+  return prefix + built.toLocaleString(undefined, {
     day: 'numeric',
     month: 'short',
     hour: '2-digit',

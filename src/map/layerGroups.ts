@@ -41,6 +41,12 @@ export const LAYER_GROUPS = [
     layers: perDeck('stamp'),
   },
   {
+    id: 'shadows',
+    label: 'Bridge shadows',
+    hint: 'What a raised road throws on the ground, and the fade that shows a ramp climbing.',
+    layers: [...perDeck('shadow-flat'), ...perDeck('shadow-ramp')],
+  },
+  {
     id: 'junctions',
     label: 'Junctions',
     hint: 'The paved ground each node owns, drawn over the road ends that meet there.',
@@ -50,7 +56,7 @@ export const LAYER_GROUPS = [
     id: 'handles',
     label: 'Editing handles',
     hint: 'Nodes, shape points and centerlines — the parts that are not on the ground.',
-    layers: ['guide-line', 'handle-point'],
+    layers: ['plate-selected', 'guide-line', 'handle-point'],
   },
 ] as const;
 
