@@ -150,6 +150,28 @@ export function endsAt(nodeId: string, segments: readonly Segment[]): {
   return out;
 }
 
+/**
+ * Every node's arriving road ends, built in one pass over the segments.
+ *
+ * `endsAt` answers the same question for one node by scanning every segment, which is fine
+ * once and quadratic when asked for every node in a project. Anything that visits all the
+ * nodes builds this first instead.
+ */
+export function adjacency(segments: readonly Segment[]): Map<string, { segment: Segment; end: 'from' | 'to' }[]> {
+  const map = new Map<string, { segment: Segment; end: 'from' | 'to' }[]>();
+  const add = (nodeId: string, segment: Segment, end: 'from' | 'to') => {
+    const list = map.get(nodeId);
+    if (list) list.push({ segment, end });
+    else map.set(nodeId, [{ segment, end }]);
+  };
+  for (const segment of segments) {
+    if (segment.visible === false) continue;
+    add(segment.fromNodeId, segment, 'from');
+    add(segment.toNodeId, segment, 'to');
+  }
+  return map;
+}
+
 /** How many roads meet at each node. Nodes with none are leftovers and get swept. */
 export function degrees(doc: Doc): Map<string, number> {
   const counts = new Map<string, number>(doc.nodes.map((node) => [node.id, 0]));

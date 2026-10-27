@@ -762,16 +762,22 @@ export function MapCanvas({ className }: MapCanvasProps) {
     if (!map || !ready) return;
 
     assetMapRef.current = assetMap(assets);
-    const sources = paintDoc(doc, assetMapRef.current, {
-      selectedSegmentId,
-      selectedNodeId,
-      selectedAreaId,
-      defaultRadiusMeters,
-      showAllCenterlines,
-    });
 
-    painted.current = sources;
-    pushSources(map, sources);
+    // At most one repaint per animation frame. A drag can deliver several store updates
+    // between frames, and only the latest is ever visible.
+    const frame = requestAnimationFrame(() => {
+      const sources = paintDoc(doc, assetMapRef.current, {
+        selectedSegmentId,
+        selectedNodeId,
+        selectedAreaId,
+        defaultRadiusMeters,
+        showAllCenterlines,
+      });
+
+      painted.current = sources;
+      pushSources(map, sources);
+    });
+    return () => cancelAnimationFrame(frame);
   }, [
     doc,
     assets,

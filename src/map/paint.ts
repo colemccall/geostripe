@@ -13,7 +13,7 @@ import { IMAGE_PX_PER_METRE } from './glyphImages';
 import { LANDCOVERS } from '../library/landcover';
 import { PRIMITIVES } from '../library/primitives';
 import { boundaryOffsets, componentStarts, resolveAnchorOffset, sectionExtent } from '../model/section';
-import { endsAt, joinCandidate, nodeMap, segmentControlPoints, segmentElevation } from '../model/doc';
+import { adjacency, joinCandidate, nodeMap, segmentControlPoints, segmentElevation } from '../model/doc';
 import type { Doc, Node, Segment } from '../model/doc';
 import { isLineAsset } from '../model/asset';
 import type { Asset, LineAsset } from '../model/asset';
@@ -583,76 +583,58 @@ function radiusFor(
   return radius > 0 ? radius : fallback;
 }
 
-function plateFeatures(
-  doc: Doc,
-  resolved: readonly Resolved[],
+/**
+ * The plates for one junction, or none.
+ *
+ * Built in a plane centred on the junction itself, so its scale is its own latitude's and it
+ * lies over the roads it covers whatever the size of the project. The `selected` flag is NOT
+ * set here: plates are cached per junction, and selecting one must not invalidate them.
+ */
+function platesAt(
+  node: Node,
+  ends: readonly { segment: Segment; end: 'from' | 'to' }[],
+  byId: ReadonlyMap<string, Resolved>,
   defaultRadius: number,
-  selectedNodeId?: string | null,
 ): Feature<Polygon>[] {
-  const byId = new Map(resolved.map((r) => [r.segment.id, r]));
-  const out: Feature<Polygon>[] = [];
+  const plane = localPlane(node.position);
+  const arrivals: Arrival[] = [];
+  const involved: Resolved[] = [];
 
-  for (const node of doc.nodes) {
-    // Each junction is built in a plane of its own, centred on it: its scale is its own
-    // latitude's, so it lies over the roads it covers whatever the size of the project.
-    const plane = localPlane(node.position);
-    const ends = endsAt(node.id, doc.segments);
-    const arrivals: Arrival[] = [];
-    const involved: Resolved[] = [];
-
-    for (const { segment, end } of ends) {
-      const item = byId.get(segment.id);
-      if (!item) continue;
-      const arrival = arrivalFor(item, end, plane, node.elevation ?? 0);
-      if (arrival) {
-        arrivals.push(arrival);
-        involved.push(item);
-      }
-    }
-
-    const plates = junctionPlates(
-      node.id,
-      node.position,
-      arrivals,
-      radiusFor(node, involved, defaultRadius),
-      plane,
-    );
-    if (!plates) continue;
-
-    const deck = deckOf(node.elevation ?? 0);
-    out.push({
-      type: 'Feature',
-      geometry: { type: 'Polygon', coordinates: [closeRing(plates.footprint)] },
-      properties: {
-        nodeId: node.id,
-        kind: 'footprint',
-        deck,
-        color: PRIMITIVES.sidewalk.color,
-        selected: node.id === selectedNodeId ? 1 : 0,
-      },
-    });
-    if (plates.paved) {
-      out.push({
-        type: 'Feature',
-        geometry: { type: 'Polygon', coordinates: [closeRing(plates.paved)] },
-        properties: {
-          nodeId: node.id,
-          kind: 'paved',
-          deck,
-          color: PRIMITIVES.travelLane.color,
-          selected: node.id === selectedNodeId ? 1 : 0,
-        },
-      });
+  for (const { segment, end } of ends) {
+    const item = byId.get(segment.id);
+    if (!item) continue;
+    const arrival = arrivalFor(item, end, plane, node.elevation ?? 0);
+    if (arrival) {
+      arrivals.push(arrival);
+      involved.push(item);
     }
   }
 
-  // Footprints of a whole deck before any of its paved plates, so a corner footway is never
-  // painted over by the asphalt of the junction next door.
-  return out.sort(
-    (a, b) =>
-      (a.properties!.deck as number) - (b.properties!.deck as number) ||
-      (a.properties!.kind === 'footprint' ? 0 : 1) - (b.properties!.kind === 'footprint' ? 0 : 1),
+  const plates = junctionPlates(
+    node.id,
+    node.position,
+    arrivals,
+    radiusFor(node, involved, defaultRadius),
+    plane,
   );
+  if (!plates) return [];
+
+  const deck = deckOf(node.elevation ?? 0);
+  const out: Feature<Polygon>[] = [
+    {
+      type: 'Feature',
+      geometry: { type: 'Polygon', coordinates: [closeRing(plates.footprint)] },
+      properties: { nodeId: node.id, kind: 'footprint', deck, color: PRIMITIVES.sidewalk.color, selected: 0 },
+    },
+  ];
+  if (plates.paved) {
+    out.push({
+      type: 'Feature',
+      geometry: { type: 'Polygon', coordinates: [closeRing(plates.paved)] },
+      properties: { nodeId: node.id, kind: 'paved', deck, color: PRIMITIVES.travelLane.color, selected: 0 },
+    });
+  }
+  return out;
 }
 
 function areaFeatures(doc: Doc, assets: ReadonlyMap<string, Asset>): Feature<Polygon>[] {
@@ -745,27 +727,158 @@ function guideFeatures(resolved: readonly Resolved[], options: PaintOptions): Fe
  * nothing here turns anything into a polygon except the junction plates, which are a convex
  * hull of at most a few dozen points each.
  */
+/**
+ * What was painted for each segment, kept until something it depends on changes.
+ *
+ * The model never mutates: an edit makes new objects for exactly what changed and reuses the
+ * rest. So object identity answers "did this change" for free, and dragging one junction
+ * repaints the handful of roads touching it instead of every road in the project.
+ */
+interface SegmentPaint {
+  from: Node;
+  to: Node;
+  asset: LineAsset;
+  resolved: Resolved;
+  bands: Feature<LineString>[];
+  stripes: Feature<LineString>[];
+  stamps: Feature<Point>[];
+  shadows: Feature<LineString>[];
+}
+const segmentCache = new WeakMap<Segment, SegmentPaint>();
+
+interface NodePaint {
+  sig: readonly unknown[];
+  features: Feature<Polygon>[];
+}
+const nodeCache = new WeakMap<Node, NodePaint>();
+
+function sameSig(a: readonly unknown[], b: readonly unknown[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+function paintSegment(
+  segment: Segment,
+  from: Node,
+  to: Node,
+  asset: LineAsset,
+  assets: ReadonlyMap<string, Asset>,
+): SegmentPaint | null {
+  const cached = segmentCache.get(segment);
+  if (cached && cached.from === from && cached.to === to && cached.asset === asset) return cached;
+
+  const mini: Doc = { nodes: [from, to], segments: [segment], areas: [] };
+  const [resolved] = resolveSegments(mini, assets);
+  if (!resolved) return null;
+
+  const entry: SegmentPaint = {
+    from,
+    to,
+    asset,
+    resolved,
+    bands: bandFeatures([resolved]),
+    stripes: stripeFeatures([resolved]),
+    stamps: stampFeatures([resolved]),
+    shadows: shadowFeatures([resolved], new Map([[from.id, from], [to.id, to]])),
+  };
+  segmentCache.set(segment, entry);
+  return entry;
+}
+
+/** Concatenate lists in order of a small integer key, keeping insertion order within a key. */
+function inOrder<T>(lists: readonly (readonly T[])[], keyOf: (item: T) => number, buckets: number): T[] {
+  const sizes = new Array<number>(buckets).fill(0);
+  for (const list of lists) for (const item of list) sizes[keyOf(item)]!++;
+  const starts = new Array<number>(buckets);
+  let total = 0;
+  for (let i = 0; i < buckets; i++) {
+    starts[i] = total;
+    total += sizes[i]!;
+  }
+  const out = new Array<T>(total);
+  for (const list of lists) for (const item of list) out[starts[keyOf(item)]!++] = item;
+  return out;
+}
+
+const deckKey = (f: Feature) => (f.properties!.deck as number) + 1;
+
+/**
+ * Build every source the map draws from.
+ *
+ * Per-segment and per-junction results are cached by object identity (see above), so the
+ * cost of a repaint follows what changed, not the size of the project. What is left on every
+ * call is stitching the cached pieces into the sources and ordering them by deck.
+ */
 export function paintDoc(
   doc: Doc,
   assets: ReadonlyMap<string, Asset>,
   options: PaintOptions,
 ): PaintSources {
-  const resolved = resolveSegments(doc, assets);
+  const nodes = nodeMap(doc);
+  const entries: SegmentPaint[] = [];
+
+  for (const segment of doc.segments) {
+    if (segment.visible === false) continue;
+    const asset = assets.get(segment.assetId);
+    if (!asset || !isLineAsset(asset)) continue;
+    const from = nodes.get(segment.fromNodeId);
+    const to = nodes.get(segment.toNodeId);
+    if (!from || !to) continue;
+    const entry = paintSegment(segment, from, to, asset, assets);
+    if (entry) entries.push(entry);
+  }
+
+  const resolved = entries.map((e) => e.resolved);
+  const byId = new Map(resolved.map((r) => [r.segment.id, r]));
+  const arriving = adjacency(doc.segments);
+
+  const plateLists: Feature<Polygon>[][] = [];
+  for (const node of doc.nodes) {
+    const ends = arriving.get(node.id) ?? [];
+    const sig: unknown[] = [options.defaultRadiusMeters];
+    for (const { segment } of ends) {
+      const e = segmentCache.get(segment);
+      sig.push(segment, e?.from, e?.to, e?.asset);
+    }
+    let cached = nodeCache.get(node);
+    if (!cached || !sameSig(cached.sig, sig)) {
+      cached = { sig, features: platesAt(node, ends, byId, options.defaultRadiusMeters) };
+      nodeCache.set(node, cached);
+    }
+    plateLists.push(
+      node.id === options.selectedNodeId
+        ? cached.features.map((f) => ({ ...f, properties: { ...f.properties, selected: 1 } }))
+        : cached.features,
+    );
+  }
+
   return {
-    bands: { type: 'FeatureCollection', features: bandFeatures(resolved) },
-    stripes: { type: 'FeatureCollection', features: stripeFeatures(resolved) },
-    stamps: { type: 'FeatureCollection', features: stampFeatures(resolved) },
-    shadows: {
+    bands: {
       type: 'FeatureCollection',
-      features: shadowFeatures(resolved, nodeMap(doc)),
+      features: inOrder(
+        entries.map((e) => e.bands),
+        (f) => deckKey(f) * 2 + (f.properties!.raised as number),
+        6,
+      ),
     },
+    stripes: {
+      type: 'FeatureCollection',
+      features: inOrder(entries.map((e) => e.stripes), deckKey, 3),
+    },
+    stamps: {
+      type: 'FeatureCollection',
+      features: inOrder(entries.map((e) => e.stamps), deckKey, 3),
+    },
+    shadows: { type: 'FeatureCollection', features: entries.flatMap((e) => e.shadows) },
     plates: {
       type: 'FeatureCollection',
-      features: plateFeatures(
-        doc,
-        resolved,
-        options.defaultRadiusMeters,
-        options.selectedNodeId,
+      // Footprints of a whole deck before any of its paved plates, so a corner footway is
+      // never painted over by the asphalt of the junction next door.
+      features: inOrder(
+        plateLists,
+        (f) => deckKey(f) * 2 + (f.properties!.kind === 'footprint' ? 0 : 1),
+        6,
       ),
     },
     areas: { type: 'FeatureCollection', features: areaFeatures(doc, assets) },
