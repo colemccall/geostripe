@@ -3,18 +3,21 @@ import type { Feature, FeatureCollection, LineString, Point, Polygon } from 'geo
 import { closeRing, resolveCenterline, resolveRing } from '../geo/curve';
 import { junctionPlates } from '../geo/junction';
 import type { Arrival } from '../geo/junction';
-import { dedupe, localPlane, originFor } from '../geo/projection';
-import type { LngLat, LocalPlane } from '../geo/projection';
+import { EQUATOR_METRES, dedupe, localPlane, scaleForLine } from '../geo/crs';
+import type { LngLat, LocalPlane } from '../geo/crs';
 import { defaultGlyphFor, stripeBetween } from '../geo/markings';
 import type { StripeStyle } from '../geo/markings';
 import { PAINT_WHITE, PAINT_YELLOW } from '../geo/markings';
 import { GLYPHS } from '../geo/glyphs';
 import { IMAGE_PX_PER_METRE } from './glyphImages';
-import { metresPerDegreeLat, metresPerDegreeLng } from '../geo/projection';
 import { LANDCOVERS } from '../library/landcover';
+import { LAND_USES } from '../library/landuse';
+import { BUILDING_TYPES } from '../library/buildingTypes';
+import { footprint } from '../model/buildings';
+import { DECK_COLORS, FAMILY_COLORS } from './views';
 import { PRIMITIVES } from '../library/primitives';
 import { boundaryOffsets, componentStarts, resolveAnchorOffset, sectionExtent } from '../model/section';
-import { endsAt, joinCandidate, nodeMap, segmentControlPoints, segmentElevation } from '../model/doc';
+import { adjacency, emptyDoc, joinCandidate, nodeMap, segmentControlPoints, segmentElevation } from '../model/doc';
 import type { Doc, Node, Segment } from '../model/doc';
 import { isLineAsset } from '../model/asset';
 import type { Asset, LineAsset } from '../model/asset';
@@ -42,21 +45,17 @@ import type { Asset, LineAsset } from '../model/asset';
  * The width is exact rather than approximate, which is the part worth being careful about.
  * Web Mercator scales by a factor of two per zoom level, so a metre is
  *
- *     pixels = metres × 512 × 2^zoom / (40075016.686 × cos(latitude))
+ *     pixels = metres × k × 512 × 2^zoom / 40075016.686,   k = 1 / cos(latitude)
  *
  * and an `['exponential', 2]` interpolation between two zoom stops reproduces exactly that
  * curve, not an approximation of it. So a 3.6 m lane measures 3.6 m at zoom 14 and at zoom
  * 22 alike, and the fit of a design against the imagery under it — which is the claim this
  * whole tool makes — is as honest as it was when polygons were being computed.
  *
- * The one thing the expression cannot know is latitude, because cos(latitude) is not
- * available to it. It is baked in from the project's own centre, which is correct over a
- * project and wrong over a continent; a design spanning enough latitude for that to matter
- * is not a design of a street.
+ * The one thing the expression cannot compute is cos(latitude), so each feature carries its
+ * own scale `k` (see geo/crs.ts), evaluated where that feature sits. Nothing is baked once
+ * for the project, so a design can be loaded or drawn at any latitude.
  */
-
-/** Circumference of the Earth at the equator, in metres — Web Mercator's world width. */
-const EQUATOR_METRES = 40075016.686;
 
 /** MapLibre's world is this many CSS pixels across at zoom zero. */
 const WORLD_PIXELS_AT_Z0 = 512;
@@ -88,27 +87,35 @@ const SHADOW_DROP_PX = 4;
  */
 const SHADOW_OPACITY = 0.45;
 
-export function pixelsPerMetre(latDeg: number, zoom: number): number {
-  const ground = EQUATOR_METRES * Math.cos((latDeg * Math.PI) / 180);
-  return (WORLD_PIXELS_AT_Z0 * Math.pow(2, zoom)) / ground;
+/**
+ * Screen pixels per ground metre at the equator. Web Mercator stretches a real distance by
+ * k = 1 / cos(latitude), so a feature's own `k` property multiplies this to give pixels per
+ * real metre where that feature sits.
+ */
+export function pixelsPerMetre(zoom: number): number {
+  return (WORLD_PIXELS_AT_Z0 * Math.pow(2, zoom)) / EQUATOR_METRES;
 }
 
+/** Fallback for a feature that carries no scale; correct only at the equator. */
+const SCALE = ['coalesce', ['get', 'k'], 1] as ExpressionSpecification;
+
 /**
- * An expression turning a value in metres into screen pixels, exactly, at every zoom.
+ * An expression turning a value in metres into screen pixels, exactly, at every zoom and at
+ * the latitude of the feature drawn, because each feature carries its own `k`.
  *
- * `zoom` has to be the input of the OUTERMOST interpolate — MapLibre rejects it anywhere
- * else — so the feature property is multiplied inside each stop rather than outside the
+ * `zoom` has to be the input of the OUTERMOST interpolate - MapLibre rejects it anywhere
+ * else - so the feature property is multiplied inside each stop rather than outside the
  * whole thing. That constraint is the only reason this looks the way it does.
  */
-export function metresToPixels(latDeg: number, metres: ExpressionSpecification | number) {
+export function metresToPixels(metres: ExpressionSpecification | number) {
   return [
     'interpolate',
     ['exponential', 2],
     ['zoom'],
     MIN_ZOOM,
-    ['*', metres, pixelsPerMetre(latDeg, MIN_ZOOM)],
+    ['*', metres, SCALE, pixelsPerMetre(MIN_ZOOM)],
     MAX_ZOOM,
-    ['*', metres, pixelsPerMetre(latDeg, MAX_ZOOM)],
+    ['*', metres, SCALE, pixelsPerMetre(MAX_ZOOM)],
   ] as ExpressionSpecification;
 }
 
@@ -148,6 +155,12 @@ export interface PaintSources {
   plates: FeatureCollection<Polygon>;
   /** Parks, plazas, water — the ground under everything. */
   areas: FeatureCollection<Polygon>;
+  /** Land use, painted over the ground and under the roads. */
+  zones: FeatureCollection<Polygon>;
+  /** Planning districts: a wash of colour and an outline. */
+  districts: FeatureCollection<Polygon>;
+  /** Building footprints. */
+  buildings: FeatureCollection<Polygon>;
   /** Nodes and shape points: the handles, which are not on the ground. */
   handles: FeatureCollection<Point>;
   /** Centerlines for selection and for dragging. */
@@ -171,25 +184,14 @@ const empty = <T extends Feature['geometry']>(): FeatureCollection<T> => ({
 
 // --------------------------------------------------------------------------- build
 
-/**
- * The centre of the project, which fixes the latitude the metre scale is built from.
- *
- * Recomputed on every build rather than cached: it is a bounding-box midpoint over a few
- * hundred points, and a stale one would silently mis-scale every width in the project after
- * the user pans to a new city.
- */
-export function projectCentre(doc: Doc): LngLat {
-  const points: LngLat[] = doc.nodes.map((n) => n.position);
-  for (const area of doc.areas) points.push(...area.ring);
-  return points.length ? originFor(points) : [0, 0];
-}
-
 interface Resolved {
   segment: Segment;
   asset: LineAsset;
   line: LngLat[];
   /** Taken from the segment's nodes, because height is a property of the place. */
   elevation: number;
+  /** Web Mercator stretch at this road's latitude; see geo/crs.ts. */
+  k: number;
 }
 
 /** The line a segment is drawn along: its start node, its shape, its end node. */
@@ -210,7 +212,13 @@ function resolveSegments(doc: Doc, assets: ReadonlyMap<string, Asset>): Resolved
     );
     if (line.length < 2) continue;
 
-    out.push({ segment, asset, line, elevation: segmentElevation(segment, nodes) });
+    out.push({
+      segment,
+      asset,
+      line,
+      elevation: segmentElevation(segment, nodes),
+      k: scaleForLine(line),
+    });
   }
 
   return out;
@@ -238,7 +246,7 @@ function bandOffsets(asset: LineAsset, reversed: boolean): { offset: number; wid
 function bandFeatures(resolved: readonly Resolved[]): Feature<LineString>[] {
   const out: Feature<LineString>[] = [];
 
-  for (const { segment, asset, line, elevation } of resolved) {
+  for (const { segment, asset, line, elevation, k } of resolved) {
     const geometry: LineString = { type: 'LineString', coordinates: line };
     const bands = bandOffsets(asset, segment.reversed === true);
 
@@ -255,7 +263,10 @@ function bandFeatures(resolved: readonly Resolved[]): Feature<LineString>[] {
           componentType: component.componentType,
           widthM: band.width,
           offsetM: band.offset,
+          k,
           color: component.colorOverride ?? primitive.color,
+          familyColor: FAMILY_COLORS[asset.family] ?? '#9AA5B1',
+          deckColor: DECK_COLORS[String(deckOf(elevation)) as keyof typeof DECK_COLORS],
           deck: deckOf(elevation),
           // Raised bands last within a segment, so a kerb reads above the asphalt beside it.
           raised: primitive.isRaised ? 1 : 0,
@@ -303,7 +314,7 @@ const DASHED: ReadonlySet<StripeStyle> = new Set<StripeStyle>([
 function stripeFeatures(resolved: readonly Resolved[]): Feature<LineString>[] {
   const out: Feature<LineString>[] = [];
 
-  for (const { segment, asset, line, elevation } of resolved) {
+  for (const { segment, asset, line, elevation, k } of resolved) {
     if (asset.components.length < 2) continue;
     const geometry: LineString = { type: 'LineString', coordinates: line };
     const offsets = boundaryOffsets(asset);
@@ -336,6 +347,7 @@ function stripeFeatures(resolved: readonly Resolved[]): Feature<LineString>[] {
             style,
             widthM: STRIPE_WIDTH_METRES,
             offsetM: sign * (boundary + shift),
+            k,
             color,
             dashed: dashed ? 1 : 0,
             deck,
@@ -371,7 +383,7 @@ function shadowFeatures(
 ): Feature<LineString>[] {
   const out: Feature<LineString>[] = [];
 
-  for (const { segment, asset, line } of resolved) {
+  for (const { segment, asset, line, k } of resolved) {
     const from = nodes.get(segment.fromNodeId)?.elevation ?? 0;
     const to = nodes.get(segment.toNodeId)?.elevation ?? 0;
     if (from <= 0 && to <= 0) continue;
@@ -387,6 +399,7 @@ function shadowFeatures(
       properties: {
         segmentId: segment.id,
         widthM: extent.left + extent.right,
+        k,
         ramp: ramp ? 1 : 0,
         deck: deckOf(Math.max(from, to)),
       },
@@ -411,7 +424,7 @@ function shadowFeatures(
 function stampFeatures(resolved: readonly Resolved[]): Feature<Point>[] {
   const out: Feature<Point>[] = [];
 
-  for (const { segment, asset, line, elevation } of resolved) {
+  for (const { segment, asset, line, elevation, k } of resolved) {
     const bands = bandOffsets(asset, segment.reversed === true);
     const deck = deckOf(elevation);
 
@@ -436,6 +449,7 @@ function stampFeatures(resolved: readonly Resolved[]): Feature<Point>[] {
           properties: {
             segmentId: segment.id,
             glyph: chosen.glyph,
+            k,
             // Compass bearing of travel, which is what icon-rotate wants once the image is
             // drawn with travel pointing up.
             bearing: segment.reversed === true ? placement.bearing + 180 : placement.bearing,
@@ -461,17 +475,16 @@ function walk(
   offsetMeters: number,
 ): { position: LngLat; bearing: number }[] {
   const out: { position: LngLat; bearing: number }[] = [];
+  const plane = localPlane(line[Math.floor(line.length / 2)]!);
+  const pts = line.map((p) => plane.toPlane(p));
   let next = spacingMeters / 2;
   let travelled = 0;
 
-  for (let i = 0; i < line.length - 1; i++) {
-    const a = line[i]!;
-    const b = line[i + 1]!;
-    const mPerLat = metresPerDegreeLat(a[1]);
-    const mPerLng = metresPerDegreeLng(a[1]);
-
-    const dx = (b[0] - a[0]) * mPerLng;
-    const dy = (b[1] - a[1]) * mPerLat;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i]!;
+    const b = pts[i + 1]!;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
     const length = Math.hypot(dx, dy);
     if (length < 1e-9) continue;
 
@@ -486,10 +499,7 @@ function walk(
       const nx = -uy * offsetMeters;
       const ny = ux * offsetMeters;
       out.push({
-        position: [
-          a[0] + (ux * along + nx) / mPerLng,
-          a[1] + (uy * along + ny) / mPerLat,
-        ],
+        position: plane.toLngLat({ x: a.x + ux * along + nx, y: a.y + uy * along + ny }),
         bearing,
       });
       next += spacingMeters;
@@ -585,74 +595,58 @@ function radiusFor(
   return radius > 0 ? radius : fallback;
 }
 
-function plateFeatures(
-  doc: Doc,
-  resolved: readonly Resolved[],
-  plane: LocalPlane,
+/**
+ * The plates for one junction, or none.
+ *
+ * Built in a plane centred on the junction itself, so its scale is its own latitude's and it
+ * lies over the roads it covers whatever the size of the project. The `selected` flag is NOT
+ * set here: plates are cached per junction, and selecting one must not invalidate them.
+ */
+function platesAt(
+  node: Node,
+  ends: readonly { segment: Segment; end: 'from' | 'to' }[],
+  byId: ReadonlyMap<string, Resolved>,
   defaultRadius: number,
-  selectedNodeId?: string | null,
 ): Feature<Polygon>[] {
-  const byId = new Map(resolved.map((r) => [r.segment.id, r]));
-  const out: Feature<Polygon>[] = [];
+  const plane = localPlane(node.position);
+  const arrivals: Arrival[] = [];
+  const involved: Resolved[] = [];
 
-  for (const node of doc.nodes) {
-    const ends = endsAt(node.id, doc.segments);
-    const arrivals: Arrival[] = [];
-    const involved: Resolved[] = [];
-
-    for (const { segment, end } of ends) {
-      const item = byId.get(segment.id);
-      if (!item) continue;
-      const arrival = arrivalFor(item, end, plane, node.elevation ?? 0);
-      if (arrival) {
-        arrivals.push(arrival);
-        involved.push(item);
-      }
-    }
-
-    const plates = junctionPlates(
-      node.id,
-      node.position,
-      arrivals,
-      radiusFor(node, involved, defaultRadius),
-      plane,
-    );
-    if (!plates) continue;
-
-    const deck = deckOf(node.elevation ?? 0);
-    out.push({
-      type: 'Feature',
-      geometry: { type: 'Polygon', coordinates: [closeRing(plates.footprint)] },
-      properties: {
-        nodeId: node.id,
-        kind: 'footprint',
-        deck,
-        color: PRIMITIVES.sidewalk.color,
-        selected: node.id === selectedNodeId ? 1 : 0,
-      },
-    });
-    if (plates.paved) {
-      out.push({
-        type: 'Feature',
-        geometry: { type: 'Polygon', coordinates: [closeRing(plates.paved)] },
-        properties: {
-          nodeId: node.id,
-          kind: 'paved',
-          deck,
-          color: PRIMITIVES.travelLane.color,
-          selected: node.id === selectedNodeId ? 1 : 0,
-        },
-      });
+  for (const { segment, end } of ends) {
+    const item = byId.get(segment.id);
+    if (!item) continue;
+    const arrival = arrivalFor(item, end, plane, node.elevation ?? 0);
+    if (arrival) {
+      arrivals.push(arrival);
+      involved.push(item);
     }
   }
 
-  // Footprints of a whole deck before any of its paved plates, so a corner footway is never
-  // painted over by the asphalt of the junction next door.
-  return out.sort(
-    (a, b) =>
-      (a.properties!.deck as number) - (b.properties!.deck as number) ||
-      (a.properties!.kind === 'footprint' ? 0 : 1) - (b.properties!.kind === 'footprint' ? 0 : 1),
+  const plates = junctionPlates(
+    node.id,
+    node.position,
+    arrivals,
+    radiusFor(node, involved, defaultRadius),
+    plane,
   );
+  if (!plates) return [];
+
+  const deck = deckOf(node.elevation ?? 0);
+  const out: Feature<Polygon>[] = [
+    {
+      type: 'Feature',
+      geometry: { type: 'Polygon', coordinates: [closeRing(plates.footprint)] },
+      properties: { nodeId: node.id, kind: 'footprint', deck, color: PRIMITIVES.sidewalk.color, selected: 0 },
+    },
+  ];
+  if (plates.paved) {
+    out.push({
+      type: 'Feature',
+      geometry: { type: 'Polygon', coordinates: [closeRing(plates.paved)] },
+      properties: { nodeId: node.id, kind: 'paved', deck, color: PRIMITIVES.travelLane.color, selected: 0 },
+    });
+  }
+  return out;
 }
 
 function areaFeatures(doc: Doc, assets: ReadonlyMap<string, Asset>): Feature<Polygon>[] {
@@ -745,33 +739,213 @@ function guideFeatures(resolved: readonly Resolved[], options: PaintOptions): Fe
  * nothing here turns anything into a polygon except the junction plates, which are a convex
  * hull of at most a few dozen points each.
  */
+function zoneFeatures(doc: Doc): Feature<Polygon>[] {
+  return doc.zones
+    .filter((z) => z.visible && z.rings.length > 0)
+    .map((zone) => {
+      const use = LAND_USES[zone.landUse];
+      return {
+        type: 'Feature',
+        geometry: { type: 'Polygon', coordinates: zone.rings.map(closeRing) },
+        properties: {
+          zoneId: zone.id,
+          landUse: zone.landUse,
+          category: use.category,
+          color: use.color,
+          opacity: use.opacity,
+        },
+      } as Feature<Polygon>;
+    });
+}
+
+function districtFeatures(doc: Doc): Feature<Polygon>[] {
+  return doc.districts
+    .filter((d) => d.visible && d.rings.length > 0)
+    .map(
+      (district) =>
+        ({
+          type: 'Feature',
+          geometry: { type: 'Polygon', coordinates: district.rings.map(closeRing) },
+          properties: { districtId: district.id, name: district.name, color: district.color },
+        }) as Feature<Polygon>,
+    );
+}
+
+function buildingFeatures(doc: Doc): Feature<Polygon>[] {
+  return doc.buildings
+    .filter((b) => b.visible)
+    .map(
+      (building) =>
+        ({
+          type: 'Feature',
+          geometry: { type: 'Polygon', coordinates: [closeRing(footprint(building))] },
+          properties: {
+            buildingId: building.id,
+            typeId: building.typeId,
+            color: BUILDING_TYPES[building.typeId].color,
+          },
+        }) as Feature<Polygon>,
+    );
+}
+
+/**
+ * What was painted for each segment, kept until something it depends on changes.
+ *
+ * The model never mutates: an edit makes new objects for exactly what changed and reuses the
+ * rest. So object identity answers "did this change" for free, and dragging one junction
+ * repaints the handful of roads touching it instead of every road in the project.
+ */
+interface SegmentPaint {
+  from: Node;
+  to: Node;
+  asset: LineAsset;
+  resolved: Resolved;
+  bands: Feature<LineString>[];
+  stripes: Feature<LineString>[];
+  stamps: Feature<Point>[];
+  shadows: Feature<LineString>[];
+}
+const segmentCache = new WeakMap<Segment, SegmentPaint>();
+
+interface NodePaint {
+  sig: readonly unknown[];
+  features: Feature<Polygon>[];
+}
+const nodeCache = new WeakMap<Node, NodePaint>();
+
+function sameSig(a: readonly unknown[], b: readonly unknown[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+function paintSegment(
+  segment: Segment,
+  from: Node,
+  to: Node,
+  asset: LineAsset,
+  assets: ReadonlyMap<string, Asset>,
+): SegmentPaint | null {
+  const cached = segmentCache.get(segment);
+  if (cached && cached.from === from && cached.to === to && cached.asset === asset) return cached;
+
+  const mini: Doc = { ...emptyDoc(), nodes: [from, to], segments: [segment] };
+  const [resolved] = resolveSegments(mini, assets);
+  if (!resolved) return null;
+
+  const entry: SegmentPaint = {
+    from,
+    to,
+    asset,
+    resolved,
+    bands: bandFeatures([resolved]),
+    stripes: stripeFeatures([resolved]),
+    stamps: stampFeatures([resolved]),
+    shadows: shadowFeatures([resolved], new Map([[from.id, from], [to.id, to]])),
+  };
+  segmentCache.set(segment, entry);
+  return entry;
+}
+
+/** Concatenate lists in order of a small integer key, keeping insertion order within a key. */
+function inOrder<T>(lists: readonly (readonly T[])[], keyOf: (item: T) => number, buckets: number): T[] {
+  const sizes = new Array<number>(buckets).fill(0);
+  for (const list of lists) for (const item of list) sizes[keyOf(item)]!++;
+  const starts = new Array<number>(buckets);
+  let total = 0;
+  for (let i = 0; i < buckets; i++) {
+    starts[i] = total;
+    total += sizes[i]!;
+  }
+  const out = new Array<T>(total);
+  for (const list of lists) for (const item of list) out[starts[keyOf(item)]!++] = item;
+  return out;
+}
+
+const deckKey = (f: Feature) => (f.properties!.deck as number) + 1;
+
+/**
+ * Build every source the map draws from.
+ *
+ * Per-segment and per-junction results are cached by object identity (see above), so the
+ * cost of a repaint follows what changed, not the size of the project. What is left on every
+ * call is stitching the cached pieces into the sources and ordering them by deck.
+ */
 export function paintDoc(
   doc: Doc,
   assets: ReadonlyMap<string, Asset>,
   options: PaintOptions,
 ): PaintSources {
-  const resolved = resolveSegments(doc, assets);
-  const plane = localPlane(projectCentre(doc));
+  const nodes = nodeMap(doc);
+  const entries: SegmentPaint[] = [];
+
+  for (const segment of doc.segments) {
+    if (segment.visible === false) continue;
+    const asset = assets.get(segment.assetId);
+    if (!asset || !isLineAsset(asset)) continue;
+    const from = nodes.get(segment.fromNodeId);
+    const to = nodes.get(segment.toNodeId);
+    if (!from || !to) continue;
+    const entry = paintSegment(segment, from, to, asset, assets);
+    if (entry) entries.push(entry);
+  }
+
+  const resolved = entries.map((e) => e.resolved);
+  const byId = new Map(resolved.map((r) => [r.segment.id, r]));
+  const arriving = adjacency(doc.segments);
+
+  const plateLists: Feature<Polygon>[][] = [];
+  for (const node of doc.nodes) {
+    const ends = arriving.get(node.id) ?? [];
+    const sig: unknown[] = [options.defaultRadiusMeters];
+    for (const { segment } of ends) {
+      const e = segmentCache.get(segment);
+      sig.push(segment, e?.from, e?.to, e?.asset);
+    }
+    let cached = nodeCache.get(node);
+    if (!cached || !sameSig(cached.sig, sig)) {
+      cached = { sig, features: platesAt(node, ends, byId, options.defaultRadiusMeters) };
+      nodeCache.set(node, cached);
+    }
+    plateLists.push(
+      node.id === options.selectedNodeId
+        ? cached.features.map((f) => ({ ...f, properties: { ...f.properties, selected: 1 } }))
+        : cached.features,
+    );
+  }
 
   return {
-    bands: { type: 'FeatureCollection', features: bandFeatures(resolved) },
-    stripes: { type: 'FeatureCollection', features: stripeFeatures(resolved) },
-    stamps: { type: 'FeatureCollection', features: stampFeatures(resolved) },
-    shadows: {
+    bands: {
       type: 'FeatureCollection',
-      features: shadowFeatures(resolved, nodeMap(doc)),
+      features: inOrder(
+        entries.map((e) => e.bands),
+        (f) => deckKey(f) * 2 + (f.properties!.raised as number),
+        6,
+      ),
     },
+    stripes: {
+      type: 'FeatureCollection',
+      features: inOrder(entries.map((e) => e.stripes), deckKey, 3),
+    },
+    stamps: {
+      type: 'FeatureCollection',
+      features: inOrder(entries.map((e) => e.stamps), deckKey, 3),
+    },
+    shadows: { type: 'FeatureCollection', features: entries.flatMap((e) => e.shadows) },
     plates: {
       type: 'FeatureCollection',
-      features: plateFeatures(
-        doc,
-        resolved,
-        plane,
-        options.defaultRadiusMeters,
-        options.selectedNodeId,
+      // Footprints of a whole deck before any of its paved plates, so a corner footway is
+      // never painted over by the asphalt of the junction next door.
+      features: inOrder(
+        plateLists,
+        (f) => deckKey(f) * 2 + (f.properties!.kind === 'footprint' ? 0 : 1),
+        6,
       ),
     },
     areas: { type: 'FeatureCollection', features: areaFeatures(doc, assets) },
+    zones: { type: 'FeatureCollection', features: zoneFeatures(doc) },
+    districts: { type: 'FeatureCollection', features: districtFeatures(doc) },
+    buildings: { type: 'FeatureCollection', features: buildingFeatures(doc) },
     handles: { type: 'FeatureCollection', features: handleFeatures(doc, options) },
     guides: { type: 'FeatureCollection', features: guideFeatures(resolved, options) },
   };
@@ -797,6 +971,7 @@ export function paintPreview(
   if (controls.length < 2) return empty<LineString>();
 
   const doc: Doc = {
+    ...emptyDoc(),
     nodes: [
       { id: 'preview-a', position: controls[0]!, elevation },
       { id: 'preview-b', position: controls[controls.length - 1]!, elevation },
@@ -825,6 +1000,9 @@ export const emptySources = (): PaintSources => ({
   shadows: empty<LineString>(),
   plates: empty<Polygon>(),
   areas: empty<Polygon>(),
+  zones: empty<Polygon>(),
+  districts: empty<Polygon>(),
+  buildings: empty<Polygon>(),
   handles: empty<Point>(),
   guides: empty<LineString>(),
 });
@@ -839,12 +1017,11 @@ export const emptySources = (): PaintSources => ({
  * the stripes is not an implementation detail — it is what removes junction trimming from
  * the project entirely.
  */
-export function designLayers(latDeg: number): LayerSpecification[] {
-  const width = metresToPixels(latDeg, ['get', 'widthM'] as ExpressionSpecification);
-  const offset = metresToPixels(latDeg, ['get', 'offsetM'] as ExpressionSpecification);
+export function designLayers(): LayerSpecification[] {
+  const width = metresToPixels(['get', 'widthM'] as ExpressionSpecification);
+  const offset = metresToPixels(['get', 'offsetM'] as ExpressionSpecification);
   // A little wider than the road, so the shadow shows either side rather than hiding under it.
   const shadowWidth = metresToPixels(
-    latDeg,
     ['+', ['*', ['get', 'widthM'], 1.05], 1.5] as ExpressionSpecification,
   );
   const layers: LayerSpecification[] = [];
@@ -858,6 +1035,53 @@ export function designLayers(latDeg: number): LayerSpecification[] {
       'fill-opacity': ['get', 'opacity'],
     },
   });
+
+  // Land use, districts and buildings sit on the ground and under every road deck.
+  layers.push(
+    {
+      id: 'zone-fill',
+      type: 'fill',
+      source: 'zones',
+      paint: { 'fill-color': ['get', 'color'], 'fill-opacity': ['get', 'opacity'] },
+    },
+    {
+      id: 'zone-line',
+      type: 'line',
+      source: 'zones',
+      layout: { 'line-join': 'round' },
+      paint: { 'line-color': ['get', 'color'], 'line-width': 1.2, 'line-opacity': 0.95 },
+    },
+    {
+      id: 'district-fill',
+      type: 'fill',
+      source: 'districts',
+      paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.1 },
+    },
+    {
+      id: 'district-line',
+      type: 'line',
+      source: 'districts',
+      layout: { 'line-join': 'round' },
+      paint: {
+        'line-color': ['get', 'color'],
+        'line-width': 2.5,
+        'line-dasharray': [4, 2],
+        'line-opacity': 0.95,
+      },
+    },
+    {
+      id: 'building-fill',
+      type: 'fill',
+      source: 'buildings',
+      paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.9 },
+    },
+    {
+      id: 'building-line',
+      type: 'line',
+      source: 'buildings',
+      paint: { 'line-color': '#2B2B2B', 'line-width': 1, 'line-opacity': 0.8 },
+    },
+  );
 
   for (const deck of DECKS) {
     // Above ground, the road's shadow goes down first — under its own deck, over whatever
@@ -953,7 +1177,7 @@ export function designLayers(latDeg: number): LayerSpecification[] {
         'icon-ignore-placement': true,
         // The image is drawn at a known pixels-per-metre, so scaling it back to ground
         // metres is the same arithmetic the line widths use.
-        'icon-size': metresToPixels(latDeg, 1 / IMAGE_PX_PER_METRE),
+        'icon-size': metresToPixels(1 / IMAGE_PX_PER_METRE),
       },
     });
 
@@ -974,7 +1198,8 @@ export function designLayers(latDeg: number): LayerSpecification[] {
     source: 'preview',
     layout: { 'line-cap': 'butt', 'line-join': 'round' },
     paint: {
-      'line-color': ['get', 'color'],
+      // A road the rules refuse is drawn red, before the click rather than after it.
+      'line-color': ['case', ['==', ['get', 'invalid'], 1], '#D64545', ['get', 'color']],
       'line-width': width,
       'line-offset': offset,
       'line-opacity': 0.65,
@@ -1073,6 +1298,8 @@ export function designLayers(latDeg: number): LayerSpecification[] {
         'case',
         ['==', ['get', 'kind'], 'node'],
         '#F2C14E',
+        ['==', ['get', 'kind'], 'blocked'],
+        '#D64545',
         '#3FB5AA',
       ],
     },
@@ -1081,5 +1308,5 @@ export function designLayers(latDeg: number): LayerSpecification[] {
   return layers;
 }
 
-export const SOURCE_IDS = ['areas', 'bands', 'stripes', 'stamps', 'shadows', 'plates', 'preview', 'guides', 'handles', 'snap'] as const;
+export const SOURCE_IDS = ['areas', 'zones', 'districts', 'buildings', 'bands', 'stripes', 'stamps', 'shadows', 'plates', 'preview', 'guides', 'handles', 'snap'] as const;
 export type SourceId = (typeof SOURCE_IDS)[number];

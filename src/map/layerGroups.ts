@@ -23,6 +23,24 @@ export const LAYER_GROUPS = [
     layers: ['area-fill'],
   },
   {
+    id: 'zoning',
+    label: 'Land use',
+    hint: 'Zones painted with a land use.',
+    layers: ['zone-fill', 'zone-line'],
+  },
+  {
+    id: 'districts',
+    label: 'Districts',
+    hint: 'Planning districts and their outlines.',
+    layers: ['district-fill', 'district-line'],
+  },
+  {
+    id: 'buildings',
+    label: 'Buildings',
+    hint: 'Building footprints.',
+    layers: ['building-fill', 'building-line'],
+  },
+  {
     id: 'roads',
     label: 'Roads',
     hint: 'Every band of every road, at every level.',

@@ -1,3 +1,8 @@
+import { RestoreBanner, SaveStatus } from '../components/SaveStatus';
+import PlannerDock from '../components/PlannerDock';
+import StatusStrip from '../components/StatusStrip';
+import PlanningControls from '../components/PlanningControls';
+import { declineRestore } from '../persist/session';
 import { useRef } from 'react';
 import { MapCanvas } from '../map/MapCanvas';
 import HotBar from '../components/HotBar';
@@ -78,7 +83,13 @@ export default function MapEditor() {
   };
 
   const onOpen = async (file: File) => {
-    const text = await file.text();
+    let text: string;
+    try {
+      text = await file.text();
+    } catch {
+      store.setNotice({ kind: 'error', title: `Could not read ${file.name}` });
+      return;
+    }
     const result = parseProject(text, builtInAssets());
     const name = file.name.replace(/\.(geo)?json$/i, '') || result.name;
 
@@ -91,6 +102,7 @@ export default function MapEditor() {
       return;
     }
 
+    declineRestore();
     store.loadProject(result.doc, result.assets, name);
     store.setNotice({
       kind: result.warnings.length ? 'warning' : 'success',
@@ -109,6 +121,10 @@ export default function MapEditor() {
   return (
     <div className="editor">
       <MapCanvas className="map-canvas" />
+      <RestoreBanner />
+      <StatusStrip />
+      <PlannerDock units={units} />
+      <PlanningControls units={units} />
 
       {/* Project and files, top-left, out of the way of the build menu. */}
       <div className="hud hud-tl">
@@ -119,6 +135,7 @@ export default function MapEditor() {
           onChange={(event) => store.setProjectName(event.target.value)}
           aria-label="Project name"
         />
+        <SaveStatus />
         <button type="button" onClick={onSave} title="Save as GeoJSON">
           Save
         </button>
@@ -129,7 +146,10 @@ export default function MapEditor() {
           value=""
           aria-label="Open an example project"
           onChange={(event) => {
-            if (event.target.value) store.openDemo(event.target.value as never);
+            if (event.target.value) {
+              declineRestore();
+              store.openDemo(event.target.value as never);
+            }
           }}
         >
           <option value="">Examples…</option>

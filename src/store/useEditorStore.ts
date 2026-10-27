@@ -19,12 +19,25 @@ import {
 import { dissolveNode, setElevation } from '../model/doc';
 import type { Doc, Segment, Snap } from '../model/doc';
 import { layRoad } from '../model/build';
+import { eraseStroke, paintOutline, paintStroke } from '../model/zones';
+import {
+  addDistrict,
+  eraseDistrictStroke,
+  paintDistrictOutline,
+  paintDistrictStroke,
+} from '../model/districts';
+import { snapRotation } from '../model/buildings';
+import { addRoundabout } from '../model/roundabout';
+import { newBuildingId } from '../model/doc';
+import type { LandUseId } from '../library/landuse';
+import type { BuildingTypeId } from '../library/buildingTypes';
+import { ROAD_ISSUE_TEXT, roadIssues } from '../model/validity';
 import { newId } from '../model/types';
 import type { SectionComponent } from '../model/types';
 import { autoAnchorOffset, geometricCentreOffset, totalWidth } from '../model/section';
 import { DEFAULT_CURVE } from '../geo/curve';
 import type { CurveSettings } from '../geo/curve';
-import type { LngLat } from '../geo/projection';
+import type { LngLat } from '../geo/crs';
 import type { DisplayUnits } from '../lib/units';
 import type { BasemapId } from '../map/basemaps';
 import { DEFAULT_VINTAGE } from '../map/basemaps';
@@ -81,7 +94,27 @@ const HISTORY_LIMIT = 100;
  * a tool to place intersections the detector had missed, and one to measure a road so the
  * fit check had a number.
  */
-export type Tool = 'select' | 'build' | 'upgrade' | 'area' | 'bulldoze';
+export type Tool =
+  | 'select'
+  | 'build'
+  | 'upgrade'
+  | 'area'
+  | 'roundabout'
+  | 'zone'
+  | 'building'
+  | 'district'
+  | 'bulldoze';
+
+/** How zones and districts are painted: dragging a brush, or tracing an outline. */
+export type PaintMode = 'brush' | 'outline';
+
+/**
+ * Info views: ways of recolouring the map by one property so a pattern can be read.
+ *
+ * `none` is the normal drawing. The others dim the imagery and colour by their property, the
+ * way an overlay in a city-builder does.
+ */
+export type ViewMode = 'none' | 'landUse' | 'roadType' | 'height' | 'district';
 
 /**
  * How the road being laid gets its shape.
@@ -165,6 +198,24 @@ export interface EditorState extends Snapshot {
   defaultRadiusMeters: number;
   showAllCenterlines: boolean;
 
+  // ----------------------------------------------------------------------- planning
+  /** Radius of the roundabout the roundabout tool places, in metres. */
+  roundaboutRadius: number;
+  /** The land use the zone brush paints. */
+  activeLandUse: LandUseId;
+  /** Brush or outline, for zones and districts alike. */
+  paintMode: PaintMode;
+  /** Brush radius in metres. */
+  brushRadiusMeters: number;
+  /** When on, the brush removes what is under it instead of painting. */
+  eraseMode: boolean;
+  activeBuildingType: BuildingTypeId;
+  /** Degrees added to the heading a building takes from the nearest road. */
+  buildingTurn: number;
+  /** The district the district tool paints into. */
+  activeDistrictId: string | null;
+  view: ViewMode;
+
   // ---------------------------------------------------------------------- selection
   selectedSegmentId: string | null;
   selectedNodeId: string | null;
@@ -197,6 +248,24 @@ export interface EditorState extends Snapshot {
   setDefaultRadius: (metres: number) => void;
   setShowAllCenterlines: (value: boolean) => void;
 
+  // planning
+  setRoundaboutRadius: (metres: number) => void;
+  placeRoundabout: (centre: LngLat) => void;
+  setLandUse: (landUse: LandUseId) => void;
+  setPaintMode: (mode: PaintMode) => void;
+  setBrushRadius: (metres: number) => void;
+  setEraseMode: (on: boolean) => void;
+  setBuildingType: (type: BuildingTypeId) => void;
+  turnBuilding: (degrees: number) => void;
+  setActiveDistrict: (id: string | null) => void;
+  setView: (view: ViewMode) => void;
+  paintStroke: (points: LngLat[]) => void;
+  paintOutline: (ring: LngLat[]) => void;
+  placeBuilding: (position: LngLat, rotation: number) => void;
+  newDistrict: () => void;
+  renameDistrict: (id: string, name: string) => void;
+  setDistrictColor: (id: string, color: string) => void;
+
   selectSegment: (id: string | null) => void;
   selectNode: (id: string | null) => void;
   selectArea: (id: string | null) => void;
@@ -225,7 +294,14 @@ export interface EditorState extends Snapshot {
   upgradeSegment: (segmentId: string) => void;
   reverseSegment: (segmentId: string) => void;
   setSegmentCurve: (segmentId: string, curve: CurveSettings) => void;
-  bulldoze: (target: { segmentId?: string; nodeId?: string; areaId?: string }) => void;
+  bulldoze: (target: {
+    segmentId?: string;
+    nodeId?: string;
+    areaId?: string;
+    zoneId?: string;
+    buildingId?: string;
+    districtId?: string;
+  }) => void;
   deleteSelection: () => void;
 
   // areas
@@ -355,6 +431,16 @@ export const useEditorStore = create<EditorState>((set, get) => {
     defaultRadiusMeters: 6,
     showAllCenterlines: false,
 
+    roundaboutRadius: 18,
+    activeLandUse: 'residentialLow',
+    paintMode: 'brush',
+    brushRadiusMeters: 20,
+    eraseMode: false,
+    activeBuildingType: 'house',
+    buildingTurn: 0,
+    activeDistrictId: null,
+    view: 'none',
+
     selectedSegmentId: null,
     selectedNodeId: null,
     selectedAreaId: null,
@@ -377,6 +463,86 @@ export const useEditorStore = create<EditorState>((set, get) => {
     setImageryOpacity: (imageryOpacity) => set({ imageryOpacity }),
     setSwipe: (swipe) => set({ swipe }),
     setNotice: (notice) => set({ notice }),
+
+    // ----------------------------------------------------------------- planning
+    setRoundaboutRadius: (metres) => set({ roundaboutRadius: Math.min(80, Math.max(8, metres)) }),
+    placeRoundabout: (centre) => {
+      const { doc, activeLineAssetId, roundaboutRadius, buildLevel } = get();
+      const built = addRoundabout(doc, activeLineAssetId, centre, roundaboutRadius, { elevation: buildLevel });
+      commit({ doc: built.doc });
+      set({ selectedSegmentId: built.segmentIds[0] ?? null });
+      noteRecent(activeLineAssetId);
+    },
+    setLandUse: (activeLandUse) => set({ activeLandUse, tool: 'zone' }),
+    setPaintMode: (paintMode) => set({ paintMode }),
+    setBrushRadius: (metres) => set({ brushRadiusMeters: Math.min(200, Math.max(3, metres)) }),
+    setEraseMode: (eraseMode) => set({ eraseMode }),
+    setBuildingType: (activeBuildingType) => set({ activeBuildingType, tool: 'building' }),
+    turnBuilding: (degrees) => set({ buildingTurn: (((get().buildingTurn + degrees) % 360) + 360) % 360 }),
+    setActiveDistrict: (activeDistrictId) => set({ activeDistrictId, tool: 'district' }),
+    setView: (view) => set({ view }),
+
+    /** One drag of the brush is one undo step. */
+    paintStroke: (points) => {
+      const { doc, tool, eraseMode, activeLandUse, activeDistrictId, brushRadiusMeters } = get();
+      if (points.length === 0) return;
+      if (tool === 'district') {
+        if (eraseMode) {
+          commit({ doc: eraseDistrictStroke(doc, points, brushRadiusMeters, activeDistrictId ?? undefined) });
+        } else if (activeDistrictId) {
+          commit({ doc: paintDistrictStroke(doc, activeDistrictId, points, brushRadiusMeters) });
+        } else {
+          set({ notice: { kind: 'warning', title: 'Make a district first', details: ['Use + New district, then paint.'] } });
+        }
+        return;
+      }
+      commit({
+        doc: eraseMode
+          ? eraseStroke(doc, points, brushRadiusMeters)
+          : paintStroke(doc, activeLandUse, points, brushRadiusMeters),
+      });
+    },
+
+    paintOutline: (ring) => {
+      const { doc, tool, activeLandUse, activeDistrictId, eraseMode } = get();
+      if (ring.length < 3) return;
+      if (tool === 'district') {
+        if (!activeDistrictId) return;
+        commit({ doc: paintDistrictOutline(doc, activeDistrictId, ring) });
+        return;
+      }
+      if (eraseMode) {
+        set({ notice: { kind: 'warning', title: 'Erase with the brush', details: ['Switch to the brush to erase; an outline only paints.'] } });
+        return;
+      }
+      commit({ doc: paintOutline(doc, activeLandUse, ring) });
+    },
+
+    placeBuilding: (position, rotation) => {
+      const { doc, activeBuildingType } = get();
+      const id = newBuildingId();
+      commit({
+        doc: {
+          ...doc,
+          buildings: [
+            ...doc.buildings,
+            { id, typeId: activeBuildingType, position, rotation: snapRotation(rotation, 1), visible: true },
+          ],
+        },
+      });
+    },
+
+    newDistrict: () => {
+      const added = addDistrict(get().doc);
+      commit({ doc: added.doc });
+      set({ activeDistrictId: added.districtId, tool: 'district' });
+    },
+
+    renameDistrict: (id, name) =>
+      commit({ doc: { ...get().doc, districts: get().doc.districts.map((d) => (d.id === id ? { ...d, name } : d)) } }),
+
+    setDistrictColor: (id, color) =>
+      commit({ doc: { ...get().doc, districts: get().doc.districts.map((d) => (d.id === id ? { ...d, color } : d)) } }),
 
     // -------------------------------------------------------------------- tools
     setTool: (tool) => {
@@ -468,6 +634,30 @@ export const useEditorStore = create<EditorState>((set, get) => {
       if (buildHandles.length < HANDLES_FOR[buildMode]) {
         set({ buildHandles: [...buildHandles, position] });
         return;
+      }
+
+      // Refuse what the rules refuse, saying why, before anything is changed. The preview
+      // has already turned red; this is the same check, so a click can never do what the
+      // colour said it would not.
+      const startNode = doc.nodes.find((n) => n.id === buildFromNodeId);
+      if (startNode) {
+        const endPosition =
+          snap?.kind === 'node'
+            ? (doc.nodes.find((n) => n.id === snap.nodeId)?.position ?? position)
+            : snap?.kind === 'segment'
+              ? snap.position
+              : position;
+        const issues = roadIssues(
+          doc,
+          { position: startNode.position, nodeId: buildFromNodeId },
+          { position: endPosition, nodeId: snap?.kind === 'node' ? snap.nodeId : undefined },
+        ).filter((issue) => issue !== 'sameNode');
+        if (issues.length > 0) {
+          set({
+            notice: { kind: 'warning', title: 'Cannot build here', details: issues.map((i) => ROAD_ISSUE_TEXT[i]) },
+          });
+          return;
+        }
       }
 
       const end = nodeAt(doc);
@@ -655,9 +845,16 @@ export const useEditorStore = create<EditorState>((set, get) => {
         return next;
       }),
 
-    bulldoze: ({ segmentId, nodeId, areaId }) => {
+    bulldoze: ({ segmentId, nodeId, areaId, zoneId, buildingId, districtId }) => {
       const { doc } = get();
-      if (segmentId) {
+      if (zoneId) {
+        commit({ doc: { ...doc, zones: doc.zones.filter((z) => z.id !== zoneId) } });
+      } else if (buildingId) {
+        commit({ doc: { ...doc, buildings: doc.buildings.filter((b) => b.id !== buildingId) } });
+      } else if (districtId) {
+        commit({ doc: { ...doc, districts: doc.districts.filter((d) => d.id !== districtId) } });
+        if (get().activeDistrictId === districtId) set({ activeDistrictId: null });
+      } else if (segmentId) {
         commit({ doc: removeSegment(doc, segmentId) });
         set({ selectedSegmentId: null });
       } else if (nodeId) {

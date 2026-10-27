@@ -1,4 +1,4 @@
-# GeoStripe
+# StreetCityEditor
 
 A browser-based editor for designing real streets the way a city-building game builds them —
 pick a road type, click where it goes, and the junctions form themselves — except the map is
@@ -22,6 +22,12 @@ actually argue about it: not "this block", but "streets like this one".
 
 The output is real GeoJSON — centerlines, nodes and the polygons derived from them — so a
 design can be measured, reopened and edited parametrically, or pulled into QGIS.
+
+Around the roads there is a planner's layer: **land use** painted with a brush, **building
+footprints** that face the road and refuse to stand in it, **planning districts**, **info
+views** that recolour the map by one property, and a **stats** panel that adds up what is
+drawn. Nothing is simulated. There are no policies, budgets or citizens; the numbers are
+measurements of the plan.
 
 ---
 
@@ -243,6 +249,33 @@ layer, and the map renders as bare imagery with the design silently missing.
 
 ---
 
+## Coordinates
+
+Files store WGS84 longitude/latitude, because that is what GeoJSON is. Everything that
+measures, offsets, snaps or intersects works in **Web Mercator**, the plane the map is drawn
+in, through one module: [`src/geo/crs.ts`](src/geo/crs.ts). Web Mercator is conformal (angles
+are exact) but stretches distance by `k = 1 / cos(latitude)`, so a metre is converted at the
+latitude of the thing being measured:
+
+- `localPlane(origin)` is Web Mercator translated to `origin` and divided by `k` there, giving
+  real metres, exact angles, and a plane that lies on the rendered map.
+- Road widths are drawn with a per-feature `k`, so loading a project at another latitude
+  needs no reload and nothing is baked for the project.
+- `crs.guard.test.ts` fails the build if any other module does latitude math or holds a
+  degrees-to-metres constant.
+
+Web Mercator treats the Earth as a sphere, the ground is an ellipsoid, and the difference is
+bounded and direction-dependent: about 0.3% north-south at 39N and 0.55% at 60N, a centimetre
+on a lane. `crs.test.ts` pins both bounds.
+
+## Autosave
+
+The working project is written to the browser (IndexedDB) a second after you stop editing,
+and when the tab is hidden. The last ten versions are kept. On the next visit the newest is
+offered back; autosave is held until you answer, so the offer is never overwritten. Closing
+with unsaved work asks first, and only one tab saves at a time. **Save** still writes a
+GeoJSON file, and that is the thing to share or keep.
+
 ## Getting started
 
 Requires Node `^18 || ^20 || >=22` (Vite 6). CI builds on Node 24.
@@ -281,6 +314,10 @@ something is selected.
 | **Roads** | Click to lay the armed asset. Landing on a node joins there; landing on a road splits it; landing on open ground makes a new node — and running *across* a road splits both without any click at the crossing. The end of one road is the start of the next, so a run of blocks is one gesture. |
 | **Upgrade** | Arm a road type and click an existing road to make it that type. One click, because a road is an instance of its asset rather than a copy of one. |
 | **Ground** | Click a shape for a park, plaza or water. Double-click or Enter closes it. |
+| **Roundabout** | Click to place a ring of one-way arcs, radius set on the bar. Roads join it like any other junction. |
+| **Zoning** | Drag a brush of a land use over the map, or trace an outline. Painting a use merges with the same use and replaces a different one, so zones never overlap. `E` erases, `[` `]` change the brush. |
+| **Buildings** | A footprint ghost that turns to face the nearest road and goes red, with a reason, when it stands on a road or another building. `R` turns it. |
+| **Districts** | Named, coloured areas painted with the same brush. No policies; they exist to be looked at and added up. |
 | **Bulldoze** | Click to remove. |
 
 A junction with exactly two roads of the same type is a **seam**, not a place — the inspector
@@ -316,6 +353,8 @@ a junction — offering it instead is the whole difference.
 
 | Key | |
 | --- | --- |
+| `V` `B` `U` `G` `Z` `N` `D` `O` `X` | Select / Roads / Upgrade / Ground / Zoning / Buildings / Districts / Roundabout / Bulldoze |
+| `Tab` | Step through everything under the cursor that it could snap to |
 | `1` `2` `3` | Straight / Curved / Freeform |
 | `Page Up` / `Page Down` | Raise or lower what you are about to build. It sets the height NEW junctions get; landing on one that exists uses its height, because the place already has one |
 | `Shift` while building | Snap to 15° instead of to the junction's own directions |
@@ -351,7 +390,7 @@ the live site.
 
 ### Routing
 
-GeoStripe uses **`HashRouter`**, giving URLs like `/geostripe/#/`.
+StreetCityEditor uses **`HashRouter`**, giving URLs like `/geostripe/#/`.
 
 GitHub Pages serves static files with no rewrite rules, so under `BrowserRouter` a hard
 refresh or a shared deep link asks Pages for a file that does not exist and gets a 404
@@ -407,9 +446,29 @@ src/
 
 ---
 
+## Planning
+
+**Land use** is a list in [`src/library/landuse.ts`](src/library/landuse.ts), shaped like the
+ground materials: an id, label, category, colour and opacity. A zone carries one and nothing
+else. Painting is done by [`src/geo/region.ts`](src/geo/region.ts), a small polygon-boolean
+engine (cut at intersections, classify each piece, stitch rings) written for the purpose and
+checked against the definition at about a hundred thousand random points per operation.
+Roads still do not use booleans; only land use and districts do.
+
+**Snapping** asks the model, not the renderer. [`src/geo/snapEngine.ts`](src/geo/snapEngine.ts)
+measures every candidate in real metres from a grid index, ranks them by a priority table per
+tool (node, then road, then kerb, then shape corner), and returns the list so `Tab` can cycle.
+Roads are refused, with a reason, when they are too short, leave a junction at too sharp an
+angle, loop to the same junction or duplicate an existing road
+([`src/model/validity.ts`](src/model/validity.ts)).
+
+**Info views** (Land use, Road type, Height, Districts) dim the imagery and recolour the map
+by one property; **Stats** adds up road length, lane length, right-of-way, area per land use
+and, per district, the land use inside it.
+
 ## The project file
 
-Plain GeoJSON. Four kinds of feature share one collection, and which of them is read back is
+Plain GeoJSON (format version 3; version 2 files open unchanged). Seven kinds of feature share one collection, and which of them is read back is
 the design:
 
 | `streetcity` | | Read back? |
@@ -417,6 +476,9 @@ the design:
 | `node` | A Point. The places roads meet. | Yes |
 | `segment` | A LineString of **control** points. | Yes |
 | `area` | A Polygon of control points. | Yes |
+| `zone` | A Polygon (outer ring and holes) with a land use. | Yes |
+| `building` | A Point with a type and a heading; the footprint is derived. | Yes |
+| `district` | A Polygon with a name and colour. | Yes |
 | `band` | The derived polygons. | **No** |
 
 The bands are generated once, at save, by the only polygon generator left in the program.
@@ -441,7 +503,13 @@ The two bundled examples were converted once, on disk, and are stored in the nat
 
 ## Testing
 
-640 tests. The ones worth knowing about:
+About 800 tests. The ones worth knowing about:
+
+- **`geo/crs.test.ts`**, **`geo/crs.guard.test.ts`** — the coordinate system against an independent haversine and the WGS84 ellipsoid at four latitudes, and a scan that fails if anything else does latitude math.
+- **`geo/snapEngine.test.ts`** — the snap engine picks the geometrically nearest candidate at 1,000 random cursor positions, and answers in constant time at 2,000 roads.
+- **`geo/region.test.ts`**, **`model/zones.test.ts`** — polygon booleans against the definition at random points; 500 random strokes never leave two zones covering one point.
+- **`map/paint.perf.test.ts`** — a repaint after dragging one junction in a 5,100-road project.
+- **`persist/autosave.test.ts`** — debouncing, one write at a time, no lost edit mid-write, failure reported.
 
 - **`map/paint.test.ts`** — that a 3.6 m lane measures 3.6 m at every zoom, at 39°N and
   69°N. Widths are no longer computed into polygons; they are an expression MapLibre
@@ -477,8 +545,9 @@ Recorded because these are the calls that would otherwise be quietly re-litigate
   previous model derived them from where centerlines happened to cross, which meant two
   roads could be joined without anyone joining them, and could fail to be joined after being
   drawn to meet.
-- **No polygon booleans.** Junctions are drawn over road ends rather than subtracted from
-  them. `polyclip` is no longer a dependency.
+- **No polygon booleans for roads.** Junctions are drawn over road ends rather than
+  subtracted from them. Land use and districts do need exact area, so they use the region
+  engine in `geo/region.ts`; no polygon library is a dependency.
 - **No per-road cross-section override.** A road is an instance of its asset. If one block
   differs it is a different asset, and assets are cheap to duplicate.
 - **No cross-section varying along a road.** Split it instead.

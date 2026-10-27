@@ -30,8 +30,12 @@ interface Props {
 const TOOL_ICONS: { id: Tool; icon: string; label: string; key: string }[] = [
   { id: 'select', icon: '➤', label: 'Select', key: 'V' },
   { id: 'build', icon: '━', label: 'Roads', key: 'B' },
+  { id: 'roundabout', icon: '◯', label: 'Roundabout', key: 'O' },
   { id: 'upgrade', icon: '⟳', label: 'Upgrade', key: 'U' },
   { id: 'area', icon: '▰', label: 'Ground', key: 'G' },
+  { id: 'zone', icon: '▦', label: 'Zoning', key: 'Z' },
+  { id: 'building', icon: '⌂', label: 'Buildings', key: 'N' },
+  { id: 'district', icon: '◫', label: 'Districts', key: 'D' },
   { id: 'bulldoze', icon: '✖', label: 'Bulldoze', key: 'X' },
 ];
 
@@ -88,6 +92,8 @@ export default function HotBar({ units }: Props) {
   const activeLineAssetId = useEditorStore((s) => s.activeLineAssetId);
   const activeAreaAssetId = useEditorStore((s) => s.activeAreaAssetId);
   const recentAssetIds = useEditorStore((s) => s.recentAssetIds);
+  const roundaboutRadius = useEditorStore((s) => s.roundaboutRadius);
+  const setRoundaboutRadius = useEditorStore((s) => s.setRoundaboutRadius);
 
   const setTool = useEditorStore((s) => s.setTool);
   const setBuildMode = useEditorStore((s) => s.setBuildMode);
@@ -99,6 +105,8 @@ export default function HotBar({ units }: Props) {
   /** Which family's drawer is open, or null for closed. */
   const [open, setOpen] = useState<AssetFamily | null>(null);
   const [query, setQuery] = useState('');
+
+  const planning = tool === 'zone' || tool === 'building' || tool === 'district';
 
   const active = assets.find(
     (a) => a.id === (tool === 'area' ? activeAreaAssetId : activeLineAssetId),
@@ -203,6 +211,23 @@ export default function HotBar({ units }: Props) {
           ))}
         </div>
 
+        {tool === 'roundabout' && (
+          <>
+            <span className="hb-sep" />
+            <label className="hb-hint" title="Radius of the roundabout">
+              Radius
+              <input
+                type="range"
+                min={8}
+                max={80}
+                value={roundaboutRadius}
+                onChange={(event) => setRoundaboutRadius(Number(event.target.value))}
+              />{' '}
+              {formatWidth(roundaboutRadius, units, { withUnit: true, decimals: 0 })}
+            </label>
+          </>
+        )}
+
         {tool === 'upgrade' && (
           <>
             <span className="hb-sep" />
@@ -243,10 +268,10 @@ export default function HotBar({ units }: Props) {
           </>
         )}
 
-        <span className="hb-sep" />
+        {planning ? null : <span className="hb-sep" />}
 
         {/* The families, which are what a build menu is actually made of. */}
-        <div className="hb-group">
+        <div className="hb-group" hidden={planning}>
           {(tool === 'area' ? (['area'] as AssetFamily[]) : LINE_FAMILIES).map((family) => (
             <button
               key={family}
@@ -261,7 +286,7 @@ export default function HotBar({ units }: Props) {
           ))}
         </div>
 
-        {recent.length > 0 && (
+        {!planning && recent.length > 0 && (
           <>
             <span className="hb-sep" />
             <div className="hb-group hb-recent">
@@ -281,7 +306,7 @@ export default function HotBar({ units }: Props) {
         )}
 
         {/* What is armed, at the end of the bar where the eye lands after choosing. */}
-        {active && (
+        {!planning && active && (
           <div className="hb-active" title={active.name}>
             <Swatch asset={active} />
             <span className="hb-active-name">{active.name}</span>

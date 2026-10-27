@@ -1,5 +1,5 @@
-import { dedupe } from './projection';
-import type { LngLat, LocalPlane } from './projection';
+import { dedupe } from './crs';
+import type { LngLat, LocalPlane } from './crs';
 
 
 /**

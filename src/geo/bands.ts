@@ -1,7 +1,7 @@
 import type { Feature, Polygon } from 'geojson';
 import { offsetPolyline } from './offset';
-import { dedupe, localPlane, originFor } from './projection';
-import type { LngLat, PlanePoint } from './projection';
+import { dedupe, localPlane, originFor } from './crs';
+import type { LngLat, PlanePoint } from './crs';
 import { boundaryOffsets } from '../model/section';
 import { PRIMITIVES } from '../library/primitives';
 import type { CrossSection } from '../model/types';

@@ -8,7 +8,7 @@ import { newId } from './types';
 /**
  * Validation for the asset interchange format.
  *
- * Uploads are the one place untrusted data enters GeoStripe, and the brief was explicit:
+ * Uploads are the one place untrusted data enters StreetCityEditor, and the brief was explicit:
  * fail gracefully on unknown types rather than crashing. Zod gives readable, path-aware
  * errors for free, and the schema doubles as the format's documentation.
  */
@@ -51,7 +51,7 @@ function describe(error: z.ZodError): string[] {
     const path = issue.path.length ? issue.path.join('.') : 'file';
 
     if (issue.code === 'invalid_value' && path === 'geostripeAsset') {
-      return `This is not a GeoStripe asset file (missing "geostripeAsset": ${ASSET_FILE_VERSION}).`;
+      return `This is not a StreetCityEditor asset file (missing "geostripeAsset": ${ASSET_FILE_VERSION}).`;
     }
     if (issue.code === 'invalid_value' && path.includes('componentType')) {
       return `${path}: unknown component type. Known types: ${COMPONENT_TYPES.join(', ')}.`;

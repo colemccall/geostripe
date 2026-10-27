@@ -5,8 +5,8 @@ import { DEFAULT_LANE_GLYPHS, PRIMITIVES } from '../library/primitives';
 import type { Direction } from '../library/primitives';
 import type { CrossSection, SectionComponent } from '../model/types';
 import { boundaryOffsets } from '../model/section';
-import { dedupe, localPlane, originFor } from './projection';
-import type { LngLat, LocalPlane, PlanePoint } from './projection';
+import { dedupe, localPlane, originFor } from './crs';
+import type { LngLat, LocalPlane, PlanePoint } from './crs';
 import { offsetPolyline } from './offset';
 
 /**

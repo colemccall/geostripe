@@ -53,7 +53,6 @@ export default function Inspector({ units }: Props) {
   const editingAssetId = useEditorStore((s) => s.editingAssetId);
   const selectedComponentId = useEditorStore((s) => s.selectedComponentId);
   const defaultRadiusMeters = useEditorStore((s) => s.defaultRadiusMeters);
-  const recentAssetIds = useEditorStore((s) => s.recentAssetIds);
 
   const store = useEditorStore.getState();
 
@@ -265,7 +264,6 @@ export default function Inspector({ units }: Props) {
           {editing.kind === 'line' && (
             <PrimitivePalette
               units={units}
-              recent={recentAssetIds as never}
               onAdd={(type) => store.addComponent(editing.id, type)}
             />
           )}

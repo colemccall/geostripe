@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * prep-pages.mjs — build GeoStripe for a chosen host, and prepare the output so a
+ * prep-pages.mjs — build StreetCityEditor for a chosen host, and prepare the output so a
  * static host serves it correctly.
  *
  *   node scripts/prep-pages.mjs --target pages     -> dist/  , base /geostripe/
@@ -62,7 +62,7 @@ const outPath = join(root, outDir);
 
 /* ---------------------------------------------------------------------- build */
 
-console.log(`\n  GeoStripe — ${label}`);
+console.log(`\n  StreetCityEditor — ${label}`);
 console.log(`  target ${target}   mode ${mode}   base ${base}   out ${outDir}/\n`);
 
 function run(cmd, args) {
@@ -92,6 +92,18 @@ if (build.status !== 0) process.exit(build.status ?? 1);
 /* --------------------------------------------------------------- post-process */
 
 if (outDir !== 'dist') {
+  // docs/ also holds the project's written documents. Replacing it wholesale would delete
+  // them, so refuse unless it holds nothing but a previous build.
+  if (outDir === 'docs' && existsSync(outPath) && existsSync(join(outPath, 'ROADMAP.md'))) {
+    console.error(
+      '
+  docs/ contains ROADMAP.md, which prep:docs would delete.
+' +
+        '  Use GitHub Actions (npm run prep:pages) or move the documents elsewhere first.
+',
+    );
+    process.exit(1);
+  }
   rmSync(outPath, { recursive: true, force: true });
   mkdirSync(outPath, { recursive: true });
   cpSync(join(root, 'dist'), outPath, { recursive: true });

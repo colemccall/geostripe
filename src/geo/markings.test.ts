@@ -10,7 +10,7 @@ import {
   stripesForStreet,
 } from './markings';
 import type { Movement } from './markings';
-import { localPlane } from './projection';
+import { localPlane } from './crs';
 import { componentsFromSpecs } from '../library/templates';
 import { distanceMeters } from './measure';
 import type { CrossSection } from '../model/types';

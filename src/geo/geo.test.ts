@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { Polygon } from 'geojson';
 import type { CrossSection, SectionComponent } from '../model/types';
 import type { ComponentType } from '../library/primitives';
-import { dedupe, localPlane, metresPerDegreeLat, metresPerDegreeLng, originFor } from './projection';
-import type { LngLat } from './projection';
+import { dedupe, localPlane, originFor } from './crs';
+import type { LngLat } from './crs';
 import { offsetPolyline, polylineLength } from './offset';
 import { bandsForSegment } from './bands';
 
@@ -81,11 +81,8 @@ const CINCY: LngLat = [-84.5194, 39.1096];
 /** Build a straight line of `lengthM` metres from `start` on the given compass bearing. */
 function straightLine(start: LngLat, bearingDeg: number, lengthM: number): LngLat[] {
   const br = (bearingDeg * Math.PI) / 180;
-  const mLat = metresPerDegreeLat(start[1]);
-  const mLng = metresPerDegreeLng(start[1]);
-  const dLat = (Math.cos(br) * lengthM) / mLat;
-  const dLng = (Math.sin(br) * lengthM) / mLng;
-  return [start, [start[0] + dLng, start[1] + dLat]];
+  const plane = localPlane(start);
+  return [start, plane.toLngLat({ x: Math.sin(br) * lengthM, y: Math.cos(br) * lengthM })];
 }
 
 /**
@@ -116,11 +113,6 @@ describe('projection', () => {
     const plane = localPlane(CINCY);
     expect(relativeError(haversine(CINCY, plane.toLngLat({ x: 0, y: 100 })), 100)).toBeLessThan(0.005);
     expect(relativeError(haversine(CINCY, plane.toLngLat({ x: 100, y: 0 })), 100)).toBeLessThan(0.005);
-  });
-
-  it('knows a degree of longitude is shorter than a degree of latitude at 39N', () => {
-    // The precise fact @turf/lineOffset ignores.
-    expect(metresPerDegreeLng(39.1)).toBeLessThan(metresPerDegreeLat(39.1) * 0.79);
   });
 
   it('drops consecutive duplicate points', () => {

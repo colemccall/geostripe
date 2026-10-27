@@ -8,19 +8,34 @@ import {
   setWorkerUrl,
 } from 'maplibre-gl';
 import type { MapMouseEvent, PointLike, StyleSpecification } from 'maplibre-gl';
+import type { Asset } from '../model/asset';
+import type { Doc } from '../model/doc';
 import type { FeatureCollection } from 'geojson';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { basemapById, tileUrlsFor } from './basemaps';
 import type { BasemapId, TileSourceOptions } from './basemaps';
-import { designLayers, emptySources, paintDoc, paintPreview, projectCentre } from './paint';
+import { designLayers, emptySources, paintDoc, paintPreview } from './paint';
 import { renderAllGlyphs } from './glyphImages';
 import type { PaintSources } from './paint';
-import { useEditorStore } from '../store/useEditorStore';
+import { HANDLES_FOR as HANDLES_FOR_MODE, useEditorStore } from '../store/useEditorStore';
+import type { Tool } from '../store/useEditorStore';
 import { assetMap } from '../library/assets';
-import { joinCandidate, splitPointFor } from '../model/doc';
+import { joinCandidate } from '../model/doc';
 import type { Snap } from '../model/doc';
+import { roadIssues } from '../model/validity';
+import { applyView, VIEW_IMAGERY_FACTOR } from './views';
+import { setPointer } from './pointer';
+import { nearestRoadPoint } from '../geo/snapEngine';
+import { bearingToFace } from '../model/buildings';
+import { footprint } from '../model/buildings';
+import { PLACEMENT_TEXT, placementIssues } from '../model/placement';
+import { circle } from '../geo/region';
+import { distanceMetres } from '../geo/crs';
+import { buildSnapIndex, findSnaps } from '../geo/snapEngine';
+import type { SnapCandidate, SnapContext, SnapIndex } from '../geo/snapEngine';
 import { directionGuidesAt, guideLine, snapToGuides } from '../geo/snapping';
-import type { LngLat } from '../geo/projection';
+import { localPlane, metresPerPixel } from '../geo/crs';
+import type { LngLat } from '../geo/crs';
 import { LAYER_GROUPS } from './layerGroups';
 import type { LayerGroupId } from './layerGroups';
 
@@ -132,6 +147,9 @@ const LIVE_SOURCES = ['preview', 'snap'] as const;
 
 const SOURCE_KEYS: (keyof PaintSources)[] = [
   'areas',
+  'zones',
+  'districts',
+  'buildings',
   'bands',
   'stripes',
   'stamps',
@@ -171,7 +189,7 @@ function pushSources(map: MapLibreMap, sources: PaintSources) {
  * Each layer goes in independently: one invalid paint property must not abort the rest, or
  * a typo in a colour renders as bare imagery with no error anywhere on screen.
  */
-function addDesign(map: MapLibreMap, latDeg: number) {
+function addDesign(map: MapLibreMap) {
   // Pavement symbols are images the symbol layer refers to by name. They have to be
   // registered before the layer that uses them, and again after any setStyle, because a
   // style change clears the image registry along with everything else.
@@ -191,7 +209,7 @@ function addDesign(map: MapLibreMap, latDeg: number) {
     }
   }
 
-  for (const layer of designLayers(latDeg)) {
+  for (const layer of designLayers()) {
     if (map.getLayer(layer.id)) continue;
     try {
       map.addLayer(layer);
@@ -206,7 +224,11 @@ function addDesign(map: MapLibreMap, latDeg: number) {
       type: 'line',
       source: DRAFT_SOURCE,
       layout: { 'line-cap': 'round' },
-      paint: { 'line-color': '#4DA3FF', 'line-width': 2, 'line-dasharray': [2, 2] },
+      paint: {
+        'line-color': ['case', ['==', ['get', 'invalid'], 1], '#D64545', '#4DA3FF'],
+        'line-width': 2,
+        'line-dasharray': [2, 2],
+      },
     });
   }
   if (!map.getLayer('draft-point')) {
@@ -223,6 +245,9 @@ function addDesign(map: MapLibreMap, latDeg: number) {
       },
     });
   }
+
+  // Layers are created with their ordinary paint; put the current info view back on them.
+  applyView(map, useEditorStore.getState().view);
 }
 
 export interface MapCanvasProps {
@@ -250,6 +275,7 @@ export function MapCanvas({ className }: MapCanvasProps) {
   const arcgisApiKey = useEditorStore((s) => s.arcgisApiKey);
   const imageryOpacity = useEditorStore((s) => s.imageryOpacity);
   const layerVisibility = useEditorStore((s) => s.layerVisibility);
+  const view = useEditorStore((s) => s.view);
 
   /**
    * Live pointer position, for the rubber band.
@@ -264,10 +290,18 @@ export function MapCanvas({ className }: MapCanvasProps) {
   const drag = useRef<
     | { kind: 'node'; nodeId: string }
     | { kind: 'shape'; segmentId: string; index: number }
+    | { kind: 'stroke'; points: LngLat[] }
     | null
   >(null);
 
   const areaRing = useRef<LngLat[]>([]);
+  /** The model index snapping queries, rebuilt only when the document or palette changes. */
+  const snapCache = useRef<{ doc: Doc; assets: Asset[]; index: SnapIndex } | null>(null);
+  /** What the last snap query landed on, so a click resolves to the position that was shown. */
+  const lastSnap = useRef<SnapCandidate | null>(null);
+  /** Which of several candidates under the cursor Tab has chosen, and where Tab was pressed. */
+  const cycle = useRef({ index: 0, anchor: [0, 0] as [number, number] });
+  const lastPointer = useRef<MapMouseEvent | null>(null);
 
   /**
    * The palette, indexed, for the preview to paint with.
@@ -305,56 +339,57 @@ export function MapCanvas({ className }: MapCanvasProps) {
   /**
    * What a click at this point should attach to.
    *
-   * Asked of the RENDERED map rather than of the model, because the question is "what is
-   * under the cursor" — a question about pixels. A tolerance in metres would be right at
-   * exactly one zoom and wrong at every other.
+   * Asked of the MODEL rather than of the rendered map: every candidate is measured in real
+   * metres (the pixel reach is converted at this zoom and latitude), ranked by an explicit
+   * priority per tool, and Tab steps through the ones that overlap. See geo/snapEngine.ts.
    *
-   * Nodes win over roads. If both are within reach you meant the junction: joining at a
-   * place that already exists is nearly always the intent, and splitting a road a metre
-   * from its own end produces a sliver nobody wanted.
-   *
-   * Returning `undefined` means open ground, which is a real answer and not a failure.
+   * Returning `undefined` means open ground, which is a real answer and not a failure. Some
+   * candidates (a kerb, a ground-shape corner) are positions with no model operation behind
+   * them; those leave `lastSnap` set and `resolvePoint` picks the position up from there.
    */
+  const candidatesAt = useCallback((event: MapMouseEvent, context: SnapContext): SnapCandidate[] => {
+    const map = mapRef.current;
+    if (!map || event.originalEvent.altKey) return [];
+    const state = useEditorStore.getState();
+    let cache = snapCache.current;
+    if (!cache || cache.doc !== state.doc || cache.assets !== state.assets) {
+      cache = {
+        doc: state.doc,
+        assets: state.assets,
+        index: buildSnapIndex(state.doc, assetMapRef.current),
+      };
+      snapCache.current = cache;
+    }
+    const cursor: LngLat = [event.lngLat.lng, event.lngLat.lat];
+    const tolerance = SNAP_PX * metresPerPixel(cursor[1], map.getZoom());
+    return findSnaps(cache.index, cursor, tolerance, context);
+  }, []);
+
   const snapAt = useCallback(
     (event: MapMouseEvent): Snap | undefined => {
-      const map = mapRef.current;
-      if (!map) return undefined;
-      const { x, y } = event.point;
-      const box: [PointLike, PointLike] = [
-        [x - SNAP_PX, y - SNAP_PX],
-        [x + SNAP_PX, y + SNAP_PX],
-      ];
+      const tool = useEditorStore.getState().tool;
+      const context: SnapContext = tool === 'area' ? 'area' : tool === 'build' ? 'build' : 'select';
+      lastPointer.current = event;
 
-      const onNode = map
-        .queryRenderedFeatures(box, { layers: ['handle-point'] })
-        .find((f) => f.properties?.kind === 'node');
-      if (onNode?.properties?.nodeId) {
-        return { kind: 'node', nodeId: String(onNode.properties.nodeId) };
+      // A fresh position starts the cycle over; Tab at the same spot keeps stepping.
+      const [ax, ay] = cycle.current.anchor;
+      if (Math.hypot(event.point.x - ax, event.point.y - ay) > 3) cycle.current.index = 0;
+
+      const found = candidatesAt(event, context);
+      if (found.length === 0) {
+        lastSnap.current = null;
+        return undefined;
       }
-
-      const state = useEditorStore.getState();
-      const bandLayers = designLayers(0)
-        .filter((l) => l.id.startsWith('band-'))
-        .map((l) => l.id)
-        .filter((id) => map.getLayer(id));
-      const onRoad = map.queryRenderedFeatures(box, { layers: bandLayers })[0];
-      const segmentId = onRoad?.properties?.segmentId ? String(onRoad.properties.segmentId) : null;
-      if (!segmentId) return undefined;
-
-      const segment = state.doc.segments.find((s) => s.id === segmentId);
-      if (!segment) return undefined;
-
-      const nodes = new Map(state.doc.nodes.map((n) => [n.id, n]));
-      const at = splitPointFor(segment, nodes, [event.lngLat.lng, event.lngLat.lat]);
-      if (!at) return undefined;
-
-      return { kind: 'segment', segmentId, shapeIndex: at.shapeIndex, position: at.point };
+      const pick = found[cycle.current.index % found.length]!;
+      lastSnap.current = pick;
+      return pick.snap;
     },
-    [],
+    [candidatesAt],
   );
 
   /** Where a point actually lands: on what it snapped to, or where the mouse is. */
   const resolvePoint = useCallback((event: MapMouseEvent, snap?: Snap): LngLat => {
+    if (!snap && lastSnap.current) return lastSnap.current.position;
     if (snap?.kind === 'segment') return snap.position;
     if (snap?.kind === 'node') {
       const node = useEditorStore.getState().doc.nodes.find((n) => n.id === snap.nodeId);
@@ -387,7 +422,7 @@ export function MapCanvas({ className }: MapCanvasProps) {
     map.touchZoomRotate.disableRotation();
 
     map.on('load', () => {
-      addDesign(map, projectCentre(useEditorStore.getState().doc)[1] || 39.1);
+      addDesign(map);
       pushSources(map, painted.current);
       setReady(true);
     });
@@ -409,6 +444,31 @@ export function MapCanvas({ className }: MapCanvasProps) {
     const map = mapRef.current;
     if (!map || !ready) return;
 
+    /**
+     * Where a building would stand and which way it would face: toward the nearest road if
+     * one is near, plus whatever turn the user has added. Null when there is no map yet.
+     */
+    const buildingGhost = (event: MapMouseEvent) => {
+      const state = useEditorStore.getState();
+      let cache = snapCache.current;
+      if (!cache || cache.doc !== state.doc || cache.assets !== state.assets) {
+        cache = { doc: state.doc, assets: state.assets, index: buildSnapIndex(state.doc, assetMapRef.current) };
+        snapCache.current = cache;
+      }
+      const position: LngLat = [event.lngLat.lng, event.lngLat.lat];
+      const road = nearestRoadPoint(cache.index, position, 80);
+      // The front of a footprint is its south edge at heading 0, so facing a bearing b
+      // means turning by b - 180.
+      const base = road ? bearingToFace(position, road) - 180 : 0;
+      const rotation = (((base + state.buildingTurn) % 360) + 360) % 360;
+      const issues = placementIssues(state.doc, cache.index, {
+        typeId: state.activeBuildingType,
+        position,
+        rotation,
+      });
+      return { position, rotation, issues };
+    };
+
     const onClick = (event: MapMouseEvent) => {
       const state = useEditorStore.getState();
       const snap = snapAt(event);
@@ -422,6 +482,32 @@ export function MapCanvas({ className }: MapCanvasProps) {
       if (state.tool === 'area') {
         areaRing.current = [...areaRing.current, point];
         drawDraft(map, areaRing.current, null);
+        return;
+      }
+
+      // Outline mode traces a shape point by point; brush mode paints on drag instead.
+      if ((state.tool === 'zone' || state.tool === 'district') && state.paintMode === 'outline') {
+        areaRing.current = [...areaRing.current, point];
+        drawDraft(map, areaRing.current, null);
+        return;
+      }
+      if (state.tool === 'zone' || state.tool === 'district') return;
+
+      if (state.tool === 'roundabout') {
+        state.placeRoundabout(point);
+        return;
+      }
+
+      if (state.tool === 'building') {
+        const ghost = buildingGhost(event);
+        if (ghost && ghost.issues.length === 0) state.placeBuilding(ghost.position, ghost.rotation);
+        else if (ghost) {
+          state.setNotice({
+            kind: 'warning',
+            title: 'Cannot place here',
+            details: ghost.issues.map((i) => PLACEMENT_TEXT[i]),
+          });
+        }
         return;
       }
 
@@ -439,8 +525,11 @@ export function MapCanvas({ className }: MapCanvasProps) {
           return;
         }
         const hit = pick(map, event);
-        if (hit.segmentId) state.bulldoze({ segmentId: hit.segmentId });
+        if (hit.buildingId) state.bulldoze({ buildingId: hit.buildingId });
+        else if (hit.segmentId) state.bulldoze({ segmentId: hit.segmentId });
         else if (hit.areaId) state.bulldoze({ areaId: hit.areaId });
+        else if (hit.zoneId) state.bulldoze({ zoneId: hit.zoneId });
+        else if (hit.districtId) state.bulldoze({ districtId: hit.districtId });
         return;
       }
 
@@ -458,15 +547,31 @@ export function MapCanvas({ className }: MapCanvasProps) {
     /** Finish an area on a double click, which is how every drawing tool ends a shape. */
     const onDoubleClick = (event: MapMouseEvent) => {
       const state = useEditorStore.getState();
-      if (state.tool !== 'area') return;
+      const outlining =
+        (state.tool === 'zone' || state.tool === 'district') && state.paintMode === 'outline';
+      if (state.tool !== 'area' && !outlining) return;
       event.preventDefault();
-      if (areaRing.current.length >= 3) state.addAreaShape(areaRing.current);
+      if (areaRing.current.length >= 3) {
+        if (outlining) state.paintOutline(areaRing.current);
+        else state.addAreaShape(areaRing.current);
+      }
       areaRing.current = [];
       drawDraft(map, [], null);
     };
 
     const onMouseDown = (event: MapMouseEvent) => {
       const state = useEditorStore.getState();
+
+      // The brush: press to start a stroke, drag to paint, release to commit one undo step.
+      if ((state.tool === 'zone' || state.tool === 'district') && state.paintMode === 'brush') {
+        if (event.originalEvent.button !== 0) return;
+        drag.current = { kind: 'stroke', points: [[event.lngLat.lng, event.lngLat.lat]] };
+        map.dragPan.disable();
+        event.preventDefault();
+        drawBrush(map, drag.current.points[0]!, state.brushRadiusMeters, drag.current.points);
+        return;
+      }
+
       if (state.tool !== 'select') return;
 
       const { x, y } = event.point;
@@ -498,6 +603,42 @@ export function MapCanvas({ className }: MapCanvasProps) {
     const onMouseMove = (event: MapMouseEvent) => {
       hover.current = [event.lngLat.lng, event.lngLat.lat];
       const state = useEditorStore.getState();
+      setPointer({ position: hover.current, snap: lastSnap.current?.label ?? null });
+
+      if (drag.current?.kind === 'stroke') {
+        const point: LngLat = [event.lngLat.lng, event.lngLat.lat];
+        const points = drag.current.points;
+        // A new point only once the brush has moved a useful way, so a long drag stays a
+        // few hundred points rather than thousands.
+        if (distanceMetres(points[points.length - 1]!, point) >= Math.max(1, state.brushRadiusMeters / 4)) {
+          points.push(point);
+        }
+        drawBrush(map, point, state.brushRadiusMeters, points);
+        return;
+      }
+
+      if (state.tool === 'zone' || state.tool === 'district') {
+        if (state.paintMode === 'brush') {
+          drawBrush(map, [event.lngLat.lng, event.lngLat.lat], state.brushRadiusMeters, []);
+        } else if (areaRing.current.length > 0) {
+          drawDraft(map, [...areaRing.current, [event.lngLat.lng, event.lngLat.lat]], null);
+        }
+        return;
+      }
+
+      if (state.tool === 'roundabout') {
+        drawBrush(map, [event.lngLat.lng, event.lngLat.lat], state.roundaboutRadius, []);
+        return;
+      }
+
+      if (state.tool === 'building') {
+        const ghost = buildingGhost(event);
+        if (ghost) {
+          drawGhost(map, footprint({ typeId: state.activeBuildingType, position: ghost.position, rotation: ghost.rotation }), ghost.issues.length > 0);
+          map.getCanvas().style.cursor = ghost.issues.length > 0 ? 'not-allowed' : 'crosshair';
+        }
+        return;
+      }
 
       if (drag.current) {
         const point: LngLat = [event.lngLat.lng, event.lngLat.lat];
@@ -512,7 +653,7 @@ export function MapCanvas({ className }: MapCanvasProps) {
           const at = target
             ? useEditorStore.getState().doc.nodes.find((n) => n.id === target.nodeId)?.position
             : null;
-          showSnap(map, at ? { kind: 'node', nodeId: target!.nodeId } : undefined, at ?? null);
+          showSnap(map, at ? { kind: 'node' } : undefined, at ?? null);
         } else {
           state.moveShapePointLive(drag.current.segmentId, drag.current.index, point);
         }
@@ -522,9 +663,14 @@ export function MapCanvas({ className }: MapCanvasProps) {
       // What the next click would attach to, shown before it is spent. Snapping that is
       // invisible is snapping you have to trust rather than see, which is what made the
       // build tool feel like guesswork.
-      const snap = state.tool === 'build' ? snapAt(event) : undefined;
-      if (state.tool !== 'build' || !state.buildFromNodeId) {
-        showSnap(map, snap, snap ? resolvePoint(event, snap) : null);
+      const snap = state.tool === 'build' || state.tool === 'area' ? snapAt(event) : undefined;
+      const shown = snap ?? lastSnap.current ?? undefined;
+      if (state.tool === 'area' || state.tool !== 'build' || !state.buildFromNodeId) {
+        if (state.tool === 'build' || state.tool === 'area') {
+          showSnap(map, shown, shown ? resolvePoint(event, snap) : null);
+        } else {
+          showSnap(map, undefined, null);
+        }
       }
 
       if (state.tool === 'build') {
@@ -555,17 +701,28 @@ export function MapCanvas({ className }: MapCanvasProps) {
 
           showGuide(map, guide, guideKind, snap, snap ? cursor : null);
           const controls = [from.position, ...state.buildHandles, cursor];
-          setData(
-            map,
-            'preview',
-            paintPreview(
-              assetMapRef.current,
-              state.activeLineAssetId,
-              controls,
-              state.buildMode !== 'straight',
-              state.buildLevel,
-            ) as FeatureCollection,
-          );
+          const preview = paintPreview(
+            assetMapRef.current,
+            state.activeLineAssetId,
+            controls,
+            state.buildMode !== 'straight',
+            state.buildLevel,
+          ) as FeatureCollection;
+
+          // The same rules the click will apply, shown before it: a road the rules refuse is
+          // drawn red and the cursor says so.
+          const issues =
+            state.buildHandles.length >= HANDLES_FOR_MODE[state.buildMode]
+              ? roadIssues(
+                  state.doc,
+                  { position: from.position, nodeId: from.id },
+                  { position: cursor, nodeId: snap?.kind === 'node' ? snap.nodeId : undefined },
+                ).filter((issue) => issue !== 'sameNode')
+              : [];
+          const invalid = issues.length > 0;
+          for (const feature of preview.features) feature.properties = { ...feature.properties, invalid: invalid ? 1 : 0 };
+          map.getCanvas().style.cursor = invalid ? 'not-allowed' : 'crosshair';
+          setData(map, 'preview', preview);
         } else {
           setData(map, 'preview', emptyFC());
         }
@@ -582,6 +739,13 @@ export function MapCanvas({ className }: MapCanvasProps) {
       if (!dragged) return;
       drag.current = null;
       const state = useEditorStore.getState();
+
+      if (dragged.kind === 'stroke') {
+        map.dragPan.enable();
+        setData(map, DRAFT_SOURCE, emptyFC());
+        state.paintStroke(dragged.points);
+        return;
+      }
       state.endGesture();
       map.dragPan.enable();
       showSnap(map, undefined, null);
@@ -617,8 +781,72 @@ export function MapCanvas({ className }: MapCanvasProps) {
       if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
       const state = useEditorStore.getState();
 
+      // Tab steps through everything under the cursor, strongest first, for the moments a
+      // junction, a road and a kerb are all within reach and the first is not the one meant.
+      if (event.key === 'Tab' && ['build', 'area', 'select'].includes(state.tool) && lastPointer.current) {
+        const last = lastPointer.current;
+        cycle.current = { index: cycle.current.index + 1, anchor: [last.point.x, last.point.y] };
+        const snap = snapAt(last);
+        const map = mapRef.current;
+        if (map && lastSnap.current) {
+          showSnap(map, lastSnap.current, resolvePoint(last, snap));
+          event.preventDefault();
+        }
+        return;
+      }
+
+      // Tool hotkeys, the ones the toolbar has always advertised.
+      if (!event.ctrlKey && !event.metaKey && !event.altKey) {
+        const tools: Record<string, Tool> = {
+          v: 'select',
+          b: 'build',
+          u: 'upgrade',
+          g: 'area',
+          o: 'roundabout',
+          z: 'zone',
+          n: 'building',
+          d: 'district',
+          x: 'bulldoze',
+        };
+        const tool = tools[event.key.toLowerCase()];
+        if (tool && !event.shiftKey) {
+          state.setTool(tool);
+          areaRing.current = [];
+          if (mapRef.current) drawDraft(mapRef.current, [], null);
+          return;
+        }
+        if (event.key.toLowerCase() === 'e' && (state.tool === 'zone' || state.tool === 'district')) {
+          state.setEraseMode(!state.eraseMode);
+          return;
+        }
+        if (event.key === '[') {
+          state.setBrushRadius(state.brushRadiusMeters / 1.25);
+          return;
+        }
+        if (event.key === ']') {
+          state.setBrushRadius(state.brushRadiusMeters * 1.25);
+          return;
+        }
+        if (event.key.toLowerCase() === 'r' && state.tool === 'building') {
+          state.turnBuilding(event.shiftKey ? 1 : 15);
+          return;
+        }
+      }
+
       if (event.key === 'Escape') {
         state.cancelBuild();
+        areaRing.current = [];
+        if (mapRef.current) drawDraft(mapRef.current, [], null);
+        return;
+      }
+
+      if (
+        event.key === 'Enter' &&
+        (state.tool === 'zone' || state.tool === 'district') &&
+        state.paintMode === 'outline' &&
+        areaRing.current.length >= 3
+      ) {
+        state.paintOutline(areaRing.current);
         areaRing.current = [];
         if (mapRef.current) drawDraft(mapRef.current, [], null);
         return;
@@ -661,12 +889,6 @@ export function MapCanvas({ className }: MapCanvasProps) {
         );
         return;
       }
-
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
-        if (event.shiftKey) state.redo();
-        else state.undo();
-        event.preventDefault();
-      }
     };
 
     window.addEventListener('keydown', onKey);
@@ -680,15 +902,18 @@ export function MapCanvas({ className }: MapCanvasProps) {
     if (!map || !ready) return;
     const canvas = map.getCanvas();
     canvas.style.cursor =
-      tool === 'build' || tool === 'area'
+      tool === 'build' || tool === 'area' || tool === 'roundabout' || tool === 'zone' || tool === 'district' || tool === 'building'
         ? 'crosshair'
         : tool === 'bulldoze'
           ? 'not-allowed'
           : tool === 'upgrade'
             ? 'cell'
             : '';
+    // A ghost, brush ring or half-drawn outline belongs to the tool that made it.
+    areaRing.current = [];
+    setData(map, DRAFT_SOURCE, emptyFC());
     // Double click places a point in the shape tools; zooming would fight it.
-    if (tool === 'area') map.doubleClickZoom.disable();
+    if (tool === 'area' || tool === 'zone' || tool === 'district') map.doubleClickZoom.disable();
     else map.doubleClickZoom.enable();
   }, [tool, ready]);
 
@@ -704,7 +929,7 @@ export function MapCanvas({ className }: MapCanvasProps) {
 
     map.setStyle(buildStyle(basemapId, { customUrl: customTileUrl, waybackRelease, arcgisApiKey }));
     map.once('styledata', () => {
-      addDesign(map, projectCentre(useEditorStore.getState().doc)[1] || 39.1);
+      addDesign(map);
       // The new style's sources are empty. Refill them from the last paint, or changing
       // imagery would silently erase the design until the next edit.
       pushSources(map, painted.current);
@@ -714,8 +939,15 @@ export function MapCanvas({ className }: MapCanvasProps) {
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready || !map.getLayer('basemap')) return;
-    map.setPaintProperty('basemap', 'raster-opacity', imageryOpacity);
-  }, [imageryOpacity, ready]);
+    map.setPaintProperty('basemap', 'raster-opacity', imageryOpacity * VIEW_IMAGERY_FACTOR[view]);
+  }, [imageryOpacity, view, ready]);
+
+  // Info views recolour the design layers; re-applied after every style rebuild too.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    applyView(map, view);
+  }, [view, ready, basemapId, customTileUrl, waybackRelease, arcgisApiKey]);
 
   // ---------------------------------------------------------------- design data
 
@@ -724,16 +956,22 @@ export function MapCanvas({ className }: MapCanvasProps) {
     if (!map || !ready) return;
 
     assetMapRef.current = assetMap(assets);
-    const sources = paintDoc(doc, assetMapRef.current, {
-      selectedSegmentId,
-      selectedNodeId,
-      selectedAreaId,
-      defaultRadiusMeters,
-      showAllCenterlines,
-    });
 
-    painted.current = sources;
-    pushSources(map, sources);
+    // At most one repaint per animation frame. A drag can deliver several store updates
+    // between frames, and only the latest is ever visible.
+    const frame = requestAnimationFrame(() => {
+      const sources = paintDoc(doc, assetMapRef.current, {
+        selectedSegmentId,
+        selectedNodeId,
+        selectedAreaId,
+        defaultRadiusMeters,
+        showAllCenterlines,
+      });
+
+      painted.current = sources;
+      pushSources(map, sources);
+    });
+    return () => cancelAnimationFrame(frame);
   }, [
     doc,
     assets,
@@ -775,10 +1013,56 @@ export function MapCanvas({ className }: MapCanvasProps) {
 // ------------------------------------------------------------------------- helpers
 
 /** What is under the cursor, among the things a click can select. */
+/** The ring of a circle on the ground, as a closed line, for the brush outline. */
+function brushRing(centre: LngLat, radiusMetres: number): LngLat[] {
+  const plane = localPlane(centre);
+  const ring = circle({ x: 0, y: 0 }, radiusMetres, 48).map((p) => plane.toLngLat(p));
+  return [...ring, ring[0]!];
+}
+
+function drawBrush(map: MapLibreMap, centre: LngLat, radiusMetres: number, stroke: readonly LngLat[]) {
+  const features: FeatureCollection['features'] = [
+    {
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: brushRing(centre, radiusMetres) },
+      properties: {},
+    },
+  ];
+  if (stroke.length >= 2) {
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: stroke as LngLat[] },
+      properties: {},
+    });
+  }
+  setData(map, DRAFT_SOURCE, { type: 'FeatureCollection', features });
+}
+
+function drawGhost(map: MapLibreMap, corners: readonly LngLat[], invalid: boolean) {
+  setData(map, DRAFT_SOURCE, {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: [...corners, corners[0]!] as LngLat[] },
+        properties: { invalid: invalid ? 1 : 0 },
+      },
+    ],
+  });
+}
+
 function pick(map: MapLibreMap, event: MapMouseEvent): {
   segmentId?: string;
   areaId?: string;
+  zoneId?: string;
+  buildingId?: string;
+  districtId?: string;
 } {
+  if (map.getLayer('building-fill')) {
+    const onBuilding = map.queryRenderedFeatures(event.point, { layers: ['building-fill'] })[0];
+    if (onBuilding?.properties?.buildingId) return { buildingId: String(onBuilding.properties.buildingId) };
+  }
+
   const bandLayers = ['band--1', 'band-0', 'band-1'].filter((id) => map.getLayer(id));
   const onRoad = map.queryRenderedFeatures(event.point, { layers: bandLayers })[0];
   if (onRoad?.properties?.segmentId) return { segmentId: String(onRoad.properties.segmentId) };
@@ -786,6 +1070,14 @@ function pick(map: MapLibreMap, event: MapMouseEvent): {
   if (map.getLayer('area-fill')) {
     const onArea = map.queryRenderedFeatures(event.point, { layers: ['area-fill'] })[0];
     if (onArea?.properties?.areaId) return { areaId: String(onArea.properties.areaId) };
+  }
+  if (map.getLayer('zone-fill')) {
+    const onZone = map.queryRenderedFeatures(event.point, { layers: ['zone-fill'] })[0];
+    if (onZone?.properties?.zoneId) return { zoneId: String(onZone.properties.zoneId) };
+  }
+  if (map.getLayer('district-fill')) {
+    const onDistrict = map.queryRenderedFeatures(event.point, { layers: ['district-fill'] })[0];
+    if (onDistrict?.properties?.districtId) return { districtId: String(onDistrict.properties.districtId) };
   }
   return {};
 }
@@ -797,7 +1089,7 @@ function pick(map: MapLibreMap, event: MapMouseEvent): {
  * landing on a road SPLITS it. Those have different consequences and the tool should say
  * which one is about to happen.
  */
-function showSnap(map: MapLibreMap, snap: Snap | undefined, at: LngLat | null) {
+function showSnap(map: MapLibreMap, snap: { kind: string } | undefined, at: LngLat | null) {
   if (!snap || !at) {
     setData(map, 'snap', emptyFC());
     return;
@@ -877,15 +1169,14 @@ function snapAngle(
   if (!event.originalEvent.shiftKey) return point;
 
   const from = shape[shape.length - 1] ?? origin;
-  const scale = Math.cos((from[1] * Math.PI) / 180);
-  const dx = (point[0] - from[0]) * scale;
-  const dy = point[1] - from[1];
+  const plane = localPlane(from);
+  const { x: dx, y: dy } = plane.toPlane(point);
   const length = Math.hypot(dx, dy);
-  if (length < 1e-12) return point;
+  if (length < 1e-9) return point;
 
   const step = (SNAP_ANGLE_DEGREES * Math.PI) / 180;
   const angle = Math.round(Math.atan2(dy, dx) / step) * step;
-  return [from[0] + (Math.cos(angle) * length) / scale, from[1] + Math.sin(angle) * length];
+  return plane.toLngLat({ x: Math.cos(angle) * length, y: Math.sin(angle) * length });
 }
 
 export const emptyPaintSources = emptySources;

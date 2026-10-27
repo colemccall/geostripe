@@ -1,5 +1,8 @@
 import type { CurveSettings } from '../geo/curve';
-import type { LngLat } from '../geo/projection';
+import { distanceMetres, localPlane, originFor } from '../geo/crs';
+import type { LngLat } from '../geo/crs';
+import type { BuildingTypeId } from '../library/buildingTypes';
+import type { LandUseId } from '../library/landuse';
 import { newId } from './types';
 
 /**
@@ -105,17 +108,67 @@ export interface AreaShape {
   visible: boolean;
 }
 
+/**
+ * A patch of land with a land use. One polygon: an outer ring and any holes.
+ *
+ * Rings are WGS84 with the first point NOT repeated at the end, outer first. Zones of the
+ * same land use that touch are merged when painted, so a single use is normally one or a
+ * few zones, and zones never overlap: painting over a zone replaces what was under it.
+ */
+export interface Zone {
+  id: string;
+  landUse: LandUseId;
+  rings: LngLat[][];
+  visible: boolean;
+}
+
+/**
+ * A building footprint: a type, a place and a heading.
+ *
+ * The polygon is derived from the type's size, so there is nothing here to keep in step with
+ * it. `rotation` is degrees clockwise from north.
+ */
+export interface Building {
+  id: string;
+  typeId: BuildingTypeId;
+  position: LngLat;
+  rotation: number;
+  visible: boolean;
+}
+
+/** A named planning district: an area with a name and a colour, and nothing else. */
+export interface District {
+  id: string;
+  name: string;
+  color: string;
+  rings: LngLat[][];
+  visible: boolean;
+}
+
 export interface Doc {
   nodes: Node[];
   segments: Segment[];
   areas: AreaShape[];
+  zones: Zone[];
+  buildings: Building[];
+  districts: District[];
 }
 
-export const emptyDoc = (): Doc => ({ nodes: [], segments: [], areas: [] });
+export const emptyDoc = (): Doc => ({
+  nodes: [],
+  segments: [],
+  areas: [],
+  zones: [],
+  buildings: [],
+  districts: [],
+});
 
 export const newNodeId = (): string => newId('n');
 export const newSegmentId = (): string => newId('s');
 export const newAreaId = (): string => newId('area');
+export const newZoneId = (): string => newId('zone');
+export const newBuildingId = (): string => newId('bldg');
+export const newDistrictId = (): string => newId('dist');
 
 // --------------------------------------------------------------------------- reading
 
@@ -147,6 +200,28 @@ export function endsAt(nodeId: string, segments: readonly Segment[]): {
     if (segment.toNodeId === nodeId) out.push({ segment, end: 'to' });
   }
   return out;
+}
+
+/**
+ * Every node's arriving road ends, built in one pass over the segments.
+ *
+ * `endsAt` answers the same question for one node by scanning every segment, which is fine
+ * once and quadratic when asked for every node in a project. Anything that visits all the
+ * nodes builds this first instead.
+ */
+export function adjacency(segments: readonly Segment[]): Map<string, { segment: Segment; end: 'from' | 'to' }[]> {
+  const map = new Map<string, { segment: Segment; end: 'from' | 'to' }[]>();
+  const add = (nodeId: string, segment: Segment, end: 'from' | 'to') => {
+    const list = map.get(nodeId);
+    if (list) list.push({ segment, end });
+    else map.set(nodeId, [{ segment, end }]);
+  };
+  for (const segment of segments) {
+    if (segment.visible === false) continue;
+    add(segment.fromNodeId, segment, 'from');
+    add(segment.toNodeId, segment, 'to');
+  }
+  return map;
 }
 
 /** How many roads meet at each node. Nodes with none are leftovers and get swept. */
@@ -315,8 +390,6 @@ export function joinCandidate(
   const node = doc.nodes.find((n) => n.id === nodeId);
   if (!node) return null;
 
-  const scale = Math.cos((node.position[1] * Math.PI) / 180);
-  const metresPerDegree = 111132;
   let best: { nodeId: string; metres: number } | null = null;
 
   for (const other of doc.nodes) {
@@ -324,9 +397,7 @@ export function joinCandidate(
     // Two places at different heights are not the same place, whatever the plan view says.
     if ((other.elevation ?? 0) !== (node.elevation ?? 0)) continue;
 
-    const dx = (other.position[0] - node.position[0]) * scale * metresPerDegree;
-    const dy = (other.position[1] - node.position[1]) * metresPerDegree;
-    const metres = Math.hypot(dx, dy);
+    const metres = distanceMetres(node.position, other.position);
     if (metres > reachMetres) continue;
     if (!best || metres < best.metres) best = { nodeId: other.id, metres };
   }
@@ -476,25 +547,27 @@ export function splitPointFor(
   const controls = segmentControlPoints(segment, nodes);
   if (!controls || controls.length < 2) return null;
 
-  const scale = Math.cos((position[1] * Math.PI) / 180);
+  const plane = localPlane(originFor(controls));
+  const pts = controls.map((c) => plane.toPlane(c));
+  const target = plane.toPlane(position);
   let best: { shapeIndex: number; point: LngLat; distance: number } | null = null;
 
-  for (let i = 0; i < controls.length - 1; i++) {
-    const a = controls[i]!;
-    const b = controls[i + 1]!;
-    const dx = (b[0] - a[0]) * scale;
-    const dy = b[1] - a[1];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i]!;
+    const b = pts[i + 1]!;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
     const lenSq = dx * dx + dy * dy;
     const t =
       lenSq <= 0
         ? 0
-        : Math.max(
-            0,
-            Math.min(1, ((position[0] - a[0]) * scale * dx + (position[1] - a[1]) * dy) / lenSq),
-          );
-    const point: LngLat = [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])];
-    const distance = Math.hypot((position[0] - point[0]) * scale, position[1] - point[1]);
-    if (!best || distance < best.distance) best = { shapeIndex: i, point, distance };
+        : Math.max(0, Math.min(1, ((target.x - a.x) * dx + (target.y - a.y) * dy) / lenSq));
+    const px = a.x + t * dx;
+    const py = a.y + t * dy;
+    const distance = Math.hypot(target.x - px, target.y - py);
+    if (!best || distance < best.distance) {
+      best = { shapeIndex: i, point: plane.toLngLat({ x: px, y: py }), distance };
+    }
   }
 
   return best ? { shapeIndex: best.shapeIndex, point: best.point } : null;

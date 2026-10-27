@@ -1,5 +1,5 @@
-import { dedupe, localPlane, originFor } from './projection';
-import type { LngLat, PlanePoint } from './projection';
+import { dedupe, localPlane, originFor } from './crs';
+import type { LngLat, LocalPlane, PlanePoint } from './crs';
 
 /**
  * Curved centerlines.
@@ -330,6 +330,29 @@ function lerpT(
 // --------------------------------------------------------------------------- public
 
 /**
+ * Convert plane points back to longitude/latitude, returning the caller's own coordinates
+ * exactly for any point that was not moved.
+ *
+ * The conversion is a Mercator round trip and is good to about 1e-14 degrees, which is
+ * invisible on the ground but is the difference between "unchanged" and "changed" to anything
+ * comparing coordinates: a straight road would come back from a curve pass with every
+ * endpoint nudged in the fourteenth decimal place.
+ */
+function restore(
+  plane: LocalPlane,
+  planar: readonly PlanePoint[],
+  originals: readonly LngLat[],
+): LngLat[] {
+  return planar.map((p) => {
+    const q = plane.toLngLat(p);
+    for (const o of originals) {
+      if (Math.abs(o[0] - q[0]) < 1e-11 && Math.abs(o[1] - q[1]) < 1e-11) return [o[0], o[1]] as LngLat;
+    }
+    return q;
+  });
+}
+
+/**
  * Resolve control points into the polyline everything downstream works on.
  *
  * Straight mode returns the input unchanged, so nothing pays for a feature it is not
@@ -346,13 +369,13 @@ export function tessellate(
   const planar = points.map((p) => plane.toPlane(p));
 
   if (settings.mode === 'bezier') {
-    return tessellateBezier(planar, SAGITTA_TOLERANCE_METRES).map((p) => plane.toLngLat(p));
+    return restore(plane, tessellateBezier(planar, SAGITTA_TOLERANCE_METRES), points);
   }
 
   const sharp = new Set(settings.sharpVertices ?? []);
 
   if (settings.mode === 'smooth') {
-    return catmullRom(planar, sharp).map((p) => plane.toLngLat(p) as LngLat);
+    return restore(plane, catmullRom(planar, sharp), points);
   }
 
   const out: PlanePoint[] = [{ ...planar[0]! }];
@@ -367,7 +390,7 @@ export function tessellate(
   }
   out.push({ ...planar[planar.length - 1]! });
 
-  return dedupe(out.map((p) => plane.toLngLat(p) as LngLat), 1e-11);
+  return dedupe(restore(plane, out, points), 1e-11);
 }
 
 /**
@@ -420,7 +443,7 @@ export function tessellateRing(
   const planar = points.map((p) => plane.toPlane(p));
 
   if (settings.mode === 'bezier') {
-    return tessellateBezier(planar, SAGITTA_TOLERANCE_METRES).map((p) => plane.toLngLat(p));
+    return restore(plane, tessellateBezier(planar, SAGITTA_TOLERANCE_METRES), points);
   }
 
   const sharp = new Set(settings.sharpVertices ?? []);
@@ -435,7 +458,7 @@ export function tessellateRing(
     const curve = catmullRom(wrapped, shifted);
     // Drop the samples belonging to the wrapped padding segments.
     const trimmed = curve.slice(1, curve.length - 1);
-    return dedupe(trimmed.map((p) => plane.toLngLat(p) as LngLat), 1e-11);
+    return dedupe(restore(plane, trimmed, points), 1e-11);
   }
 
   const out: PlanePoint[] = [];
@@ -449,7 +472,7 @@ export function tessellateRing(
     else out.push({ ...planar[i]! });
   }
 
-  return dedupe(out.map((p) => plane.toLngLat(p) as LngLat), 1e-11);
+  return dedupe(restore(plane, out, points), 1e-11);
 }
 
 // -------------------------------------------------------------------- memoised access

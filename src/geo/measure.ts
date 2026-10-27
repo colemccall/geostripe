@@ -1,5 +1,5 @@
-import { localPlane, originFor } from './projection';
-import type { LngLat } from './projection';
+import { localPlane, originFor } from './crs';
+import type { LngLat } from './crs';
 
 /**
  * Ground distance, in metres.
