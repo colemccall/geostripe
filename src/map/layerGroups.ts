@@ -94,7 +94,3 @@ export function allLayersVisible(): Record<LayerGroupId, boolean> {
     boolean
   >;
 }
-
-export function groupVisibleByDefault(_id: LayerGroupId): boolean {
-  return true;
-}

@@ -1299,4 +1299,3 @@ function snapAngle(
   return plane.toLngLat({ x: Math.cos(angle) * length, y: Math.sin(angle) * length });
 }
 
-export const emptyPaintSources = emptySources;

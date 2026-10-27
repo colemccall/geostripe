@@ -11,7 +11,6 @@ import { newId } from './types';
 import type { SectionComponent } from './types';
 import { bandsForSegment } from '../geo/bands';
 import { closeRing, resolveCenterline, resolveRing } from '../geo/curve';
-import { builtInAssets } from '../library/assets';
 import { LANDCOVER_TYPES } from '../library/landcover';
 import { PRIMITIVES } from '../library/primitives';
 import { EDITOR_VERSION } from '../lib/version';
@@ -617,6 +616,3 @@ function readNative(features: readonly Feature[], warnings: string[], assetIds: 
 
   return { nodes, segments: kept, areas, zones, buildings, districts };
 }
-
-/** A palette for a file that brought none: the built-ins, exactly as a new project gets. */
-export const defaultPalette = builtInAssets;
