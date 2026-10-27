@@ -27,6 +27,7 @@ import {
   paintDistrictStroke,
 } from '../model/districts';
 import { snapRotation } from '../model/buildings';
+import { addRoundabout } from '../model/roundabout';
 import { newBuildingId } from '../model/doc';
 import type { LandUseId } from '../library/landuse';
 import type { BuildingTypeId } from '../library/buildingTypes';
@@ -98,6 +99,7 @@ export type Tool =
   | 'build'
   | 'upgrade'
   | 'area'
+  | 'roundabout'
   | 'zone'
   | 'building'
   | 'district'
@@ -197,6 +199,8 @@ export interface EditorState extends Snapshot {
   showAllCenterlines: boolean;
 
   // ----------------------------------------------------------------------- planning
+  /** Radius of the roundabout the roundabout tool places, in metres. */
+  roundaboutRadius: number;
   /** The land use the zone brush paints. */
   activeLandUse: LandUseId;
   /** Brush or outline, for zones and districts alike. */
@@ -245,6 +249,8 @@ export interface EditorState extends Snapshot {
   setShowAllCenterlines: (value: boolean) => void;
 
   // planning
+  setRoundaboutRadius: (metres: number) => void;
+  placeRoundabout: (centre: LngLat) => void;
   setLandUse: (landUse: LandUseId) => void;
   setPaintMode: (mode: PaintMode) => void;
   setBrushRadius: (metres: number) => void;
@@ -425,6 +431,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     defaultRadiusMeters: 6,
     showAllCenterlines: false,
 
+    roundaboutRadius: 18,
     activeLandUse: 'residentialLow',
     paintMode: 'brush',
     brushRadiusMeters: 20,
@@ -458,6 +465,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
     setNotice: (notice) => set({ notice }),
 
     // ----------------------------------------------------------------- planning
+    setRoundaboutRadius: (metres) => set({ roundaboutRadius: Math.min(80, Math.max(8, metres)) }),
+    placeRoundabout: (centre) => {
+      const { doc, activeLineAssetId, roundaboutRadius, buildLevel } = get();
+      const built = addRoundabout(doc, activeLineAssetId, centre, roundaboutRadius, { elevation: buildLevel });
+      commit({ doc: built.doc });
+      set({ selectedSegmentId: built.segmentIds[0] ?? null });
+      noteRecent(activeLineAssetId);
+    },
     setLandUse: (activeLandUse) => set({ activeLandUse, tool: 'zone' }),
     setPaintMode: (paintMode) => set({ paintMode }),
     setBrushRadius: (metres) => set({ brushRadiusMeters: Math.min(200, Math.max(3, metres)) }),

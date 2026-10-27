@@ -1,5 +1,6 @@
 import { RestoreBanner, SaveStatus } from '../components/SaveStatus';
 import PlannerDock from '../components/PlannerDock';
+import StatusStrip from '../components/StatusStrip';
 import PlanningControls from '../components/PlanningControls';
 import { declineRestore } from '../persist/session';
 import { useRef } from 'react';
@@ -121,6 +122,7 @@ export default function MapEditor() {
     <div className="editor">
       <MapCanvas className="map-canvas" />
       <RestoreBanner />
+      <StatusStrip />
       <PlannerDock units={units} />
       <PlanningControls units={units} />
 

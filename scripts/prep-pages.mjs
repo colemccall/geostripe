@@ -92,6 +92,18 @@ if (build.status !== 0) process.exit(build.status ?? 1);
 /* --------------------------------------------------------------- post-process */
 
 if (outDir !== 'dist') {
+  // docs/ also holds the project's written documents. Replacing it wholesale would delete
+  // them, so refuse unless it holds nothing but a previous build.
+  if (outDir === 'docs' && existsSync(outPath) && existsSync(join(outPath, 'ROADMAP.md'))) {
+    console.error(
+      '
+  docs/ contains ROADMAP.md, which prep:docs would delete.
+' +
+        '  Use GitHub Actions (npm run prep:pages) or move the documents elsewhere first.
+',
+    );
+    process.exit(1);
+  }
   rmSync(outPath, { recursive: true, force: true });
   mkdirSync(outPath, { recursive: true });
   cpSync(join(root, 'dist'), outPath, { recursive: true });

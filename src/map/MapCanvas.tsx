@@ -24,6 +24,7 @@ import { joinCandidate } from '../model/doc';
 import type { Snap } from '../model/doc';
 import { roadIssues } from '../model/validity';
 import { applyView, VIEW_IMAGERY_FACTOR } from './views';
+import { setPointer } from './pointer';
 import { nearestRoadPoint } from '../geo/snapEngine';
 import { bearingToFace } from '../model/buildings';
 import { footprint } from '../model/buildings';
@@ -492,6 +493,11 @@ export function MapCanvas({ className }: MapCanvasProps) {
       }
       if (state.tool === 'zone' || state.tool === 'district') return;
 
+      if (state.tool === 'roundabout') {
+        state.placeRoundabout(point);
+        return;
+      }
+
       if (state.tool === 'building') {
         const ghost = buildingGhost(event);
         if (ghost && ghost.issues.length === 0) state.placeBuilding(ghost.position, ghost.rotation);
@@ -597,6 +603,7 @@ export function MapCanvas({ className }: MapCanvasProps) {
     const onMouseMove = (event: MapMouseEvent) => {
       hover.current = [event.lngLat.lng, event.lngLat.lat];
       const state = useEditorStore.getState();
+      setPointer({ position: hover.current, snap: lastSnap.current?.label ?? null });
 
       if (drag.current?.kind === 'stroke') {
         const point: LngLat = [event.lngLat.lng, event.lngLat.lat];
@@ -616,6 +623,11 @@ export function MapCanvas({ className }: MapCanvasProps) {
         } else if (areaRing.current.length > 0) {
           drawDraft(map, [...areaRing.current, [event.lngLat.lng, event.lngLat.lat]], null);
         }
+        return;
+      }
+
+      if (state.tool === 'roundabout') {
+        drawBrush(map, [event.lngLat.lng, event.lngLat.lat], state.roundaboutRadius, []);
         return;
       }
 
@@ -790,6 +802,7 @@ export function MapCanvas({ className }: MapCanvasProps) {
           b: 'build',
           u: 'upgrade',
           g: 'area',
+          o: 'roundabout',
           z: 'zone',
           n: 'building',
           d: 'district',
@@ -889,13 +902,16 @@ export function MapCanvas({ className }: MapCanvasProps) {
     if (!map || !ready) return;
     const canvas = map.getCanvas();
     canvas.style.cursor =
-      tool === 'build' || tool === 'area' || tool === 'zone' || tool === 'district' || tool === 'building'
+      tool === 'build' || tool === 'area' || tool === 'roundabout' || tool === 'zone' || tool === 'district' || tool === 'building'
         ? 'crosshair'
         : tool === 'bulldoze'
           ? 'not-allowed'
           : tool === 'upgrade'
             ? 'cell'
             : '';
+    // A ghost, brush ring or half-drawn outline belongs to the tool that made it.
+    areaRing.current = [];
+    setData(map, DRAFT_SOURCE, emptyFC());
     // Double click places a point in the shape tools; zooming would fight it.
     if (tool === 'area' || tool === 'zone' || tool === 'district') map.doubleClickZoom.disable();
     else map.doubleClickZoom.enable();

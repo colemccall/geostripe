@@ -30,6 +30,7 @@ interface Props {
 const TOOL_ICONS: { id: Tool; icon: string; label: string; key: string }[] = [
   { id: 'select', icon: '➤', label: 'Select', key: 'V' },
   { id: 'build', icon: '━', label: 'Roads', key: 'B' },
+  { id: 'roundabout', icon: '◯', label: 'Roundabout', key: 'O' },
   { id: 'upgrade', icon: '⟳', label: 'Upgrade', key: 'U' },
   { id: 'area', icon: '▰', label: 'Ground', key: 'G' },
   { id: 'zone', icon: '▦', label: 'Zoning', key: 'Z' },
@@ -91,6 +92,8 @@ export default function HotBar({ units }: Props) {
   const activeLineAssetId = useEditorStore((s) => s.activeLineAssetId);
   const activeAreaAssetId = useEditorStore((s) => s.activeAreaAssetId);
   const recentAssetIds = useEditorStore((s) => s.recentAssetIds);
+  const roundaboutRadius = useEditorStore((s) => s.roundaboutRadius);
+  const setRoundaboutRadius = useEditorStore((s) => s.setRoundaboutRadius);
 
   const setTool = useEditorStore((s) => s.setTool);
   const setBuildMode = useEditorStore((s) => s.setBuildMode);
@@ -207,6 +210,23 @@ export default function HotBar({ units }: Props) {
             </button>
           ))}
         </div>
+
+        {tool === 'roundabout' && (
+          <>
+            <span className="hb-sep" />
+            <label className="hb-hint" title="Radius of the roundabout">
+              Radius
+              <input
+                type="range"
+                min={8}
+                max={80}
+                value={roundaboutRadius}
+                onChange={(event) => setRoundaboutRadius(Number(event.target.value))}
+              />{' '}
+              {formatWidth(roundaboutRadius, units, { withUnit: true, decimals: 0 })}
+            </label>
+          </>
+        )}
 
         {tool === 'upgrade' && (
           <>

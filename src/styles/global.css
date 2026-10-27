@@ -3354,3 +3354,43 @@ button {
 .save-status::before {
   content: '';
 }
+
+/* ------------------------------------------------------------- status strip */
+
+.status-strip {
+  position: absolute;
+  z-index: 5;
+  top: 12px;
+  left: 50%;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  max-width: calc(100% - 520px);
+  padding: 6px 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  font: 500 11px var(--font-ui);
+  color: var(--ink-2);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.status-coords {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.status-snap.is-on {
+  font-weight: 700;
+  color: #2f7d6d;
+}
+
+@media (max-width: 1100px) {
+  .status-hint {
+    display: none;
+  }
+}

@@ -4,6 +4,27 @@ Status: planning document. Evaluation was read-only: `tsc --noEmit` is clean and
 
 Decisions already made: US only, 2D footprints, custom land-use classification, autosave in, no sound, no simulation / policies / finances, imagery licensing deferred while the project is private, product renamed to StreetCityEditor, hybrid UI (bottom category toolbar + docked planner panel).
 
+## Status (end of first implementation pass)
+
+Everything below is covered by automated tests (typecheck clean, about 800 tests passing, production build succeeds) **except what is marked "not browser-verified"**: no browser was available in the session, so no screen was looked at and no pointer was moved. Treat the interactive behaviour as unproven until it has been used.
+
+| Milestone | State | What is not done |
+|---|---|---|
+| C0 Coordinates | Done. `geo/crs.ts` is the one converter; per-feature scale; guard test. | The sphere/ellipsoid difference (about 0.3% north-south at 39N, 0.55% at 60N) is documented and bounded, not removed. |
+| S0 Snapping + collision | Done: grid index, metre-based ranking, priority table, Tab cycling, road validity rules, `layRoad` desync fixed. | Auto-merge of nearby nodes with preview, perpendicular/equal-length/grid guides, tangent-overlap handling. Not browser-verified. |
+| P0 Autosave | Done: IndexedDB ring of 10, restore prompt, unload guard, tab lock. | Not browser-verified (IndexedDB and Web Locks are exercised only through a fake store in tests). |
+| R0 Render pipeline | Partly: cached per segment and junction, adjacency built once, one repaint per frame. A repaint after dragging one junction in a 5,100-road project went from about 7,200 ms to about 30 ms of JavaScript. | Selection and hover as feature-state, incremental `updateData`. MapLibre's own `setData` cost is unmeasured. |
+| D0 Document model | Done: zones, buildings, districts; format v3 reads v2; duplicate ids, unknown assets, bad coordinates, oversize files handled. | Migrations beyond v2 to v3 (none needed yet). |
+| N0 Rename + cleanup | Mostly: product, package, UI and docs renamed; sample files moved to `examples/`; double undo and the Inspector crash fixed. | Fonts are still loaded from Google Fonts. The GitHub repository name and Pages base path (`/geostripe/`) are unchanged because changing them needs the repository renamed. Dead CSS and some stale comments remain. `prep:docs` now refuses to delete `docs/ROADMAP.md`. |
+| M1 Shell and design system | Partly: planner dock (Views, Stats), floating planning controls, status strip with coordinates, snap state and hints, tool hotkeys. | The full redesign: design tokens, original icon set, docked properties tab, axe checks, tablet layout. |
+| M2 Road tool | Partly: validity preview (red, with reasons), roundabout generator, hotkeys, Tab cycling. | Hover highlight for upgrade/bulldoze, one-way flag and arrows, crosswalks and stop bars, plate for gentle bends, bend insertion, multi-select and copy/paste, touch input. |
+| M3 Zoning | Partly: brush, outline, erase (by brush), same use merges, different use is replaced, undo as one step, no overlaps (500-stroke test). | Vertex editing, fill-enclosed-block, erase by outline. |
+| M4 Buildings | Done in basic form: footprints, face the nearest road, setback and overlap validity. | Snap to zone edges. |
+| M5 Districts | Done in basic form: named, coloured, painted with the brush. | On-map labels (the style has no glyph source). |
+| M6 Views and stats | Done: four info views with legends; road length, lane length, right-of-way, land use area, district roll-up. | Land-use stats use the Mercator-derived scale, so share the bound above. |
+| M7 Polish | Not done. | |
+| Phase 2 | Only GeoJSON export of the new kinds (a consequence of D0). | Before/after slider, cross-section region packs, Streetmix import, OSM import, scenarios. |
+
 ## 1. Executive summary
 
 - Today's app (internally "GeoStripe") is a React 18 + MapLibre 6 + Zustand static SPA with a good node/segment/asset model and 640 passing tests, but it is a *road drawing* tool only. It has no zoning, buildings, districts, info views, persistence or planner stats.
@@ -262,5 +283,5 @@ Resolved:
 
 Still open:
 
-4. Polygon-boolean and spatial-index dependencies (polygon-clipping, Flatbush): needed for brush painting/erasing and for fast snapping. Awaiting a yes/no; assumed yes unless told otherwise.
+4. Polygon-boolean and spatial-index libraries: declined; written in-house instead.
 5. The suspected Inspector crash: unconfirmed. First task in N0 is to reproduce it in a running build.
