@@ -1,4 +1,6 @@
 import { RestoreBanner, SaveStatus } from '../components/SaveStatus';
+import PlannerDock from '../components/PlannerDock';
+import PlanningControls from '../components/PlanningControls';
 import { declineRestore } from '../persist/session';
 import { useRef } from 'react';
 import { MapCanvas } from '../map/MapCanvas';
@@ -119,6 +121,8 @@ export default function MapEditor() {
     <div className="editor">
       <MapCanvas className="map-canvas" />
       <RestoreBanner />
+      <PlannerDock units={units} />
+      <PlanningControls units={units} />
 
       {/* Project and files, top-left, out of the way of the build menu. */}
       <div className="hud hud-tl">

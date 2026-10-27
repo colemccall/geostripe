@@ -284,3 +284,33 @@ export function findSnaps(
       allowed.indexOf(a.kind) - allowed.indexOf(b.kind) || a.distanceMetres - b.distanceMetres,
   );
 }
+
+/**
+ * How far a point is from the nearest road's paved edge, in metres. Negative means it is on
+ * the road; Infinity means no road is within reach. What a building's setback is measured by.
+ */
+export function roadClearance(index: SnapIndex, point: LngLat, reachMetres = 60): number {
+  const k = scaleAt(point[1]);
+  const c = sub(point);
+  let best = Infinity;
+  for (const edge of index.edges.near(c.x, c.y, reachMetres * k)) {
+    if (edge.kind !== 'road') continue;
+    const hit = pointToSegment(c.x, c.y, edge.a.x, edge.a.y, edge.b.x, edge.b.y);
+    const half = edge.kerbs ? Math.max(Math.abs(edge.kerbs[0]), Math.abs(edge.kerbs[1])) : 0;
+    best = Math.min(best, hit.distance / k - half);
+  }
+  return best;
+}
+
+/** The nearest point on any road centreline within reach, or null. */
+export function nearestRoadPoint(index: SnapIndex, point: LngLat, reachMetres = 80): LngLat | null {
+  const k = scaleAt(point[1]);
+  const c = sub(point);
+  let best: { d: number; x: number; y: number } | null = null;
+  for (const edge of index.edges.near(c.x, c.y, reachMetres * k)) {
+    if (edge.kind !== 'road') continue;
+    const hit = pointToSegment(c.x, c.y, edge.a.x, edge.a.y, edge.b.x, edge.b.y);
+    if (!best || hit.distance < best.d) best = { d: hit.distance, x: hit.x, y: hit.y };
+  }
+  return best && best.d / k <= reachMetres ? fromMercator({ x: best.x, y: best.y }) : null;
+}

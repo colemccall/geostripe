@@ -22,6 +22,9 @@ function styleWith(layers: unknown[]) {
     version: 8,
     sources: {
       areas: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
+      zones: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
+      districts: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
+      buildings: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
       bands: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
       stripes: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
       stamps: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
@@ -43,7 +46,7 @@ describe('the design style is one MapLibre will accept', () => {
   });
 
   it('names every source it draws from', () => {
-    const sources = new Set(['areas', 'bands', 'stripes', 'stamps', 'shadows', 'plates', 'preview', 'guides', 'handles', 'snap']);
+    const sources = new Set(['areas', 'zones', 'districts', 'buildings', 'bands', 'stripes', 'stamps', 'shadows', 'plates', 'preview', 'guides', 'handles', 'snap']);
     for (const layer of designLayers()) {
       if ('source' in layer) expect(sources.has(layer.source as string)).toBe(true);
     }

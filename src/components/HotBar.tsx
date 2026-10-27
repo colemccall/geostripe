@@ -32,6 +32,9 @@ const TOOL_ICONS: { id: Tool; icon: string; label: string; key: string }[] = [
   { id: 'build', icon: '━', label: 'Roads', key: 'B' },
   { id: 'upgrade', icon: '⟳', label: 'Upgrade', key: 'U' },
   { id: 'area', icon: '▰', label: 'Ground', key: 'G' },
+  { id: 'zone', icon: '▦', label: 'Zoning', key: 'Z' },
+  { id: 'building', icon: '⌂', label: 'Buildings', key: 'N' },
+  { id: 'district', icon: '◫', label: 'Districts', key: 'D' },
   { id: 'bulldoze', icon: '✖', label: 'Bulldoze', key: 'X' },
 ];
 
@@ -99,6 +102,8 @@ export default function HotBar({ units }: Props) {
   /** Which family's drawer is open, or null for closed. */
   const [open, setOpen] = useState<AssetFamily | null>(null);
   const [query, setQuery] = useState('');
+
+  const planning = tool === 'zone' || tool === 'building' || tool === 'district';
 
   const active = assets.find(
     (a) => a.id === (tool === 'area' ? activeAreaAssetId : activeLineAssetId),
@@ -243,10 +248,10 @@ export default function HotBar({ units }: Props) {
           </>
         )}
 
-        <span className="hb-sep" />
+        {planning ? null : <span className="hb-sep" />}
 
         {/* The families, which are what a build menu is actually made of. */}
-        <div className="hb-group">
+        <div className="hb-group" hidden={planning}>
           {(tool === 'area' ? (['area'] as AssetFamily[]) : LINE_FAMILIES).map((family) => (
             <button
               key={family}
@@ -261,7 +266,7 @@ export default function HotBar({ units }: Props) {
           ))}
         </div>
 
-        {recent.length > 0 && (
+        {!planning && recent.length > 0 && (
           <>
             <span className="hb-sep" />
             <div className="hb-group hb-recent">
@@ -281,7 +286,7 @@ export default function HotBar({ units }: Props) {
         )}
 
         {/* What is armed, at the end of the bar where the eye lands after choosing. */}
-        {active && (
+        {!planning && active && (
           <div className="hb-active" title={active.name}>
             <Swatch asset={active} />
             <span className="hb-active-name">{active.name}</span>

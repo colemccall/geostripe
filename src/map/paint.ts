@@ -11,6 +11,10 @@ import { PAINT_WHITE, PAINT_YELLOW } from '../geo/markings';
 import { GLYPHS } from '../geo/glyphs';
 import { IMAGE_PX_PER_METRE } from './glyphImages';
 import { LANDCOVERS } from '../library/landcover';
+import { LAND_USES } from '../library/landuse';
+import { BUILDING_TYPES } from '../library/buildingTypes';
+import { footprint } from '../model/buildings';
+import { DECK_COLORS, FAMILY_COLORS } from './views';
 import { PRIMITIVES } from '../library/primitives';
 import { boundaryOffsets, componentStarts, resolveAnchorOffset, sectionExtent } from '../model/section';
 import { adjacency, emptyDoc, joinCandidate, nodeMap, segmentControlPoints, segmentElevation } from '../model/doc';
@@ -151,6 +155,12 @@ export interface PaintSources {
   plates: FeatureCollection<Polygon>;
   /** Parks, plazas, water — the ground under everything. */
   areas: FeatureCollection<Polygon>;
+  /** Land use, painted over the ground and under the roads. */
+  zones: FeatureCollection<Polygon>;
+  /** Planning districts: a wash of colour and an outline. */
+  districts: FeatureCollection<Polygon>;
+  /** Building footprints. */
+  buildings: FeatureCollection<Polygon>;
   /** Nodes and shape points: the handles, which are not on the ground. */
   handles: FeatureCollection<Point>;
   /** Centerlines for selection and for dragging. */
@@ -255,6 +265,8 @@ function bandFeatures(resolved: readonly Resolved[]): Feature<LineString>[] {
           offsetM: band.offset,
           k,
           color: component.colorOverride ?? primitive.color,
+          familyColor: FAMILY_COLORS[asset.family] ?? '#9AA5B1',
+          deckColor: DECK_COLORS[String(deckOf(elevation)) as keyof typeof DECK_COLORS],
           deck: deckOf(elevation),
           // Raised bands last within a segment, so a kerb reads above the asphalt beside it.
           raised: primitive.isRaised ? 1 : 0,
@@ -727,6 +739,55 @@ function guideFeatures(resolved: readonly Resolved[], options: PaintOptions): Fe
  * nothing here turns anything into a polygon except the junction plates, which are a convex
  * hull of at most a few dozen points each.
  */
+function zoneFeatures(doc: Doc): Feature<Polygon>[] {
+  return doc.zones
+    .filter((z) => z.visible && z.rings.length > 0)
+    .map((zone) => {
+      const use = LAND_USES[zone.landUse];
+      return {
+        type: 'Feature',
+        geometry: { type: 'Polygon', coordinates: zone.rings.map(closeRing) },
+        properties: {
+          zoneId: zone.id,
+          landUse: zone.landUse,
+          category: use.category,
+          color: use.color,
+          opacity: use.opacity,
+        },
+      } as Feature<Polygon>;
+    });
+}
+
+function districtFeatures(doc: Doc): Feature<Polygon>[] {
+  return doc.districts
+    .filter((d) => d.visible && d.rings.length > 0)
+    .map(
+      (district) =>
+        ({
+          type: 'Feature',
+          geometry: { type: 'Polygon', coordinates: district.rings.map(closeRing) },
+          properties: { districtId: district.id, name: district.name, color: district.color },
+        }) as Feature<Polygon>,
+    );
+}
+
+function buildingFeatures(doc: Doc): Feature<Polygon>[] {
+  return doc.buildings
+    .filter((b) => b.visible)
+    .map(
+      (building) =>
+        ({
+          type: 'Feature',
+          geometry: { type: 'Polygon', coordinates: [closeRing(footprint(building))] },
+          properties: {
+            buildingId: building.id,
+            typeId: building.typeId,
+            color: BUILDING_TYPES[building.typeId].color,
+          },
+        }) as Feature<Polygon>,
+    );
+}
+
 /**
  * What was painted for each segment, kept until something it depends on changes.
  *
@@ -882,6 +943,9 @@ export function paintDoc(
       ),
     },
     areas: { type: 'FeatureCollection', features: areaFeatures(doc, assets) },
+    zones: { type: 'FeatureCollection', features: zoneFeatures(doc) },
+    districts: { type: 'FeatureCollection', features: districtFeatures(doc) },
+    buildings: { type: 'FeatureCollection', features: buildingFeatures(doc) },
     handles: { type: 'FeatureCollection', features: handleFeatures(doc, options) },
     guides: { type: 'FeatureCollection', features: guideFeatures(resolved, options) },
   };
@@ -936,6 +1000,9 @@ export const emptySources = (): PaintSources => ({
   shadows: empty<LineString>(),
   plates: empty<Polygon>(),
   areas: empty<Polygon>(),
+  zones: empty<Polygon>(),
+  districts: empty<Polygon>(),
+  buildings: empty<Polygon>(),
   handles: empty<Point>(),
   guides: empty<LineString>(),
 });
@@ -968,6 +1035,53 @@ export function designLayers(): LayerSpecification[] {
       'fill-opacity': ['get', 'opacity'],
     },
   });
+
+  // Land use, districts and buildings sit on the ground and under every road deck.
+  layers.push(
+    {
+      id: 'zone-fill',
+      type: 'fill',
+      source: 'zones',
+      paint: { 'fill-color': ['get', 'color'], 'fill-opacity': ['get', 'opacity'] },
+    },
+    {
+      id: 'zone-line',
+      type: 'line',
+      source: 'zones',
+      layout: { 'line-join': 'round' },
+      paint: { 'line-color': ['get', 'color'], 'line-width': 1.2, 'line-opacity': 0.95 },
+    },
+    {
+      id: 'district-fill',
+      type: 'fill',
+      source: 'districts',
+      paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.1 },
+    },
+    {
+      id: 'district-line',
+      type: 'line',
+      source: 'districts',
+      layout: { 'line-join': 'round' },
+      paint: {
+        'line-color': ['get', 'color'],
+        'line-width': 2.5,
+        'line-dasharray': [4, 2],
+        'line-opacity': 0.95,
+      },
+    },
+    {
+      id: 'building-fill',
+      type: 'fill',
+      source: 'buildings',
+      paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.9 },
+    },
+    {
+      id: 'building-line',
+      type: 'line',
+      source: 'buildings',
+      paint: { 'line-color': '#2B2B2B', 'line-width': 1, 'line-opacity': 0.8 },
+    },
+  );
 
   for (const deck of DECKS) {
     // Above ground, the road's shadow goes down first — under its own deck, over whatever
@@ -1194,5 +1308,5 @@ export function designLayers(): LayerSpecification[] {
   return layers;
 }
 
-export const SOURCE_IDS = ['areas', 'bands', 'stripes', 'stamps', 'shadows', 'plates', 'preview', 'guides', 'handles', 'snap'] as const;
+export const SOURCE_IDS = ['areas', 'zones', 'districts', 'buildings', 'bands', 'stripes', 'stamps', 'shadows', 'plates', 'preview', 'guides', 'handles', 'snap'] as const;
 export type SourceId = (typeof SOURCE_IDS)[number];

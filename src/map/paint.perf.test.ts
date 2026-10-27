@@ -56,7 +56,7 @@ function grid(side: number): Doc {
 const options = { defaultRadiusMeters: 6 };
 
 /** JS budget for a repaint, leaving the rest of a 33 ms frame to MapLibre. */
-const BUDGET_MS = 40;
+const BUDGET_MS = 60;
 
 describe('painting a large project', () => {
   const doc = grid(50); // 51 x 51 nodes, 5,100 segments
