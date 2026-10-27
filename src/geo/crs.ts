@@ -77,6 +77,16 @@ export function scaleForLine(line: readonly LngLat[]): number {
   return scaleAt(line[Math.floor(line.length / 2)]![1]);
 }
 
+/**
+ * Real ground metres covered by one screen pixel at this latitude and zoom.
+ *
+ * What turns a tolerance in pixels (how near the cursor must be to grab something) into a
+ * tolerance in metres, so snapping asks the model a question instead of asking the renderer.
+ */
+export function metresPerPixel(latDeg: number, zoom: number): number {
+  return EQUATOR_METRES / (512 * Math.pow(2, zoom) * scaleAt(latDeg));
+}
+
 export interface LocalPlane {
   readonly origin: LngLat;
   /** Real metres at the origin; x east, y north. */

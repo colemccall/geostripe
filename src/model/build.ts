@@ -250,30 +250,32 @@ export function layRoad(doc: Doc, input: LayRoadInput): LayRoadResult {
     return { doc: built.doc, segmentIds: [built.segmentId], crossings: 0 };
   }
 
-  // Cut every road that is in the way, keeping the node each cut produced.
+  // Cut every road that is in the way, keeping the node each cut produced. A cut that
+  // fails is dropped here, together with its crossing, so the new road is never cut at a
+  // place whose node does not exist.
   let next = doc;
   const families = new Map<string, string[]>();
-  const nodeIds: string[] = [];
+  const cuts: { crossing: Crossing; nodeId: string }[] = [];
 
   for (const crossing of crossings) {
     const family = families.get(crossing.segmentId) ?? [crossing.segmentId];
     const split = splitDescendant(next, family, crossing.point);
-    if (!split) {
-      nodeIds.push('');
-      continue;
-    }
+    if (!split) continue;
     next = split.doc;
     families.set(crossing.segmentId, split.family);
-    nodeIds.push(split.nodeId);
+    cuts.push({ crossing, nodeId: split.nodeId });
   }
 
   // Cut the new road at the same places. Each split reparametrises what is left, so the
-  // next cut is measured against the remainder rather than against the original curve.
+  // next cut is measured against the remainder rather than against the original curve. A
+  // node joins the chain only when its piece was actually cut, which keeps the pieces and
+  // the chain of nodes in step; the two used to be built separately and could disagree.
   const pieces: PlanePoint[][] = [];
+  const chainNodes: string[] = [];
   let remaining = planarControls;
   let consumed = 0;
 
-  for (const crossing of crossings) {
+  for (const { crossing, nodeId } of cuts) {
     const local = (crossing.t - consumed) / (1 - consumed);
     if (!(local > 0 && local < 1)) continue;
     if (curved) {
@@ -285,11 +287,12 @@ export function layRoad(doc: Doc, input: LayRoadInput): LayRoadResult {
       pieces.push([remaining[0]!, point]);
       remaining = [point, remaining[remaining.length - 1]!];
     }
+    chainNodes.push(nodeId);
     consumed = crossing.t;
   }
   pieces.push(remaining);
 
-  const chain = [input.fromNodeId, ...nodeIds.filter(Boolean), input.toNodeId];
+  const chain = [input.fromNodeId, ...chainNodes, input.toNodeId];
   const segmentIds: string[] = [];
 
   pieces.forEach((piece, i) => {
@@ -310,5 +313,5 @@ export function layRoad(doc: Doc, input: LayRoadInput): LayRoadResult {
     segmentIds.push(built.segmentId);
   });
 
-  return { doc: next, segmentIds, crossings: crossings.length };
+  return { doc: next, segmentIds, crossings: chainNodes.length };
 }

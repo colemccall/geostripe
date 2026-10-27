@@ -970,7 +970,8 @@ export function designLayers(): LayerSpecification[] {
     source: 'preview',
     layout: { 'line-cap': 'butt', 'line-join': 'round' },
     paint: {
-      'line-color': ['get', 'color'],
+      // A road the rules refuse is drawn red, before the click rather than after it.
+      'line-color': ['case', ['==', ['get', 'invalid'], 1], '#D64545', ['get', 'color']],
       'line-width': width,
       'line-offset': offset,
       'line-opacity': 0.65,
@@ -1069,6 +1070,8 @@ export function designLayers(): LayerSpecification[] {
         'case',
         ['==', ['get', 'kind'], 'node'],
         '#F2C14E',
+        ['==', ['get', 'kind'], 'blocked'],
+        '#D64545',
         '#3FB5AA',
       ],
     },

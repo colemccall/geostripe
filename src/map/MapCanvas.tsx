@@ -8,6 +8,8 @@ import {
   setWorkerUrl,
 } from 'maplibre-gl';
 import type { MapMouseEvent, PointLike, StyleSpecification } from 'maplibre-gl';
+import type { Asset } from '../model/asset';
+import type { Doc } from '../model/doc';
 import type { FeatureCollection } from 'geojson';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { basemapById, tileUrlsFor } from './basemaps';
@@ -15,12 +17,15 @@ import type { BasemapId, TileSourceOptions } from './basemaps';
 import { designLayers, emptySources, paintDoc, paintPreview } from './paint';
 import { renderAllGlyphs } from './glyphImages';
 import type { PaintSources } from './paint';
-import { useEditorStore } from '../store/useEditorStore';
+import { HANDLES_FOR as HANDLES_FOR_MODE, useEditorStore } from '../store/useEditorStore';
 import { assetMap } from '../library/assets';
-import { joinCandidate, splitPointFor } from '../model/doc';
+import { joinCandidate } from '../model/doc';
 import type { Snap } from '../model/doc';
+import { roadIssues } from '../model/validity';
+import { buildSnapIndex, findSnaps } from '../geo/snapEngine';
+import type { SnapCandidate, SnapContext, SnapIndex } from '../geo/snapEngine';
 import { directionGuidesAt, guideLine, snapToGuides } from '../geo/snapping';
-import { localPlane } from '../geo/crs';
+import { localPlane, metresPerPixel } from '../geo/crs';
 import type { LngLat } from '../geo/crs';
 import { LAYER_GROUPS } from './layerGroups';
 import type { LayerGroupId } from './layerGroups';
@@ -269,6 +274,13 @@ export function MapCanvas({ className }: MapCanvasProps) {
   >(null);
 
   const areaRing = useRef<LngLat[]>([]);
+  /** The model index snapping queries, rebuilt only when the document or palette changes. */
+  const snapCache = useRef<{ doc: Doc; assets: Asset[]; index: SnapIndex } | null>(null);
+  /** What the last snap query landed on, so a click resolves to the position that was shown. */
+  const lastSnap = useRef<SnapCandidate | null>(null);
+  /** Which of several candidates under the cursor Tab has chosen, and where Tab was pressed. */
+  const cycle = useRef({ index: 0, anchor: [0, 0] as [number, number] });
+  const lastPointer = useRef<MapMouseEvent | null>(null);
 
   /**
    * The palette, indexed, for the preview to paint with.
@@ -306,56 +318,57 @@ export function MapCanvas({ className }: MapCanvasProps) {
   /**
    * What a click at this point should attach to.
    *
-   * Asked of the RENDERED map rather than of the model, because the question is "what is
-   * under the cursor" — a question about pixels. A tolerance in metres would be right at
-   * exactly one zoom and wrong at every other.
+   * Asked of the MODEL rather than of the rendered map: every candidate is measured in real
+   * metres (the pixel reach is converted at this zoom and latitude), ranked by an explicit
+   * priority per tool, and Tab steps through the ones that overlap. See geo/snapEngine.ts.
    *
-   * Nodes win over roads. If both are within reach you meant the junction: joining at a
-   * place that already exists is nearly always the intent, and splitting a road a metre
-   * from its own end produces a sliver nobody wanted.
-   *
-   * Returning `undefined` means open ground, which is a real answer and not a failure.
+   * Returning `undefined` means open ground, which is a real answer and not a failure. Some
+   * candidates (a kerb, a ground-shape corner) are positions with no model operation behind
+   * them; those leave `lastSnap` set and `resolvePoint` picks the position up from there.
    */
+  const candidatesAt = useCallback((event: MapMouseEvent, context: SnapContext): SnapCandidate[] => {
+    const map = mapRef.current;
+    if (!map || event.originalEvent.altKey) return [];
+    const state = useEditorStore.getState();
+    let cache = snapCache.current;
+    if (!cache || cache.doc !== state.doc || cache.assets !== state.assets) {
+      cache = {
+        doc: state.doc,
+        assets: state.assets,
+        index: buildSnapIndex(state.doc, assetMapRef.current),
+      };
+      snapCache.current = cache;
+    }
+    const cursor: LngLat = [event.lngLat.lng, event.lngLat.lat];
+    const tolerance = SNAP_PX * metresPerPixel(cursor[1], map.getZoom());
+    return findSnaps(cache.index, cursor, tolerance, context);
+  }, []);
+
   const snapAt = useCallback(
     (event: MapMouseEvent): Snap | undefined => {
-      const map = mapRef.current;
-      if (!map) return undefined;
-      const { x, y } = event.point;
-      const box: [PointLike, PointLike] = [
-        [x - SNAP_PX, y - SNAP_PX],
-        [x + SNAP_PX, y + SNAP_PX],
-      ];
+      const tool = useEditorStore.getState().tool;
+      const context: SnapContext = tool === 'area' ? 'area' : tool === 'build' ? 'build' : 'select';
+      lastPointer.current = event;
 
-      const onNode = map
-        .queryRenderedFeatures(box, { layers: ['handle-point'] })
-        .find((f) => f.properties?.kind === 'node');
-      if (onNode?.properties?.nodeId) {
-        return { kind: 'node', nodeId: String(onNode.properties.nodeId) };
+      // A fresh position starts the cycle over; Tab at the same spot keeps stepping.
+      const [ax, ay] = cycle.current.anchor;
+      if (Math.hypot(event.point.x - ax, event.point.y - ay) > 3) cycle.current.index = 0;
+
+      const found = candidatesAt(event, context);
+      if (found.length === 0) {
+        lastSnap.current = null;
+        return undefined;
       }
-
-      const state = useEditorStore.getState();
-      const bandLayers = designLayers()
-        .filter((l) => l.id.startsWith('band-'))
-        .map((l) => l.id)
-        .filter((id) => map.getLayer(id));
-      const onRoad = map.queryRenderedFeatures(box, { layers: bandLayers })[0];
-      const segmentId = onRoad?.properties?.segmentId ? String(onRoad.properties.segmentId) : null;
-      if (!segmentId) return undefined;
-
-      const segment = state.doc.segments.find((s) => s.id === segmentId);
-      if (!segment) return undefined;
-
-      const nodes = new Map(state.doc.nodes.map((n) => [n.id, n]));
-      const at = splitPointFor(segment, nodes, [event.lngLat.lng, event.lngLat.lat]);
-      if (!at) return undefined;
-
-      return { kind: 'segment', segmentId, shapeIndex: at.shapeIndex, position: at.point };
+      const pick = found[cycle.current.index % found.length]!;
+      lastSnap.current = pick;
+      return pick.snap;
     },
-    [],
+    [candidatesAt],
   );
 
   /** Where a point actually lands: on what it snapped to, or where the mouse is. */
   const resolvePoint = useCallback((event: MapMouseEvent, snap?: Snap): LngLat => {
+    if (!snap && lastSnap.current) return lastSnap.current.position;
     if (snap?.kind === 'segment') return snap.position;
     if (snap?.kind === 'node') {
       const node = useEditorStore.getState().doc.nodes.find((n) => n.id === snap.nodeId);
@@ -513,7 +526,7 @@ export function MapCanvas({ className }: MapCanvasProps) {
           const at = target
             ? useEditorStore.getState().doc.nodes.find((n) => n.id === target.nodeId)?.position
             : null;
-          showSnap(map, at ? { kind: 'node', nodeId: target!.nodeId } : undefined, at ?? null);
+          showSnap(map, at ? { kind: 'node' } : undefined, at ?? null);
         } else {
           state.moveShapePointLive(drag.current.segmentId, drag.current.index, point);
         }
@@ -523,9 +536,14 @@ export function MapCanvas({ className }: MapCanvasProps) {
       // What the next click would attach to, shown before it is spent. Snapping that is
       // invisible is snapping you have to trust rather than see, which is what made the
       // build tool feel like guesswork.
-      const snap = state.tool === 'build' ? snapAt(event) : undefined;
-      if (state.tool !== 'build' || !state.buildFromNodeId) {
-        showSnap(map, snap, snap ? resolvePoint(event, snap) : null);
+      const snap = state.tool === 'build' || state.tool === 'area' ? snapAt(event) : undefined;
+      const shown = snap ?? lastSnap.current ?? undefined;
+      if (state.tool === 'area' || state.tool !== 'build' || !state.buildFromNodeId) {
+        if (state.tool === 'build' || state.tool === 'area') {
+          showSnap(map, shown, shown ? resolvePoint(event, snap) : null);
+        } else {
+          showSnap(map, undefined, null);
+        }
       }
 
       if (state.tool === 'build') {
@@ -556,17 +574,28 @@ export function MapCanvas({ className }: MapCanvasProps) {
 
           showGuide(map, guide, guideKind, snap, snap ? cursor : null);
           const controls = [from.position, ...state.buildHandles, cursor];
-          setData(
-            map,
-            'preview',
-            paintPreview(
-              assetMapRef.current,
-              state.activeLineAssetId,
-              controls,
-              state.buildMode !== 'straight',
-              state.buildLevel,
-            ) as FeatureCollection,
-          );
+          const preview = paintPreview(
+            assetMapRef.current,
+            state.activeLineAssetId,
+            controls,
+            state.buildMode !== 'straight',
+            state.buildLevel,
+          ) as FeatureCollection;
+
+          // The same rules the click will apply, shown before it: a road the rules refuse is
+          // drawn red and the cursor says so.
+          const issues =
+            state.buildHandles.length >= HANDLES_FOR_MODE[state.buildMode]
+              ? roadIssues(
+                  state.doc,
+                  { position: from.position, nodeId: from.id },
+                  { position: cursor, nodeId: snap?.kind === 'node' ? snap.nodeId : undefined },
+                ).filter((issue) => issue !== 'sameNode')
+              : [];
+          const invalid = issues.length > 0;
+          for (const feature of preview.features) feature.properties = { ...feature.properties, invalid: invalid ? 1 : 0 };
+          map.getCanvas().style.cursor = invalid ? 'not-allowed' : 'crosshair';
+          setData(map, 'preview', preview);
         } else {
           setData(map, 'preview', emptyFC());
         }
@@ -617,6 +646,20 @@ export function MapCanvas({ className }: MapCanvasProps) {
       const target = event.target as HTMLElement | null;
       if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
       const state = useEditorStore.getState();
+
+      // Tab steps through everything under the cursor, strongest first, for the moments a
+      // junction, a road and a kerb are all within reach and the first is not the one meant.
+      if (event.key === 'Tab' && ['build', 'area', 'select'].includes(state.tool) && lastPointer.current) {
+        const last = lastPointer.current;
+        cycle.current = { index: cycle.current.index + 1, anchor: [last.point.x, last.point.y] };
+        const snap = snapAt(last);
+        const map = mapRef.current;
+        if (map && lastSnap.current) {
+          showSnap(map, lastSnap.current, resolvePoint(last, snap));
+          event.preventDefault();
+        }
+        return;
+      }
 
       if (event.key === 'Escape') {
         state.cancelBuild();
@@ -798,7 +841,7 @@ function pick(map: MapLibreMap, event: MapMouseEvent): {
  * landing on a road SPLITS it. Those have different consequences and the tool should say
  * which one is about to happen.
  */
-function showSnap(map: MapLibreMap, snap: Snap | undefined, at: LngLat | null) {
+function showSnap(map: MapLibreMap, snap: { kind: string } | undefined, at: LngLat | null) {
   if (!snap || !at) {
     setData(map, 'snap', emptyFC());
     return;

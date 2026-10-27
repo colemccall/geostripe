@@ -19,6 +19,7 @@ import {
 import { dissolveNode, setElevation } from '../model/doc';
 import type { Doc, Segment, Snap } from '../model/doc';
 import { layRoad } from '../model/build';
+import { ROAD_ISSUE_TEXT, roadIssues } from '../model/validity';
 import { newId } from '../model/types';
 import type { SectionComponent } from '../model/types';
 import { autoAnchorOffset, geometricCentreOffset, totalWidth } from '../model/section';
@@ -468,6 +469,30 @@ export const useEditorStore = create<EditorState>((set, get) => {
       if (buildHandles.length < HANDLES_FOR[buildMode]) {
         set({ buildHandles: [...buildHandles, position] });
         return;
+      }
+
+      // Refuse what the rules refuse, saying why, before anything is changed. The preview
+      // has already turned red; this is the same check, so a click can never do what the
+      // colour said it would not.
+      const startNode = doc.nodes.find((n) => n.id === buildFromNodeId);
+      if (startNode) {
+        const endPosition =
+          snap?.kind === 'node'
+            ? (doc.nodes.find((n) => n.id === snap.nodeId)?.position ?? position)
+            : snap?.kind === 'segment'
+              ? snap.position
+              : position;
+        const issues = roadIssues(
+          doc,
+          { position: startNode.position, nodeId: buildFromNodeId },
+          { position: endPosition, nodeId: snap?.kind === 'node' ? snap.nodeId : undefined },
+        ).filter((issue) => issue !== 'sameNode');
+        if (issues.length > 0) {
+          set({
+            notice: { kind: 'warning', title: 'Cannot build here', details: issues.map((i) => ROAD_ISSUE_TEXT[i]) },
+          });
+          return;
+        }
       }
 
       const end = nodeAt(doc);
