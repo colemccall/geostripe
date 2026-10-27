@@ -27,6 +27,14 @@ function BrushRow({ units }: { units: DisplayUnits }) {
         <button type="button" aria-pressed={paintMode === 'outline'} onClick={() => setPaintMode('outline')}>
           Outline
         </button>
+        <button
+          type="button"
+          aria-pressed={paintMode === 'fill'}
+          onClick={() => setPaintMode('fill')}
+          title="Fill the whole block between roads with one click"
+        >
+          Fill block
+        </button>
       </div>
       <button
         type="button"
@@ -51,6 +59,7 @@ function BrushRow({ units }: { units: DisplayUnits }) {
         </label>
       )}
       {paintMode === 'outline' && <span className="pp-hint">Click corners, double-click or Enter to finish</span>}
+      {paintMode === 'fill' && <span className="pp-hint">Click inside a block; the roads are left out</span>}
     </div>
   );
 }

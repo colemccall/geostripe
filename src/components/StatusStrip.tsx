@@ -9,12 +9,12 @@ import type { Tool } from '../store/useEditorStore';
  */
 
 const HINTS: Record<Tool, string> = {
-  select: 'Click to select · drag a junction to move it',
+  select: 'Click to select · drag a junction to move it · double-click a road to add a bend, a bend to remove it',
   build: 'Click to place · Tab cycles snaps · Alt ignores snapping · Esc cancels',
   roundabout: 'Click to place a roundabout · the armed road type is used',
   upgrade: 'Click a road to change it to the armed type',
   area: 'Click corners · double-click or Enter to finish',
-  zone: 'Drag to paint · E erases · [ ] change size · Outline mode: click corners',
+  zone: 'Drag to paint · E erases · [ ] change size · Outline: click corners · Fill: click a block',
   building: 'Click to place · R turns · it faces the nearest road',
   district: 'Drag to paint a district · E erases · [ ] change size',
   bulldoze: 'Click to remove',

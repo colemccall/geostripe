@@ -28,6 +28,9 @@ import {
 } from '../model/districts';
 import { snapRotation } from '../model/buildings';
 import { addRoundabout } from '../model/roundabout';
+import { blockAt, findFaces } from '../model/blocks';
+import { eraseRegion, paintRegion } from '../model/zones';
+import { eraseDistrictRegion, paintDistrictRegion } from '../model/districts';
 import { newBuildingId } from '../model/doc';
 import type { LandUseId } from '../library/landuse';
 import type { BuildingTypeId } from '../library/buildingTypes';
@@ -105,8 +108,8 @@ export type Tool =
   | 'district'
   | 'bulldoze';
 
-/** How zones and districts are painted: dragging a brush, or tracing an outline. */
-export type PaintMode = 'brush' | 'outline';
+/** How zones and districts are painted: a dragged brush, a traced outline, or a whole block. */
+export type PaintMode = 'brush' | 'outline' | 'fill';
 
 /**
  * Info views: ways of recolouring the map by one property so a pattern can be read.
@@ -261,6 +264,7 @@ export interface EditorState extends Snapshot {
   setView: (view: ViewMode) => void;
   paintStroke: (points: LngLat[]) => void;
   paintOutline: (ring: LngLat[]) => void;
+  fillBlock: (point: LngLat) => void;
   placeBuilding: (position: LngLat, rotation: number) => void;
   newDistrict: () => void;
   renameDistrict: (id: string, name: string) => void;
@@ -516,6 +520,28 @@ export const useEditorStore = create<EditorState>((set, get) => {
         return;
       }
       commit({ doc: paintOutline(doc, activeLandUse, ring) });
+    },
+
+    /** Paint, or erase, the whole block between roads under a point. */
+    fillBlock: (point) => {
+      const { doc, assets, tool, eraseMode, activeLandUse, activeDistrictId } = get();
+      const byId = new Map(assets.map((a) => [a.id, a]));
+      const block = blockAt(doc, byId, findFaces(doc, byId), point);
+      if (!block) {
+        set({ notice: { kind: 'warning', title: 'No block here', details: ['Click inside ground that roads enclose.'] } });
+        return;
+      }
+      if (tool === 'district') {
+        if (eraseMode) commit({ doc: eraseDistrictRegion(doc, block.shape, block.plane, activeDistrictId ?? undefined) });
+        else if (activeDistrictId) commit({ doc: paintDistrictRegion(doc, activeDistrictId, block.shape, block.plane) });
+        else set({ notice: { kind: 'warning', title: 'Make a district first' } });
+        return;
+      }
+      commit({
+        doc: eraseMode
+          ? eraseRegion(doc, block.shape, block.plane)
+          : paintRegion(doc, activeLandUse, block.shape, block.plane),
+      });
     },
 
     placeBuilding: (position, rotation) => {
