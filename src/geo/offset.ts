@@ -1,4 +1,4 @@
-import type { PlanePoint } from './projection';
+import type { PlanePoint } from './crs';
 
 /**
  * Planar polyline offsetting.

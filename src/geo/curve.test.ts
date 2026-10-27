@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_CURVE, tessellate, tightestRadius } from './curve';
 import { distanceMeters, lineLengthMeters } from './measure';
-import type { LngLat } from './projection';
+import type { LngLat } from './crs';
 
 /**
  * Curved centerlines.

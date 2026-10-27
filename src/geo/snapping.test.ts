@@ -1,3 +1,4 @@
+import { localPlane } from './crs';
 import { describe, expect, it } from 'vitest';
 import { directionGuidesAt, guideLine, snapToGuides } from './snapping';
 import { addNode, addSegment, emptyDoc } from '../model/doc';
@@ -114,7 +115,8 @@ describe('pulling the cursor onto a guide', () => {
     // Placed symmetrically about wherever the cursor actually points, so the tie is exact
     // rather than a coordinate that happens to look balanced on paper.
     const cursor: [number, number] = [-84.515, 39.104];
-    const bearing = (Math.atan2(39.104 - 39.1, (-84.515 + 84.52) * Math.cos((39.1 * Math.PI) / 180)) * 180) / Math.PI;
+    const target = localPlane(AT).toPlane(cursor);
+    const bearing = (Math.atan2(target.y, target.x) * 180) / Math.PI;
     const rad = (deg: number) => (deg * Math.PI) / 180;
 
     const guides = [

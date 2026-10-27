@@ -24,7 +24,7 @@ import type { SectionComponent } from '../model/types';
 import { autoAnchorOffset, geometricCentreOffset, totalWidth } from '../model/section';
 import { DEFAULT_CURVE } from '../geo/curve';
 import type { CurveSettings } from '../geo/curve';
-import type { LngLat } from '../geo/projection';
+import type { LngLat } from '../geo/crs';
 import type { DisplayUnits } from '../lib/units';
 import type { BasemapId } from '../map/basemaps';
 import { DEFAULT_VINTAGE } from '../map/basemaps';

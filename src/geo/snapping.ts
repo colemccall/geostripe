@@ -1,6 +1,6 @@
 import { resolveCenterline } from './curve';
-import { dedupe, localPlane } from './projection';
-import type { LngLat } from './projection';
+import { dedupe, localPlane } from './crs';
+import type { LngLat } from './crs';
 import { endsAt, nodeMap, segmentControlPoints } from '../model/doc';
 import type { Doc } from '../model/doc';
 

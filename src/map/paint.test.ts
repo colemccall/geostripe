@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DECKS, deckOf, metresToPixels, paintDoc, pixelsPerMetre, projectCentre } from './paint';
+import { DECKS, deckOf, metresToPixels, paintDoc, pixelsPerMetre } from './paint';
 import { addNode, addSegment, emptyDoc, setElevation } from '../model/doc';
 import type { Doc } from '../model/doc';
 import { assetMap, builtInAssets, defaultLineAssetId } from '../library/assets';
@@ -18,49 +18,70 @@ import { totalWidth } from '../model/section';
 
 const LAT = 39.1; // Cincinnati, which is what the real project data is of.
 
-/** Evaluate the interpolation the way MapLibre does, so the test checks the real curve. */
-function evaluate(expr: unknown[], zoom: number, metres: number): number {
-  // ['interpolate', ['exponential', 2], ['zoom'], z0, ['*', m, k0], z1, ['*', m, k1]]
+/** Mercator stretch, written out independently of the code under test. */
+const stretch = (lat: number) => 1 / Math.cos((lat * Math.PI) / 180);
+const EQUATOR = 40075016.686;
+
+/**
+ * Evaluate the interpolation the way MapLibre does, for a feature whose scale is `k`.
+ * ['interpolate', ['exponential', 2], ['zoom'], z0, ['*', m, SCALE, p0], z1, ['*', m, SCALE, p1]]
+ */
+function evaluate(expr: unknown[], zoom: number, metres: number, k: number): number {
   const z0 = expr[3] as number;
   const z1 = expr[5] as number;
-  const k0 = (expr[4] as unknown[])[2] as number;
-  const k1 = (expr[6] as unknown[])[2] as number;
+  const p0 = (expr[4] as unknown[])[3] as number;
+  const p1 = (expr[6] as unknown[])[3] as number;
   const base = 2;
-  const t =
-    (Math.pow(base, zoom - z0) - 1) / (Math.pow(base, z1 - z0) - 1);
-  return metres * k0 + t * (metres * k1 - metres * k0);
+  const t = (Math.pow(base, zoom - z0) - 1) / (Math.pow(base, z1 - z0) - 1);
+  return metres * k * p0 + t * (metres * k * p1 - metres * k * p0);
 }
+
+/** Real ground metres a number of screen pixels covers, at a latitude and zoom. */
+const groundMetres = (pixels: number, lat: number, zoom: number) =>
+  (pixels * EQUATOR * Math.cos((lat * Math.PI) / 180)) / (512 * Math.pow(2, zoom));
 
 describe('metre-exact widths', () => {
   it('puts a 3.6 m lane at the same ground width on every zoom', () => {
-    const expr = metresToPixels(LAT, ['get', 'widthM'] as never) as unknown[];
+    const expr = metresToPixels(['get', 'widthM'] as never) as unknown[];
 
     for (const zoom of [12, 14, 16, 18, 20, 22]) {
-      const pixels = evaluate(expr, zoom, 3.6);
-      const metres = pixels / pixelsPerMetre(LAT, zoom);
-      expect(metres).toBeCloseTo(3.6, 6);
+      const pixels = evaluate(expr, zoom, 3.6, stretch(LAT));
+      expect(groundMetres(pixels, LAT, zoom)).toBeCloseTo(3.6, 6);
     }
   });
 
-  it('holds at a high latitude, where cos(latitude) is doing real work', () => {
-    const expr = metresToPixels(69, ['get', 'widthM'] as never) as unknown[];
-    const pixels = evaluate(expr, 18, 3.6);
-    expect(pixels / pixelsPerMetre(69, 18)).toBeCloseTo(3.6, 6);
+  it('is right at every latitude, because each feature carries its own scale', () => {
+    const expr = metresToPixels(['get', 'widthM'] as never) as unknown[];
+    for (const lat of [20, 39.1, 61.2, 69]) {
+      const pixels = evaluate(expr, 18, 3.6, stretch(lat));
+      expect(groundMetres(pixels, lat, 18)).toBeCloseTo(3.6, 6);
+    }
+  });
+
+  it('draws the same road wider on screen at 60N than at 20N, never baked at one latitude', () => {
+    const expr = metresToPixels(['get', 'widthM'] as never) as unknown[];
+    const low = evaluate(expr, 18, 3.6, stretch(20));
+    const high = evaluate(expr, 18, 3.6, stretch(60));
+    expect(high / low).toBeCloseTo(stretch(60) / stretch(20), 9);
   });
 
   it('scales exactly by two per zoom level, which is what Mercator does', () => {
-    const expr = metresToPixels(LAT, ['get', 'widthM'] as never) as unknown[];
-    const at18 = evaluate(expr, 18, 10);
-    const at19 = evaluate(expr, 19, 10);
+    const expr = metresToPixels(['get', 'widthM'] as never) as unknown[];
+    const at18 = evaluate(expr, 18, 10, 1.3);
+    const at19 = evaluate(expr, 19, 10, 1.3);
     expect(at19 / at18).toBeCloseTo(2, 9);
   });
 
   it('keeps zoom as the outermost input, which is the only form MapLibre accepts', () => {
-    const expr = metresToPixels(LAT, ['get', 'widthM'] as never) as unknown[];
+    const expr = metresToPixels(['get', 'widthM'] as never) as unknown[];
     expect(expr[0]).toBe('interpolate');
     expect(expr[2]).toEqual(['zoom']);
     // The feature property is multiplied INSIDE a stop, never outside the interpolation.
     expect((expr[4] as unknown[])[0]).toBe('*');
+  });
+
+  it('agrees with pixelsPerMetre at the equator', () => {
+    expect(pixelsPerMetre(18)).toBeCloseTo((512 * 2 ** 18) / EQUATOR, 8);
   });
 });
 
@@ -381,13 +402,14 @@ describe('decks', () => {
   });
 });
 
-describe('project centre', () => {
-  it('sits inside the project, which is what the metre scale is built from', () => {
-    const { doc } = twoRoads();
-    const [lng, lat] = projectCentre(doc);
-    expect(lng).toBeGreaterThan(-84.53);
-    expect(lng).toBeLessThan(-84.49);
-    expect(lat).toBeGreaterThan(39.09);
-    expect(lat).toBeLessThan(39.12);
+describe('scale on features', () => {
+  it('stamps every drawn feature with the scale of its own latitude', () => {
+    const { doc, assets } = twoRoads();
+    const sources = paintDoc(doc, assets, { defaultRadiusMeters: 6 });
+    for (const fc of [sources.bands, sources.stripes, sources.shadows, sources.stamps]) {
+      for (const f of fc.features) {
+        expect(f.properties!.k as number).toBeCloseTo(stretch(LAT), 3);
+      }
+    }
   });
 });

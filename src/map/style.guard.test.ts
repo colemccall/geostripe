@@ -16,8 +16,6 @@ import { designLayers, metresToPixels } from './paint';
  * of the rules, which would drift.
  */
 
-const LAT = 39.1;
-
 /** A minimal style carrying the design layers, which is what the validator wants. */
 function styleWith(layers: unknown[]) {
   return {
@@ -40,19 +38,19 @@ function styleWith(layers: unknown[]) {
 
 describe('the design style is one MapLibre will accept', () => {
   it('validates clean, layer for layer', () => {
-    const errors = validateStyleMin(styleWith(designLayers(LAT)) as never);
+    const errors = validateStyleMin(styleWith(designLayers()) as never);
     expect(errors.map((e) => `${e.message}`)).toEqual([]);
   });
 
   it('names every source it draws from', () => {
     const sources = new Set(['areas', 'bands', 'stripes', 'stamps', 'shadows', 'plates', 'preview', 'guides', 'handles', 'snap']);
-    for (const layer of designLayers(LAT)) {
+    for (const layer of designLayers()) {
       if ('source' in layer) expect(sources.has(layer.source as string)).toBe(true);
     }
   });
 
   it('gives every layer a unique id, or MapLibre keeps only the first', () => {
-    const ids = designLayers(LAT).map((l) => l.id);
+    const ids = designLayers().map((l) => l.id);
     expect(new Set(ids).size).toBe(ids.length);
   });
 
@@ -66,8 +64,8 @@ describe('the design style is one MapLibre will accept', () => {
           type: 'line',
           source: 'bands',
           paint: {
-            'line-width': metresToPixels(LAT, ['get', 'widthM'] as never),
-            'line-offset': metresToPixels(LAT, ['get', 'offsetM'] as never),
+            'line-width': metresToPixels(['get', 'widthM'] as never),
+            'line-offset': metresToPixels(['get', 'offsetM'] as never),
           },
         },
       ]) as never,
@@ -78,7 +76,7 @@ describe('the design style is one MapLibre will accept', () => {
   it('draws the junction plates after the stripes they cover', () => {
     // The stacking order IS the junction trimming. If a plate ever ends up below the paint
     // it is meant to hide, lane lines run straight through every intersection.
-    const ids = designLayers(LAT).map((l) => l.id);
+    const ids = designLayers().map((l) => l.id);
     for (const deck of [-1, 0, 1]) {
       const stripe = ids.indexOf(`stripe-dashed-${deck}`);
       const plate = ids.indexOf(`plate-${deck}`);
@@ -88,7 +86,7 @@ describe('the design style is one MapLibre will accept', () => {
   });
 
   it('draws the snap ring last, so what the next click will hit is never hidden', () => {
-    const ids = designLayers(LAT).map((l) => l.id);
+    const ids = designLayers().map((l) => l.id);
     expect(ids[ids.length - 1]).toBe('snap-ring');
     // The guide is a hint about direction and sits under the ring, which is a target.
     expect(ids.indexOf('snap-guide')).toBeLessThan(ids.indexOf('snap-ring'));
@@ -97,7 +95,7 @@ describe('the design style is one MapLibre will accept', () => {
   });
 
   it('drops a raised road’s shadow before the road itself, and after the ground below', () => {
-    const ids = designLayers(LAT).map((l) => l.id);
+    const ids = designLayers().map((l) => l.id);
     // The shadow has to land on what is underneath and be covered by what casts it.
     expect(ids.indexOf('shadow-flat-1')).toBeGreaterThan(ids.indexOf('plate-0'));
     expect(ids.indexOf('shadow-flat-1')).toBeLessThan(ids.indexOf('band-1'));
@@ -105,13 +103,13 @@ describe('the design style is one MapLibre will accept', () => {
   });
 
   it('casts no shadow at or below ground, where there is nothing to cast one onto', () => {
-    const ids = designLayers(LAT).map((l) => l.id);
+    const ids = designLayers().map((l) => l.id);
     expect(ids).not.toContain('shadow-flat-0');
     expect(ids).not.toContain('shadow-flat--1');
   });
 
   it('draws the road under construction over the design but under the handles', () => {
-    const ids = designLayers(LAT).map((l) => l.id);
+    const ids = designLayers().map((l) => l.id);
     // A preview hidden behind the roads it is being threaded between is no preview at all,
     // and one drawn over the handles would cover the node you are aiming at.
     expect(ids.indexOf('preview-band')).toBeGreaterThan(ids.indexOf('plate-1'));
@@ -119,7 +117,7 @@ describe('the design style is one MapLibre will accept', () => {
   });
 
   it('puts the ground under every road', () => {
-    const ids = designLayers(LAT).map((l) => l.id);
+    const ids = designLayers().map((l) => l.id);
     expect(ids.indexOf('area-fill')).toBeLessThan(ids.indexOf('band-0'));
   });
 });

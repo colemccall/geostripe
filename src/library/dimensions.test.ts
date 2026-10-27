@@ -5,7 +5,7 @@ import { TEMPLATES, instantiateTemplate, templateTotalWidth } from './templates'
 import { bandsForSegment } from '../geo/bands';
 import { totalWidth, travelwayWidth } from '../model/section';
 import { metresToDisplay } from '../lib/units';
-import type { LngLat } from '../geo/projection';
+import type { LngLat } from '../geo/crs';
 import type { CrossSection } from '../model/types';
 
 /**

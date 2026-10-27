@@ -1,7 +1,7 @@
 import { splitBezierAt } from '../geo/curve';
 import { resolveCenterline } from '../geo/curve';
-import { dedupe, localPlane, originFor } from '../geo/projection';
-import type { LngLat, LocalPlane, PlanePoint } from '../geo/projection';
+import { dedupe, localPlane, originFor } from '../geo/crs';
+import type { LngLat, LocalPlane, PlanePoint } from '../geo/crs';
 import { distanceMeters } from '../geo/measure';
 import {
   addSegment,

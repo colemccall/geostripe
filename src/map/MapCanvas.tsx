@@ -12,7 +12,7 @@ import type { FeatureCollection } from 'geojson';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { basemapById, tileUrlsFor } from './basemaps';
 import type { BasemapId, TileSourceOptions } from './basemaps';
-import { designLayers, emptySources, paintDoc, paintPreview, projectCentre } from './paint';
+import { designLayers, emptySources, paintDoc, paintPreview } from './paint';
 import { renderAllGlyphs } from './glyphImages';
 import type { PaintSources } from './paint';
 import { useEditorStore } from '../store/useEditorStore';
@@ -20,7 +20,8 @@ import { assetMap } from '../library/assets';
 import { joinCandidate, splitPointFor } from '../model/doc';
 import type { Snap } from '../model/doc';
 import { directionGuidesAt, guideLine, snapToGuides } from '../geo/snapping';
-import type { LngLat } from '../geo/projection';
+import { localPlane } from '../geo/crs';
+import type { LngLat } from '../geo/crs';
 import { LAYER_GROUPS } from './layerGroups';
 import type { LayerGroupId } from './layerGroups';
 
@@ -171,7 +172,7 @@ function pushSources(map: MapLibreMap, sources: PaintSources) {
  * Each layer goes in independently: one invalid paint property must not abort the rest, or
  * a typo in a colour renders as bare imagery with no error anywhere on screen.
  */
-function addDesign(map: MapLibreMap, latDeg: number) {
+function addDesign(map: MapLibreMap) {
   // Pavement symbols are images the symbol layer refers to by name. They have to be
   // registered before the layer that uses them, and again after any setStyle, because a
   // style change clears the image registry along with everything else.
@@ -191,7 +192,7 @@ function addDesign(map: MapLibreMap, latDeg: number) {
     }
   }
 
-  for (const layer of designLayers(latDeg)) {
+  for (const layer of designLayers()) {
     if (map.getLayer(layer.id)) continue;
     try {
       map.addLayer(layer);
@@ -333,7 +334,7 @@ export function MapCanvas({ className }: MapCanvasProps) {
       }
 
       const state = useEditorStore.getState();
-      const bandLayers = designLayers(0)
+      const bandLayers = designLayers()
         .filter((l) => l.id.startsWith('band-'))
         .map((l) => l.id)
         .filter((id) => map.getLayer(id));
@@ -387,7 +388,7 @@ export function MapCanvas({ className }: MapCanvasProps) {
     map.touchZoomRotate.disableRotation();
 
     map.on('load', () => {
-      addDesign(map, projectCentre(useEditorStore.getState().doc)[1] || 39.1);
+      addDesign(map);
       pushSources(map, painted.current);
       setReady(true);
     });
@@ -704,7 +705,7 @@ export function MapCanvas({ className }: MapCanvasProps) {
 
     map.setStyle(buildStyle(basemapId, { customUrl: customTileUrl, waybackRelease, arcgisApiKey }));
     map.once('styledata', () => {
-      addDesign(map, projectCentre(useEditorStore.getState().doc)[1] || 39.1);
+      addDesign(map);
       // The new style's sources are empty. Refill them from the last paint, or changing
       // imagery would silently erase the design until the next edit.
       pushSources(map, painted.current);
@@ -877,15 +878,14 @@ function snapAngle(
   if (!event.originalEvent.shiftKey) return point;
 
   const from = shape[shape.length - 1] ?? origin;
-  const scale = Math.cos((from[1] * Math.PI) / 180);
-  const dx = (point[0] - from[0]) * scale;
-  const dy = point[1] - from[1];
+  const plane = localPlane(from);
+  const { x: dx, y: dy } = plane.toPlane(point);
   const length = Math.hypot(dx, dy);
-  if (length < 1e-12) return point;
+  if (length < 1e-9) return point;
 
   const step = (SNAP_ANGLE_DEGREES * Math.PI) / 180;
   const angle = Math.round(Math.atan2(dy, dx) / step) * step;
-  return [from[0] + (Math.cos(angle) * length) / scale, from[1] + Math.sin(angle) * length];
+  return plane.toLngLat({ x: Math.cos(angle) * length, y: Math.sin(angle) * length });
 }
 
 export const emptyPaintSources = emptySources;

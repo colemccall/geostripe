@@ -13,7 +13,7 @@ import { builtInAssets } from '../library/assets';
 import { LANDCOVER_TYPES } from '../library/landcover';
 import { PRIMITIVES } from '../library/primitives';
 import { EDITOR_VERSION } from '../lib/version';
-import type { LngLat } from '../geo/projection';
+import type { LngLat } from '../geo/crs';
 
 /**
  * The project file: plain GeoJSON, readable by QGIS, editable by hand.
