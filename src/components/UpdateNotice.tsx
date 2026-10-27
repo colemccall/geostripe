@@ -15,7 +15,8 @@ import { useEffect, useState } from 'react';
  * reload.
  *
  * Deliberately a prompt, not an automatic refresh: reloading out from under someone
- * mid-edit would lose their work, and this app has no autosave.
+ * mid-edit would interrupt their work; autosave would catch most of it, but a prompt lets
+ * them choose the moment.
  */
 
 /** How often to look. Long enough to be free, short enough to catch a deploy mid-session. */

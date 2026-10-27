@@ -705,12 +705,6 @@ export function MapCanvas({ className }: MapCanvasProps) {
         );
         return;
       }
-
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
-        if (event.shiftKey) state.redo();
-        else state.undo();
-        event.preventDefault();
-      }
     };
 
     window.addEventListener('keydown', onKey);
