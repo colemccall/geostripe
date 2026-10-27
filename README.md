@@ -1,4 +1,4 @@
-# GeoStripe
+# StreetCityEditor
 
 A browser-based editor for designing real streets the way a city-building game builds them —
 pick a road type, click where it goes, and the junctions form themselves — except the map is
@@ -351,7 +351,7 @@ the live site.
 
 ### Routing
 
-GeoStripe uses **`HashRouter`**, giving URLs like `/geostripe/#/`.
+StreetCityEditor uses **`HashRouter`**, giving URLs like `/geostripe/#/`.
 
 GitHub Pages serves static files with no rewrite rules, so under `BrowserRouter` a hard
 refresh or a shared deep link asks Pages for a file that does not exist and gets a 404

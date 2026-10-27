@@ -80,7 +80,13 @@ export default function MapEditor() {
   };
 
   const onOpen = async (file: File) => {
-    const text = await file.text();
+    let text: string;
+    try {
+      text = await file.text();
+    } catch {
+      store.setNotice({ kind: 'error', title: `Could not read ${file.name}` });
+      return;
+    }
     const result = parseProject(text, builtInAssets());
     const name = file.name.replace(/\.(geo)?json$/i, '') || result.name;
 

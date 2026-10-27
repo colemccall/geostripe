@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * prep-pages.mjs — build GeoStripe for a chosen host, and prepare the output so a
+ * prep-pages.mjs — build StreetCityEditor for a chosen host, and prepare the output so a
  * static host serves it correctly.
  *
  *   node scripts/prep-pages.mjs --target pages     -> dist/  , base /geostripe/
@@ -62,7 +62,7 @@ const outPath = join(root, outDir);
 
 /* ---------------------------------------------------------------------- build */
 
-console.log(`\n  GeoStripe — ${label}`);
+console.log(`\n  StreetCityEditor — ${label}`);
 console.log(`  target ${target}   mode ${mode}   base ${base}   out ${outDir}/\n`);
 
 function run(cmd, args) {

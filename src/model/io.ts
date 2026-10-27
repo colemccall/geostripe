@@ -3,8 +3,10 @@ import type { Feature, FeatureCollection } from 'geojson';
 import { ASSET_FAMILIES } from './asset';
 import type { Asset, AssetFamily } from './asset';
 import { componentSchema } from './schema';
-import { emptyDoc, newAreaId, newNodeId, newSegmentId } from './doc';
-import type { AreaShape, Doc, Node, Segment } from './doc';
+import { emptyDoc, newAreaId, newBuildingId, newDistrictId, newNodeId, newSegmentId, newZoneId } from './doc';
+import type { AreaShape, Building, District, Doc, Node, Segment, Zone } from './doc';
+import { isLandUseId } from '../library/landuse';
+import { isBuildingTypeId } from '../library/buildingTypes';
 import { newId } from './types';
 import type { SectionComponent } from './types';
 import { bandsForSegment } from '../geo/bands';
@@ -38,7 +40,27 @@ import type { LngLat } from '../geo/crs';
  * a set of roads that know their type by name and nothing about what that type is.
  */
 
-export const PROJECT_VERSION = 2;
+/**
+ * File format version.
+ *
+ *   2   nodes, segments, areas.
+ *   3   adds zones, buildings and districts. A version 2 file has none of them and reads as
+ *       a version 3 file with those lists empty, so no rewriting is needed to migrate it.
+ *
+ * A file from a NEWER version is read as far as it can be and says what was left out; it is
+ * never refused outright, because a planner's file should open.
+ */
+export const PROJECT_VERSION = 3;
+
+/** Largest project file read, in bytes. A guard against opening something that is not one. */
+export const MAX_PROJECT_BYTES = 80 * 1024 * 1024;
+
+/** Elevation is authored freely but drawn on three decks; this is the range the UI offers. */
+const ELEVATION_RANGE = [-2, 2] as const;
+const RADIUS_RANGE = [0, 200] as const;
+
+const clamp = (value: number, [min, max]: readonly [number, number]) =>
+  Math.min(max, Math.max(min, value));
 
 const positionSchema = z
   .array(z.number().finite())
@@ -163,6 +185,47 @@ export function toProjectGeoJSON(
     });
   }
 
+  for (const zone of doc.zones) {
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'Polygon', coordinates: zone.rings.map(closeRing) },
+      properties: {
+        streetcity: 'zone',
+        id: zone.id,
+        landUse: zone.landUse,
+        visible: zone.visible,
+      },
+    });
+  }
+
+  for (const building of doc.buildings) {
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: building.position },
+      properties: {
+        streetcity: 'building',
+        id: building.id,
+        typeId: building.typeId,
+        rotation: building.rotation,
+        visible: building.visible,
+      },
+    });
+  }
+
+  for (const district of doc.districts) {
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'Polygon', coordinates: district.rings.map(closeRing) },
+      properties: {
+        streetcity: 'district',
+        id: district.id,
+        name: district.name,
+        color: district.color,
+        visible: district.visible,
+      },
+    });
+  }
+
   if (meta.includeBands !== false) {
     for (const segment of doc.segments) {
       if (segment.visible === false) continue;
@@ -240,6 +303,8 @@ export interface ParseResult {
   doc: Doc;
   assets: Asset[];
   name: string;
+  /** Version the file declared, or 1 when it declared none. */
+  version: number;
   /** What was dropped and why. A file with one bad road loses that road, not the project. */
   warnings: string[];
 }
@@ -256,6 +321,16 @@ export function parseProject(text: string, palette: readonly Asset[]): ParseResu
   const warnings: string[] = [];
   let raw: unknown;
 
+  if (text.length > MAX_PROJECT_BYTES) {
+    return {
+      doc: emptyDoc(),
+      assets: [...palette],
+      name: 'Untitled',
+      version: 0,
+      warnings: ['That file is too large to be a project.'],
+    };
+  }
+
   try {
     raw = JSON.parse(text);
   } catch {
@@ -263,6 +338,7 @@ export function parseProject(text: string, palette: readonly Asset[]): ParseResu
       doc: emptyDoc(),
       assets: [...palette],
       name: 'Untitled',
+      version: 0,
       warnings: ['That file is not valid JSON.'],
     };
   }
@@ -273,11 +349,24 @@ export function parseProject(text: string, palette: readonly Asset[]): ParseResu
       doc: emptyDoc(),
       assets: [...palette],
       name: 'Untitled',
+      version: 0,
       warnings: ['That file is not a GeoJSON FeatureCollection.'],
     };
   }
 
   const meta = paletteSchema.safeParse(collection.streetcity ?? {});
+  if (!meta.success && collection.streetcity) {
+    warnings.push('The palette in that file could not be read, so built-in road types were used instead.');
+  }
+  const version =
+    typeof (collection.streetcity as { version?: unknown } | undefined)?.version === 'number'
+      ? ((collection.streetcity as { version: number }).version)
+      : 1;
+  if (version > PROJECT_VERSION) {
+    warnings.push(
+      `That file was made by a newer version (format ${version}). It was opened as far as this version understands it.`,
+    );
+  }
   const fileAssets = meta.success && meta.data.assets ? meta.data.assets : [];
   const name = (meta.success && meta.data.name) || 'Untitled';
 
@@ -299,13 +388,20 @@ export function parseProject(text: string, palette: readonly Asset[]): ParseResu
       doc: emptyDoc(),
       assets,
       name,
+      version,
       warnings: [
         'That file is in the old street format, which this version no longer reads.',
       ],
     };
   }
 
-  return { doc: readNative(collection.features, warnings), assets, name, warnings };
+  return {
+    doc: readNative(collection.features, warnings, new Set(assets.map((a) => a.id))),
+    assets,
+    name,
+    version,
+    warnings,
+  };
 }
 
 /** Give a parsed asset the runtime component ids the editor selects on. */
@@ -322,10 +418,47 @@ function materialise(asset: z.infer<typeof assetSchema>): Asset {
   };
 }
 
-function readNative(features: readonly Feature[], warnings: string[]): Doc {
+/** A list of rings from a GeoJSON Polygon, unclosed, each with at least three valid points. */
+function readRings(coordinates: unknown): LngLat[][] | null {
+  if (!Array.isArray(coordinates)) return null;
+  const rings: LngLat[][] = [];
+  for (const ring of coordinates) {
+    if (!Array.isArray(ring)) return null;
+    const points: LngLat[] = [];
+    for (const p of ring) {
+      const parsed = positionSchema.safeParse(p);
+      if (!parsed.success) return null;
+      points.push([parsed.data[0]!, parsed.data[1]!]);
+    }
+    // GeoJSON closes rings by repeating the first point; the document does not.
+    const first = points[0];
+    const last = points[points.length - 1];
+    if (first && last && points.length > 1 && first[0] === last[0] && first[1] === last[1]) points.pop();
+    if (points.length < 3) return null;
+    rings.push(points);
+  }
+  return rings.length > 0 ? rings : null;
+}
+
+function readNative(features: readonly Feature[], warnings: string[], assetIds: ReadonlySet<string>): Doc {
   const nodes: Node[] = [];
   const segments: Segment[] = [];
   const areas: AreaShape[] = [];
+  const zones: Zone[] = [];
+  const buildings: Building[] = [];
+  const districts: District[] = [];
+  const seen = new Set<string>();
+  let duplicates = 0;
+  /** True when this id was already used by an earlier feature of the same kind. */
+  const duplicate = (kind: string, id: string): boolean => {
+    const key = `${kind}:${id}`;
+    if (seen.has(key)) {
+      duplicates++;
+      return true;
+    }
+    seen.add(key);
+    return false;
+  };
 
   for (const feature of features) {
     const kind = feature.properties?.streetcity;
@@ -336,17 +469,19 @@ function readNative(features: readonly Feature[], warnings: string[]): Doc {
         warnings.push('A node had coordinates that are not [longitude, latitude].');
         continue;
       }
+      const nodeId = String(feature.properties!.id ?? newNodeId());
+      if (duplicate('node', nodeId)) continue;
       nodes.push({
-        id: String(feature.properties!.id ?? newNodeId()),
+        id: nodeId,
         name: feature.properties!.name || undefined,
         position: position.data.slice(0, 2) as LngLat,
         elevation:
-          typeof feature.properties!.elevation === 'number'
-            ? feature.properties!.elevation
+          typeof feature.properties!.elevation === 'number' && Number.isFinite(feature.properties!.elevation)
+            ? Math.round(clamp(feature.properties!.elevation, ELEVATION_RANGE))
             : undefined,
         radiusMeters:
-          typeof feature.properties!.radiusMeters === 'number'
-            ? feature.properties!.radiusMeters
+          typeof feature.properties!.radiusMeters === 'number' && Number.isFinite(feature.properties!.radiusMeters)
+            ? clamp(feature.properties!.radiusMeters, RADIUS_RANGE)
             : undefined,
       });
       continue;
@@ -360,14 +495,21 @@ function readNative(features: readonly Feature[], warnings: string[]): Doc {
         continue;
       }
       const curve = props.curve ? curveSchema.safeParse(props.curve) : null;
+      const shape = coordinates.slice(1, -1).map((p) => positionSchema.safeParse(p));
+      if (shape.some((p) => !p.success)) {
+        warnings.push('A road had a bend with coordinates that are not [longitude, latitude] and was dropped.');
+        continue;
+      }
+      const segmentId = String(props.id ?? newSegmentId());
+      if (duplicate('segment', segmentId)) continue;
       segments.push({
-        id: String(props.id ?? newSegmentId()),
+        id: segmentId,
         name: props.name || undefined,
         assetId: String(props.assetId ?? ''),
         fromNodeId: String(props.fromNodeId ?? ''),
         toNodeId: String(props.toNodeId ?? ''),
         // The two ends are the nodes and are not stored on the segment.
-        shape: coordinates.slice(1, -1).map((p) => [p[0], p[1]] as LngLat),
+        shape: shape.map((p) => [p.data![0]!, p.data![1]!] as LngLat),
         curve: curve?.success ? curve.data : undefined,
         reversed: props.reversed === true ? true : undefined,
         visible: props.visible !== false,
@@ -383,17 +525,87 @@ function readNative(features: readonly Feature[], warnings: string[]): Doc {
         warnings.push('An area had fewer than three points and was dropped.');
         continue;
       }
+      if (ring.some((p) => !positionSchema.safeParse(p).success)) {
+        warnings.push('An area had coordinates that are not [longitude, latitude] and was dropped.');
+        continue;
+      }
       const curve = props.curve ? curveSchema.safeParse(props.curve) : null;
+      const areaId = String(props.id ?? newAreaId());
+      if (duplicate('area', areaId)) continue;
       areas.push({
-        id: String(props.id ?? newAreaId()),
+        id: areaId,
         name: props.name || undefined,
         assetId: String(props.assetId ?? ''),
         ring: ring.map((p) => [p[0], p[1]] as LngLat),
         curve: curve?.success ? curve.data : undefined,
         visible: props.visible !== false,
       });
+      continue;
+    }
+
+    if (kind === 'zone' && feature.geometry?.type === 'Polygon') {
+      const props = feature.properties!;
+      const rings = readRings(feature.geometry.coordinates);
+      if (!rings || !isLandUseId(props.landUse)) {
+        warnings.push('A zone had a land use or an outline this version does not understand and was dropped.');
+        continue;
+      }
+      const zoneId = String(props.id ?? newZoneId());
+      if (duplicate('zone', zoneId)) continue;
+      zones.push({ id: zoneId, landUse: props.landUse, rings, visible: props.visible !== false });
+      continue;
+    }
+
+    if (kind === 'building' && feature.geometry?.type === 'Point') {
+      const props = feature.properties!;
+      const position = positionSchema.safeParse(feature.geometry.coordinates);
+      if (!position.success || !isBuildingTypeId(props.typeId)) {
+        warnings.push('A building had a type or a position this version does not understand and was dropped.');
+        continue;
+      }
+      const buildingId = String(props.id ?? newBuildingId());
+      if (duplicate('building', buildingId)) continue;
+      buildings.push({
+        id: buildingId,
+        typeId: props.typeId,
+        position: [position.data[0]!, position.data[1]!],
+        rotation: typeof props.rotation === 'number' && Number.isFinite(props.rotation) ? props.rotation : 0,
+        visible: props.visible !== false,
+      });
+      continue;
+    }
+
+    if (kind === 'district' && feature.geometry?.type === 'Polygon') {
+      const props = feature.properties!;
+      const rings = readRings(feature.geometry.coordinates);
+      if (!rings) {
+        warnings.push('A district had an outline this version does not understand and was dropped.');
+        continue;
+      }
+      const districtId = String(props.id ?? newDistrictId());
+      if (duplicate('district', districtId)) continue;
+      districts.push({
+        id: districtId,
+        name: typeof props.name === 'string' && props.name ? props.name : 'District',
+        color: typeof props.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(props.color) ? props.color : '#4DA3FF',
+        rings,
+        visible: props.visible !== false,
+      });
     }
   }
+
+  if (duplicates > 0) warnings.push(`${duplicates} feature(s) repeated an id already used and were dropped.`);
+
+  // Roads and shapes that name an asset the palette does not have cannot be drawn and
+  // cannot be repaired from the UI, so they are dropped with a count.
+  const knownSegments = segments.filter((s) => assetIds.has(s.assetId));
+  const knownAreas = areas.filter((a) => assetIds.has(a.assetId));
+  const unknown = segments.length - knownSegments.length + (areas.length - knownAreas.length);
+  if (unknown > 0) warnings.push(`${unknown} road(s) or shape(s) used a type that is not in the file's palette and were dropped.`);
+  segments.length = 0;
+  segments.push(...knownSegments);
+  areas.length = 0;
+  areas.push(...knownAreas);
 
   // Drop roads whose nodes did not survive, rather than leaving the document referring to
   // places that are not there.
@@ -403,7 +615,7 @@ function readNative(features: readonly Feature[], warnings: string[]): Doc {
     warnings.push(`${segments.length - kept.length} road(s) referred to missing nodes.`);
   }
 
-  return { nodes, segments: kept, areas };
+  return { nodes, segments: kept, areas, zones, buildings, districts };
 }
 
 /** A palette for a file that brought none: the built-ins, exactly as a new project gets. */

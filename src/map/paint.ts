@@ -13,7 +13,7 @@ import { IMAGE_PX_PER_METRE } from './glyphImages';
 import { LANDCOVERS } from '../library/landcover';
 import { PRIMITIVES } from '../library/primitives';
 import { boundaryOffsets, componentStarts, resolveAnchorOffset, sectionExtent } from '../model/section';
-import { adjacency, joinCandidate, nodeMap, segmentControlPoints, segmentElevation } from '../model/doc';
+import { adjacency, emptyDoc, joinCandidate, nodeMap, segmentControlPoints, segmentElevation } from '../model/doc';
 import type { Doc, Node, Segment } from '../model/doc';
 import { isLineAsset } from '../model/asset';
 import type { Asset, LineAsset } from '../model/asset';
@@ -768,7 +768,7 @@ function paintSegment(
   const cached = segmentCache.get(segment);
   if (cached && cached.from === from && cached.to === to && cached.asset === asset) return cached;
 
-  const mini: Doc = { nodes: [from, to], segments: [segment], areas: [] };
+  const mini: Doc = { ...emptyDoc(), nodes: [from, to], segments: [segment] };
   const [resolved] = resolveSegments(mini, assets);
   if (!resolved) return null;
 
@@ -907,6 +907,7 @@ export function paintPreview(
   if (controls.length < 2) return empty<LineString>();
 
   const doc: Doc = {
+    ...emptyDoc(),
     nodes: [
       { id: 'preview-a', position: controls[0]!, elevation },
       { id: 'preview-b', position: controls[controls.length - 1]!, elevation },

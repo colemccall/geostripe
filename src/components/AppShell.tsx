@@ -53,7 +53,7 @@ export default function AppShell() {
       <header className="topbar">
         <div className="brand">
           <span className="brand-mark" aria-hidden="true" />
-          <b>GeoStripe</b>
+          <b>StreetCityEditor</b>
 {/* Version and build, because they answer different questions: what this is,
               and which compilation of it you have. The build is a time rather than a
               commit hash — "is this newer than what I pushed" is a comparison you can

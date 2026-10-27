@@ -1,6 +1,8 @@
 import type { CurveSettings } from '../geo/curve';
 import { distanceMetres, localPlane, originFor } from '../geo/crs';
 import type { LngLat } from '../geo/crs';
+import type { BuildingTypeId } from '../library/buildingTypes';
+import type { LandUseId } from '../library/landuse';
 import { newId } from './types';
 
 /**
@@ -106,17 +108,67 @@ export interface AreaShape {
   visible: boolean;
 }
 
+/**
+ * A patch of land with a land use. One polygon: an outer ring and any holes.
+ *
+ * Rings are WGS84 with the first point NOT repeated at the end, outer first. Zones of the
+ * same land use that touch are merged when painted, so a single use is normally one or a
+ * few zones, and zones never overlap: painting over a zone replaces what was under it.
+ */
+export interface Zone {
+  id: string;
+  landUse: LandUseId;
+  rings: LngLat[][];
+  visible: boolean;
+}
+
+/**
+ * A building footprint: a type, a place and a heading.
+ *
+ * The polygon is derived from the type's size, so there is nothing here to keep in step with
+ * it. `rotation` is degrees clockwise from north.
+ */
+export interface Building {
+  id: string;
+  typeId: BuildingTypeId;
+  position: LngLat;
+  rotation: number;
+  visible: boolean;
+}
+
+/** A named planning district: an area with a name and a colour, and nothing else. */
+export interface District {
+  id: string;
+  name: string;
+  color: string;
+  rings: LngLat[][];
+  visible: boolean;
+}
+
 export interface Doc {
   nodes: Node[];
   segments: Segment[];
   areas: AreaShape[];
+  zones: Zone[];
+  buildings: Building[];
+  districts: District[];
 }
 
-export const emptyDoc = (): Doc => ({ nodes: [], segments: [], areas: [] });
+export const emptyDoc = (): Doc => ({
+  nodes: [],
+  segments: [],
+  areas: [],
+  zones: [],
+  buildings: [],
+  districts: [],
+});
 
 export const newNodeId = (): string => newId('n');
 export const newSegmentId = (): string => newId('s');
 export const newAreaId = (): string => newId('area');
+export const newZoneId = (): string => newId('zone');
+export const newBuildingId = (): string => newId('bldg');
+export const newDistrictId = (): string => newId('dist');
 
 // --------------------------------------------------------------------------- reading
 

@@ -1,4 +1,4 @@
-# Deploying GeoStripe
+# Deploying StreetCityEditor
 
 Three supported targets. All of them typecheck and test before building, so a broken
 commit fails at the build rather than on the live site.
@@ -193,7 +193,7 @@ always a custom domain added without switching the workflow to `npm run build:do
 
 ## Routing note
 
-GeoStripe uses `HashRouter`, so URLs look like `/geostripe/#/builder`.
+StreetCityEditor uses `HashRouter`, so URLs look like `/geostripe/#/builder`.
 
 GitHub Pages is a static host with no rewrite rules. Under `BrowserRouter`, refreshing or
 sharing a deep link to `/geostripe/builder` asks Pages for a file that does not exist and
