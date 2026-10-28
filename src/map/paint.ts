@@ -687,7 +687,8 @@ function handleFeatures(doc: Doc, options: PaintOptions): Feature<Point>[] {
     // A road that stops next to another road is usually a road that was meant to reach it.
     // Flagged rather than joined: the old model made that decision silently and was wrong
     // about it, so this only says "there is something here" and waits to be told.
-    const loose = count === 1 && joinCandidate(doc, node.id) !== null;
+    // A ramp's nose sits beside the mainline on purpose; it is not a road that stopped short.
+    const loose = count === 1 && node.role !== 'rampNose' && joinCandidate(doc, node.id) !== null;
 
     return {
       type: 'Feature',
@@ -739,6 +740,33 @@ function guideFeatures(resolved: readonly Resolved[], options: PaintOptions): Fe
  * nothing here turns anything into a polygon except the junction plates, which are a convex
  * hull of at most a few dozen points each.
  */
+/** Draw order within a deck: junction ground first, then lane transitions, then paint on top. */
+const PLATE_KINDS = ['footprint', 'paved', 'taper', 'gore', 'paint'] as const;
+
+const PATCH_COLORS: Record<'taper' | 'gore' | 'paint', string> = {
+  taper: PRIMITIVES.decelerationLane.color,
+  gore: '#CBCFCB',
+  paint: '#FFFFFF',
+};
+
+/** Lane tapers, gores and the paint along them, drawn with the junction plates. */
+function patchFeatures(doc: Doc): Feature<Polygon>[] {
+  return doc.patches.map(
+    (patch) =>
+      ({
+        type: 'Feature',
+        geometry: { type: 'Polygon', coordinates: [closeRing(patch.ring)] },
+        properties: {
+          patchId: patch.id,
+          kind: patch.kind,
+          deck: deckOf(patch.deck),
+          color: PATCH_COLORS[patch.kind],
+          selected: 0,
+        },
+      }) as Feature<Polygon>,
+  );
+}
+
 function zoneFeatures(doc: Doc): Feature<Polygon>[] {
   return doc.zones
     .filter((z) => z.visible && z.rings.length > 0)
@@ -937,9 +965,9 @@ export function paintDoc(
       // Footprints of a whole deck before any of its paved plates, so a corner footway is
       // never painted over by the asphalt of the junction next door.
       features: inOrder(
-        plateLists,
-        (f) => deckKey(f) * 2 + (f.properties!.kind === 'footprint' ? 0 : 1),
-        6,
+        [...plateLists, patchFeatures(doc)],
+        (f) => deckKey(f) * PLATE_KINDS.length + PLATE_KINDS.indexOf(f.properties!.kind as (typeof PLATE_KINDS)[number]),
+        3 * PLATE_KINDS.length,
       ),
     },
     areas: { type: 'FeatureCollection', features: areaFeatures(doc, assets) },
@@ -1189,6 +1217,16 @@ export function designLayers(): LayerSpecification[] {
       paint: { 'fill-color': ['get', 'color'] },
     });
   }
+
+  // The white edge of a painted gore.
+  layers.push({
+    id: 'patch-outline',
+    type: 'line',
+    source: 'plates',
+    filter: ['==', ['get', 'kind'], 'gore'],
+    layout: { 'line-join': 'round' },
+    paint: { 'line-color': '#FFFFFF', 'line-width': 1.4, 'line-opacity': 0.95 },
+  });
 
   // The road under construction, over everything built but under the handles. Translucent,
   // because it is a proposal rather than a thing that exists.

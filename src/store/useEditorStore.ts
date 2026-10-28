@@ -28,6 +28,11 @@ import {
 } from '../model/districts';
 import { snapRotation } from '../model/buildings';
 import { addRoundabout } from '../model/roundabout';
+import { addLane, addRamp } from '../model/interchange';
+import type { RampKind } from '../model/interchange';
+import { blockAt, findFaces } from '../model/blocks';
+import { eraseRegion, paintRegion } from '../model/zones';
+import { eraseDistrictRegion, paintDistrictRegion } from '../model/districts';
 import { newBuildingId } from '../model/doc';
 import type { LandUseId } from '../library/landuse';
 import type { BuildingTypeId } from '../library/buildingTypes';
@@ -100,13 +105,15 @@ export type Tool =
   | 'upgrade'
   | 'area'
   | 'roundabout'
+  | 'ramp'
+  | 'lane'
   | 'zone'
   | 'building'
   | 'district'
   | 'bulldoze';
 
-/** How zones and districts are painted: dragging a brush, or tracing an outline. */
-export type PaintMode = 'brush' | 'outline';
+/** How zones and districts are painted: a dragged brush, a traced outline, or a whole block. */
+export type PaintMode = 'brush' | 'outline' | 'fill';
 
 /**
  * Info views: ways of recolouring the map by one property so a pattern can be read.
@@ -199,6 +206,10 @@ export interface EditorState extends Snapshot {
   showAllCenterlines: boolean;
 
   // ----------------------------------------------------------------------- planning
+  /** What the lane tool adds: a turn lane at an approach, or an auxiliary lane. */
+  laneType: 'turnPocket' | 'auxiliaryLane';
+  /** Whether the ramp tool builds an exit or an entrance. */
+  rampKind: RampKind;
   /** Radius of the roundabout the roundabout tool places, in metres. */
   roundaboutRadius: number;
   /** The land use the zone brush paints. */
@@ -249,6 +260,10 @@ export interface EditorState extends Snapshot {
   setShowAllCenterlines: (value: boolean) => void;
 
   // planning
+  setLaneType: (type: 'turnPocket' | 'auxiliaryLane') => void;
+  placeLane: (segmentId: string, at: LngLat, side: 'left' | 'right') => boolean;
+  setRampKind: (kind: RampKind) => void;
+  placeRamp: (segmentId: string, at: LngLat, side: 'left' | 'right') => boolean;
   setRoundaboutRadius: (metres: number) => void;
   placeRoundabout: (centre: LngLat) => void;
   setLandUse: (landUse: LandUseId) => void;
@@ -261,6 +276,7 @@ export interface EditorState extends Snapshot {
   setView: (view: ViewMode) => void;
   paintStroke: (points: LngLat[]) => void;
   paintOutline: (ring: LngLat[]) => void;
+  fillBlock: (point: LngLat) => void;
   placeBuilding: (position: LngLat, rotation: number) => void;
   newDistrict: () => void;
   renameDistrict: (id: string, name: string) => void;
@@ -431,6 +447,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
     defaultRadiusMeters: 6,
     showAllCenterlines: false,
 
+    laneType: 'turnPocket',
+    rampKind: 'exit',
     roundaboutRadius: 18,
     activeLandUse: 'residentialLow',
     paintMode: 'brush',
@@ -465,6 +483,33 @@ export const useEditorStore = create<EditorState>((set, get) => {
     setNotice: (notice) => set({ notice }),
 
     // ----------------------------------------------------------------- planning
+    setLaneType: (laneType) => set({ laneType }),
+    /** Add a turn or auxiliary lane to the end of a road. Says why in a notice when it cannot. */
+    placeLane: (segmentId, at, side) => {
+      const { doc, assets, laneType } = get();
+      const result = addLane(doc, assets, segmentId, at, { side, laneType });
+      if ('error' in result) {
+        set({ notice: { kind: 'warning', title: 'Cannot add the lane here', details: [result.error] } });
+        return false;
+      }
+      commit({ doc: result.doc, assets: result.assets });
+      set({ selectedSegmentId: result.segmentId, selectedNodeId: null, selectedAreaId: null });
+      return true;
+    },
+    setRampKind: (rampKind) => set({ rampKind }),
+    /** Build an exit or entrance on a road. Says why in a notice when it cannot. */
+    placeRamp: (segmentId, at, side) => {
+      const { doc, assets, rampKind } = get();
+      const result = addRamp(doc, assets, segmentId, at, { kind: rampKind, side });
+      if ('error' in result) {
+        set({ notice: { kind: 'warning', title: `Cannot build the ${rampKind} here`, details: [result.error] } });
+        return false;
+      }
+      commit({ doc: result.doc, assets: result.assets });
+      // Continue from the ramp's free end, the way the road tool continues from its last click.
+      set({ selectedSegmentId: result.rampSegmentId, selectedNodeId: null, selectedAreaId: null });
+      return true;
+    },
     setRoundaboutRadius: (metres) => set({ roundaboutRadius: Math.min(80, Math.max(8, metres)) }),
     placeRoundabout: (centre) => {
       const { doc, activeLineAssetId, roundaboutRadius, buildLevel } = get();
@@ -516,6 +561,28 @@ export const useEditorStore = create<EditorState>((set, get) => {
         return;
       }
       commit({ doc: paintOutline(doc, activeLandUse, ring) });
+    },
+
+    /** Paint, or erase, the whole block between roads under a point. */
+    fillBlock: (point) => {
+      const { doc, assets, tool, eraseMode, activeLandUse, activeDistrictId } = get();
+      const byId = new Map(assets.map((a) => [a.id, a]));
+      const block = blockAt(doc, byId, findFaces(doc, byId), point);
+      if (!block) {
+        set({ notice: { kind: 'warning', title: 'No block here', details: ['Click inside ground that roads enclose.'] } });
+        return;
+      }
+      if (tool === 'district') {
+        if (eraseMode) commit({ doc: eraseDistrictRegion(doc, block.shape, block.plane, activeDistrictId ?? undefined) });
+        else if (activeDistrictId) commit({ doc: paintDistrictRegion(doc, activeDistrictId, block.shape, block.plane) });
+        else set({ notice: { kind: 'warning', title: 'Make a district first' } });
+        return;
+      }
+      commit({
+        doc: eraseMode
+          ? eraseRegion(doc, block.shape, block.plane)
+          : paintRegion(doc, activeLandUse, block.shape, block.plane),
+      });
     },
 
     placeBuilding: (position, rotation) => {

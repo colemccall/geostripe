@@ -20,7 +20,7 @@ import type { PaintSources } from './paint';
 import { HANDLES_FOR as HANDLES_FOR_MODE, useEditorStore } from '../store/useEditorStore';
 import type { Tool } from '../store/useEditorStore';
 import { assetMap } from '../library/assets';
-import { joinCandidate } from '../model/doc';
+import { joinCandidate, splitPointFor } from '../model/doc';
 import type { Snap } from '../model/doc';
 import { roadIssues } from '../model/validity';
 import { applyView, VIEW_IMAGERY_FACTOR } from './views';
@@ -30,6 +30,9 @@ import { bearingToFace } from '../model/buildings';
 import { footprint } from '../model/buildings';
 import { PLACEMENT_TEXT, placementIssues } from '../model/placement';
 import { circle } from '../geo/region';
+import { addLane, addRamp, sideOfLine } from '../model/interchange';
+import { blockAt, findFaces } from '../model/blocks';
+import type { Face } from '../model/blocks';
 import { distanceMetres } from '../geo/crs';
 import { buildSnapIndex, findSnaps } from '../geo/snapEngine';
 import type { SnapCandidate, SnapContext, SnapIndex } from '../geo/snapEngine';
@@ -302,6 +305,8 @@ export function MapCanvas({ className }: MapCanvasProps) {
   /** Which of several candidates under the cursor Tab has chosen, and where Tab was pressed. */
   const cycle = useRef({ index: 0, anchor: [0, 0] as [number, number] });
   const lastPointer = useRef<MapMouseEvent | null>(null);
+  /** The blocks between roads, recomputed only when the document or palette changes. */
+  const facesCache = useRef<{ doc: Doc; assets: Asset[]; faces: Face[] } | null>(null);
 
   /**
    * The palette, indexed, for the preview to paint with.
@@ -469,6 +474,26 @@ export function MapCanvas({ className }: MapCanvasProps) {
       return { position, rotation, issues };
     };
 
+    /**
+     * The road under the pointer for the ramp tool and the side of it being pointed at.
+     * Generous reach, since the side you want may be a lane's width from the centreline.
+     */
+    const rampTarget = (event: MapMouseEvent) => {
+      const state = useEditorStore.getState();
+      let cache = snapCache.current;
+      if (!cache || cache.doc !== state.doc || cache.assets !== state.assets) {
+        cache = { doc: state.doc, assets: state.assets, index: buildSnapIndex(state.doc, assetMapRef.current) };
+        snapCache.current = cache;
+      }
+      const cursor: LngLat = [event.lngLat.lng, event.lngLat.lat];
+      const reach = 60 * metresPerPixel(cursor[1], map.getZoom());
+      // Of the roads in reach, the one whose centreline is nearest.
+      const hit = findSnaps(cache.index, cursor, reach, 'select').find((c) => c.snap?.kind === 'segment');
+      if (!hit || hit.snap?.kind !== 'segment') return null;
+      const side = sideOfLine(state.doc, hit.snap.segmentId, cursor);
+      return side ? { segmentId: hit.snap.segmentId, side, cursor } : null;
+    };
+
     const onClick = (event: MapMouseEvent) => {
       const state = useEditorStore.getState();
       const snap = snapAt(event);
@@ -485,6 +510,11 @@ export function MapCanvas({ className }: MapCanvasProps) {
         return;
       }
 
+      if ((state.tool === 'zone' || state.tool === 'district') && state.paintMode === 'fill') {
+        state.fillBlock(point);
+        return;
+      }
+
       // Outline mode traces a shape point by point; brush mode paints on drag instead.
       if ((state.tool === 'zone' || state.tool === 'district') && state.paintMode === 'outline') {
         areaRing.current = [...areaRing.current, point];
@@ -495,6 +525,17 @@ export function MapCanvas({ className }: MapCanvasProps) {
 
       if (state.tool === 'roundabout') {
         state.placeRoundabout(point);
+        return;
+      }
+
+      if (state.tool === 'ramp' || state.tool === 'lane') {
+        const target = rampTarget(event);
+        if (!target) {
+          state.setNotice({ kind: 'warning', title: 'Point at a road first' });
+          return;
+        }
+        if (state.tool === 'ramp') state.placeRamp(target.segmentId, target.cursor, target.side);
+        else state.placeLane(target.segmentId, target.cursor, target.side);
         return;
       }
 
@@ -547,6 +588,37 @@ export function MapCanvas({ className }: MapCanvasProps) {
     /** Finish an area on a double click, which is how every drawing tool ends a shape. */
     const onDoubleClick = (event: MapMouseEvent) => {
       const state = useEditorStore.getState();
+
+      // Editing the bends of the selected road: double-click a bend to remove it, or the
+      // road itself to add one there.
+      if (state.tool === 'select') {
+        const box: [PointLike, PointLike] = [
+          [event.point.x - SNAP_PX, event.point.y - SNAP_PX],
+          [event.point.x + SNAP_PX, event.point.y + SNAP_PX],
+        ];
+        const handle = map
+          .queryRenderedFeatures(box, { layers: ['handle-point'] })
+          .find((f) => f.properties?.kind === 'shape');
+        if (handle) {
+          event.preventDefault();
+          state.removeShapePoint(String(handle.properties!.segmentId), Number(handle.properties!.shapeIndex));
+          return;
+        }
+        const selected = state.doc.segments.find((x) => x.id === state.selectedSegmentId);
+        if (selected && pick(map, event).segmentId === selected.id) {
+          const at = splitPointFor(
+            selected,
+            new Map(state.doc.nodes.map((n) => [n.id, n])),
+            [event.lngLat.lng, event.lngLat.lat],
+          );
+          if (at) {
+            event.preventDefault();
+            state.insertShapePoint(selected.id, at.shapeIndex, at.point);
+          }
+        }
+        return;
+      }
+
       const outlining =
         (state.tool === 'zone' || state.tool === 'district') && state.paintMode === 'outline';
       if (state.tool !== 'area' && !outlining) return;
@@ -617,12 +689,110 @@ export function MapCanvas({ className }: MapCanvasProps) {
         return;
       }
 
+      if ((state.tool === 'zone' || state.tool === 'district') && state.paintMode === 'fill') {
+        let cache = facesCache.current;
+        if (!cache || cache.doc !== state.doc || cache.assets !== state.assets) {
+          const byId = assetMapRef.current;
+          cache = { doc: state.doc, assets: state.assets, faces: findFaces(state.doc, byId) };
+          facesCache.current = cache;
+        }
+        const block = blockAt(state.doc, assetMapRef.current, cache.faces, [event.lngLat.lng, event.lngLat.lat]);
+        const features: FeatureCollection['features'] = (block?.shape ?? []).map((ring) => ({
+          type: 'Feature',
+          geometry: {
+            type: 'LineString',
+            coordinates: [...ring, ring[0]!].map((p) => block!.plane.toLngLat(p)),
+          },
+          properties: {},
+        }));
+        setData(map, DRAFT_SOURCE, { type: 'FeatureCollection', features });
+        return;
+      }
+
       if (state.tool === 'zone' || state.tool === 'district') {
         if (state.paintMode === 'brush') {
           drawBrush(map, [event.lngLat.lng, event.lngLat.lat], state.brushRadiusMeters, []);
         } else if (areaRing.current.length > 0) {
           drawDraft(map, [...areaRing.current, [event.lngLat.lng, event.lngLat.lat]], null);
         }
+        return;
+      }
+
+      if (state.tool === 'bulldoze' || state.tool === 'upgrade') {
+        const snapped = state.tool === 'bulldoze' ? snapAt(event) : undefined;
+        const nodePosition =
+          snapped?.kind === 'node'
+            ? (state.doc.nodes.find((n) => n.id === snapped.nodeId)?.position ?? null)
+            : null;
+        const hit = nodePosition ? {} : pick(map, event);
+        // Upgrade only acts on roads, so only a road is shown as its target.
+        const target = state.tool === 'upgrade' ? (hit.segmentId ? { segmentId: hit.segmentId } : {}) : hit;
+        highlight(map, painted.current, target, nodePosition, state.tool === 'bulldoze');
+        return;
+      }
+
+      if (state.tool === 'lane') {
+        const target = rampTarget(event);
+        if (!target) {
+          setData(map, DRAFT_SOURCE, emptyFC());
+          setPointer({ position: hover.current, snap: null, note: 'Point at a road' });
+          return;
+        }
+        const built = addLane(state.doc, state.assets, target.segmentId, target.cursor, {
+          side: target.side,
+          laneType: state.laneType,
+        });
+        if ('error' in built) {
+          setData(map, DRAFT_SOURCE, emptyFC());
+          setPointer({ position: hover.current, snap: null, note: built.error });
+          map.getCanvas().style.cursor = 'not-allowed';
+          return;
+        }
+        map.getCanvas().style.cursor = 'crosshair';
+        setPointer({ position: hover.current, snap: state.laneType === 'turnPocket' ? 'Turn lane' : 'Auxiliary lane', note: null });
+        setData(map, DRAFT_SOURCE, {
+          type: 'FeatureCollection',
+          features: [
+            { type: 'Feature', geometry: { type: 'LineString', coordinates: built.preview.lane }, properties: {} },
+            ...built.preview.patches.map((ring) => ({
+              type: 'Feature' as const,
+              geometry: { type: 'LineString' as const, coordinates: [...ring, ring[0]!] },
+              properties: {},
+            })),
+          ],
+        });
+        return;
+      }
+
+      if (state.tool === 'ramp') {
+        const target = rampTarget(event);
+        if (!target) {
+          setData(map, DRAFT_SOURCE, emptyFC());
+          setPointer({ position: hover.current, snap: null, note: 'Point at a road' });
+          return;
+        }
+        const built = addRamp(state.doc, state.assets, target.segmentId, target.cursor, {
+          kind: state.rampKind,
+          side: target.side,
+        });
+        if ('error' in built) {
+          setData(map, DRAFT_SOURCE, emptyFC());
+          setPointer({ position: hover.current, snap: null, note: built.error });
+          map.getCanvas().style.cursor = 'not-allowed';
+          return;
+        }
+        map.getCanvas().style.cursor = 'crosshair';
+        setPointer({ position: hover.current, snap: state.rampKind === 'exit' ? 'Exit' : 'Entrance', note: null });
+        const feats: FeatureCollection['features'] = [
+          { type: 'Feature', geometry: { type: 'LineString', coordinates: built.preview.ramp }, properties: {} },
+          { type: 'Feature', geometry: { type: 'LineString', coordinates: built.preview.lane }, properties: {} },
+          ...built.preview.patches.map((ring) => ({
+            type: 'Feature' as const,
+            geometry: { type: 'LineString' as const, coordinates: [...ring, ring[0]!] },
+            properties: {},
+          })),
+        ];
+        setData(map, DRAFT_SOURCE, { type: 'FeatureCollection', features: feats });
         return;
       }
 
@@ -803,6 +973,8 @@ export function MapCanvas({ className }: MapCanvasProps) {
           u: 'upgrade',
           g: 'area',
           o: 'roundabout',
+          p: 'ramp',
+          l: 'lane',
           z: 'zone',
           n: 'building',
           d: 'district',
@@ -902,7 +1074,7 @@ export function MapCanvas({ className }: MapCanvasProps) {
     if (!map || !ready) return;
     const canvas = map.getCanvas();
     canvas.style.cursor =
-      tool === 'build' || tool === 'area' || tool === 'roundabout' || tool === 'zone' || tool === 'district' || tool === 'building'
+      tool === 'build' || tool === 'area' || tool === 'roundabout' || tool === 'ramp' || tool === 'lane' || tool === 'zone' || tool === 'district' || tool === 'building'
         ? 'crosshair'
         : tool === 'bulldoze'
           ? 'not-allowed'
@@ -1034,6 +1206,53 @@ function drawBrush(map: MapLibreMap, centre: LngLat, radiusMetres: number, strok
       geometry: { type: 'LineString', coordinates: stroke as LngLat[] },
       properties: {},
     });
+  }
+  setData(map, DRAFT_SOURCE, { type: 'FeatureCollection', features });
+}
+
+/** What a bulldoze or upgrade click would hit, as lines, so the target is shown before it is hit. */
+function highlight(
+  map: MapLibreMap,
+  painted: PaintSources,
+  hit: ReturnType<typeof pick>,
+  nodeAt: LngLat | null,
+  destructive: boolean,
+) {
+  const props = { invalid: destructive ? 1 : 0 };
+  const features: FeatureCollection['features'] = [];
+  const outline = (rings: readonly (readonly (readonly number[])[])[]) => {
+    for (const ring of rings) {
+      features.push({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: ring as unknown as LngLat[] },
+        properties: props,
+      });
+    }
+  };
+
+  if (nodeAt) {
+    features.push({ type: 'Feature', geometry: { type: 'Point', coordinates: nodeAt }, properties: props });
+  } else if (hit.buildingId) {
+    for (const f of painted.buildings.features) {
+      if (f.properties?.buildingId === hit.buildingId) outline(f.geometry.coordinates);
+    }
+  } else if (hit.segmentId) {
+    const f = painted.bands.features.find((b) => b.properties?.segmentId === hit.segmentId);
+    if (f) {
+      features.push({ type: 'Feature', geometry: f.geometry, properties: props });
+    }
+  } else if (hit.areaId) {
+    for (const f of painted.areas.features) {
+      if (f.properties?.areaId === hit.areaId) outline(f.geometry.coordinates);
+    }
+  } else if (hit.zoneId) {
+    for (const f of painted.zones.features) {
+      if (f.properties?.zoneId === hit.zoneId) outline(f.geometry.coordinates);
+    }
+  } else if (hit.districtId) {
+    for (const f of painted.districts.features) {
+      if (f.properties?.districtId === hit.districtId) outline(f.geometry.coordinates);
+    }
   }
   setData(map, DRAFT_SOURCE, { type: 'FeatureCollection', features });
 }
@@ -1179,4 +1398,3 @@ function snapAngle(
   return plane.toLngLat({ x: Math.cos(angle) * length, y: Math.sin(angle) * length });
 }
 
-export const emptyPaintSources = emptySources;

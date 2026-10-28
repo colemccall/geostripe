@@ -68,7 +68,7 @@ export const LAYER_GROUPS = [
     id: 'junctions',
     label: 'Junctions',
     hint: 'The paved ground each node owns, drawn over the road ends that meet there.',
-    layers: perDeck('plate'),
+    layers: [...perDeck('plate'), 'patch-outline'],
   },
   {
     id: 'handles',
@@ -93,8 +93,4 @@ export function allLayersVisible(): Record<LayerGroupId, boolean> {
     LayerGroupId,
     boolean
   >;
-}
-
-export function groupVisibleByDefault(_id: LayerGroupId): boolean {
-  return true;
 }

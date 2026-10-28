@@ -315,6 +315,8 @@ something is selected.
 | **Upgrade** | Arm a road type and click an existing road to make it that type. One click, because a road is an instance of its asset rather than a copy of one. |
 | **Ground** | Click a shape for a park, plaza or water. Double-click or Enter closes it. |
 | **Roundabout** | Click to place a ring of one-way arcs, radius set on the bar. Roads join it like any other junction. |
+| **Exit / ramp** | Point at the side of a road where the ramp goes and click. An **exit** builds a tapered wedge that widens into a deceleration lane, a stretch of mainline with that extra lane, a one-way ramp that peels off from the same lane, and the painted gore between them; an **entrance** is the same thing run backwards (the ramp arrives, an acceleration lane runs alongside, and a taper ends it). Works on either side of a two-way freeway. |
+| **Add lane** | Point near the end of a road, on the side the lane goes. A **turn lane** is added on the approach where traffic on that side arrives (a junction plate then widens to match); an **auxiliary lane** can go at either end. A taper leads into the lane. |
 | **Zoning** | Drag a brush of a land use over the map, or trace an outline. Painting a use merges with the same use and replaces a different one, so zones never overlap. `E` erases, `[` `]` change the brush. |
 | **Buildings** | A footprint ghost that turns to face the nearest road and goes red, with a reason, when it stands on a road or another building. `R` turns it. |
 | **Districts** | Named, coloured areas painted with the same brush. No policies; they exist to be looked at and added up. |
@@ -353,7 +355,7 @@ a junction — offering it instead is the whole difference.
 
 | Key | |
 | --- | --- |
-| `V` `B` `U` `G` `Z` `N` `D` `O` `X` | Select / Roads / Upgrade / Ground / Zoning / Buildings / Districts / Roundabout / Bulldoze |
+| `V` `B` `U` `G` `Z` `N` `D` `O` `P` `L` `X` | Select / Roads / Upgrade / Ground / Zoning / Buildings / Districts / Roundabout / Exit-ramp / Add lane / Bulldoze |
 | `Tab` | Step through everything under the cursor that it could snap to |
 | `1` `2` `3` | Straight / Curved / Freeform |
 | `Page Up` / `Page Down` | Raise or lower what you are about to build. It sets the height NEW junctions get; landing on one that exists uses its height, because the place already has one |
@@ -466,9 +468,27 @@ angle, loop to the same junction or duplicate an existing road
 by one property; **Stats** adds up road length, lane length, right-of-way, area per land use
 and, per district, the land use inside it.
 
+### Exits, entrances and lanes
+
+A ramp is not two roads that touch. [`src/model/interchange.ts`](src/model/interchange.ts) builds
+the four visible parts of one (taper, parallel lane, nose, gore) and keeps them honest:
+
+- The mainline is split into three roads; the middle one uses a **derived asset**, the
+  original plus one lane, pinned to the same drawn line so nothing shifts sideways.
+- The ramp is an ordinary one-way road whose first lane is in line with that extra lane, so the
+  pavement is continuous across the nose. Its first node has the role `rampNose`: it sits
+  beside the mainline on purpose, and is neither a loose end nor a place roads cross.
+- The **taper** and **gore** are stored as `patch` features, owned by the ramp and removed with
+  it. They are computed once, at placement; they do not follow the mainline if it is moved
+  afterwards, so rebuild the ramp (or undo) rather than dragging the road under it.
+- A ramp needs a clear stretch: the lane run plus the taper (200 m by default) within one road,
+  clear of its ends and of other junctions. The tool says how much is missing.
+
+The same lane-with-a-taper machinery serves turn lanes and auxiliary lanes at junctions.
+
 ## The project file
 
-Plain GeoJSON (format version 3; version 2 files open unchanged). Seven kinds of feature share one collection, and which of them is read back is
+Plain GeoJSON (format version 3; version 2 files open unchanged). Eight kinds of feature share one collection, and which of them is read back is
 the design:
 
 | `streetcity` | | Read back? |
@@ -479,6 +499,7 @@ the design:
 | `zone` | A Polygon (outer ring and holes) with a land use. | Yes |
 | `building` | A Point with a type and a heading; the footprint is derived. | Yes |
 | `district` | A Polygon with a name and colour. | Yes |
+| `patch` | A taper, gore or lane line, owned by a ramp or lane. | Yes |
 | `band` | The derived polygons. | **No** |
 
 The bands are generated once, at save, by the only polygon generator left in the program.

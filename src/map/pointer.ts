@@ -12,6 +12,8 @@ import type { LngLat } from '../geo/crs';
 export interface PointerInfo {
   position: LngLat | null;
   snap: string | null;
+  /** A line of explanation for the status strip, e.g. why a placement is refused. */
+  note?: string | null;
 }
 
 let current: PointerInfo = { position: null, snap: null };
