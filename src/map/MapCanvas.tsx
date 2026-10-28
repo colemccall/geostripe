@@ -30,6 +30,7 @@ import { bearingToFace } from '../model/buildings';
 import { footprint } from '../model/buildings';
 import { PLACEMENT_TEXT, placementIssues } from '../model/placement';
 import { circle } from '../geo/region';
+import { addLane, addRamp, sideOfLine } from '../model/interchange';
 import { blockAt, findFaces } from '../model/blocks';
 import type { Face } from '../model/blocks';
 import { distanceMetres } from '../geo/crs';
@@ -473,6 +474,26 @@ export function MapCanvas({ className }: MapCanvasProps) {
       return { position, rotation, issues };
     };
 
+    /**
+     * The road under the pointer for the ramp tool and the side of it being pointed at.
+     * Generous reach, since the side you want may be a lane's width from the centreline.
+     */
+    const rampTarget = (event: MapMouseEvent) => {
+      const state = useEditorStore.getState();
+      let cache = snapCache.current;
+      if (!cache || cache.doc !== state.doc || cache.assets !== state.assets) {
+        cache = { doc: state.doc, assets: state.assets, index: buildSnapIndex(state.doc, assetMapRef.current) };
+        snapCache.current = cache;
+      }
+      const cursor: LngLat = [event.lngLat.lng, event.lngLat.lat];
+      const reach = 60 * metresPerPixel(cursor[1], map.getZoom());
+      // Of the roads in reach, the one whose centreline is nearest.
+      const hit = findSnaps(cache.index, cursor, reach, 'select').find((c) => c.snap?.kind === 'segment');
+      if (!hit || hit.snap?.kind !== 'segment') return null;
+      const side = sideOfLine(state.doc, hit.snap.segmentId, cursor);
+      return side ? { segmentId: hit.snap.segmentId, side, cursor } : null;
+    };
+
     const onClick = (event: MapMouseEvent) => {
       const state = useEditorStore.getState();
       const snap = snapAt(event);
@@ -504,6 +525,17 @@ export function MapCanvas({ className }: MapCanvasProps) {
 
       if (state.tool === 'roundabout') {
         state.placeRoundabout(point);
+        return;
+      }
+
+      if (state.tool === 'ramp' || state.tool === 'lane') {
+        const target = rampTarget(event);
+        if (!target) {
+          state.setNotice({ kind: 'warning', title: 'Point at a road first' });
+          return;
+        }
+        if (state.tool === 'ramp') state.placeRamp(target.segmentId, target.cursor, target.side);
+        else state.placeLane(target.segmentId, target.cursor, target.side);
         return;
       }
 
@@ -699,6 +731,71 @@ export function MapCanvas({ className }: MapCanvasProps) {
         return;
       }
 
+      if (state.tool === 'lane') {
+        const target = rampTarget(event);
+        if (!target) {
+          setData(map, DRAFT_SOURCE, emptyFC());
+          setPointer({ position: hover.current, snap: null, note: 'Point at a road' });
+          return;
+        }
+        const built = addLane(state.doc, state.assets, target.segmentId, target.cursor, {
+          side: target.side,
+          laneType: state.laneType,
+        });
+        if ('error' in built) {
+          setData(map, DRAFT_SOURCE, emptyFC());
+          setPointer({ position: hover.current, snap: null, note: built.error });
+          map.getCanvas().style.cursor = 'not-allowed';
+          return;
+        }
+        map.getCanvas().style.cursor = 'crosshair';
+        setPointer({ position: hover.current, snap: state.laneType === 'turnPocket' ? 'Turn lane' : 'Auxiliary lane', note: null });
+        setData(map, DRAFT_SOURCE, {
+          type: 'FeatureCollection',
+          features: [
+            { type: 'Feature', geometry: { type: 'LineString', coordinates: built.preview.lane }, properties: {} },
+            ...built.preview.patches.map((ring) => ({
+              type: 'Feature' as const,
+              geometry: { type: 'LineString' as const, coordinates: [...ring, ring[0]!] },
+              properties: {},
+            })),
+          ],
+        });
+        return;
+      }
+
+      if (state.tool === 'ramp') {
+        const target = rampTarget(event);
+        if (!target) {
+          setData(map, DRAFT_SOURCE, emptyFC());
+          setPointer({ position: hover.current, snap: null, note: 'Point at a road' });
+          return;
+        }
+        const built = addRamp(state.doc, state.assets, target.segmentId, target.cursor, {
+          kind: state.rampKind,
+          side: target.side,
+        });
+        if ('error' in built) {
+          setData(map, DRAFT_SOURCE, emptyFC());
+          setPointer({ position: hover.current, snap: null, note: built.error });
+          map.getCanvas().style.cursor = 'not-allowed';
+          return;
+        }
+        map.getCanvas().style.cursor = 'crosshair';
+        setPointer({ position: hover.current, snap: state.rampKind === 'exit' ? 'Exit' : 'Entrance', note: null });
+        const feats: FeatureCollection['features'] = [
+          { type: 'Feature', geometry: { type: 'LineString', coordinates: built.preview.ramp }, properties: {} },
+          { type: 'Feature', geometry: { type: 'LineString', coordinates: built.preview.lane }, properties: {} },
+          ...built.preview.patches.map((ring) => ({
+            type: 'Feature' as const,
+            geometry: { type: 'LineString' as const, coordinates: [...ring, ring[0]!] },
+            properties: {},
+          })),
+        ];
+        setData(map, DRAFT_SOURCE, { type: 'FeatureCollection', features: feats });
+        return;
+      }
+
       if (state.tool === 'roundabout') {
         drawBrush(map, [event.lngLat.lng, event.lngLat.lat], state.roundaboutRadius, []);
         return;
@@ -876,6 +973,8 @@ export function MapCanvas({ className }: MapCanvasProps) {
           u: 'upgrade',
           g: 'area',
           o: 'roundabout',
+          p: 'ramp',
+          l: 'lane',
           z: 'zone',
           n: 'building',
           d: 'district',
@@ -975,7 +1074,7 @@ export function MapCanvas({ className }: MapCanvasProps) {
     if (!map || !ready) return;
     const canvas = map.getCanvas();
     canvas.style.cursor =
-      tool === 'build' || tool === 'area' || tool === 'roundabout' || tool === 'zone' || tool === 'district' || tool === 'building'
+      tool === 'build' || tool === 'area' || tool === 'roundabout' || tool === 'ramp' || tool === 'lane' || tool === 'zone' || tool === 'district' || tool === 'building'
         ? 'crosshair'
         : tool === 'bulldoze'
           ? 'not-allowed'

@@ -31,6 +31,8 @@ const TOOL_ICONS: { id: Tool; icon: string; label: string; key: string }[] = [
   { id: 'select', icon: '➤', label: 'Select', key: 'V' },
   { id: 'build', icon: '━', label: 'Roads', key: 'B' },
   { id: 'roundabout', icon: '◯', label: 'Roundabout', key: 'O' },
+  { id: 'ramp', icon: '⤴', label: 'Exit / ramp', key: 'P' },
+  { id: 'lane', icon: '≣', label: 'Add lane', key: 'L' },
   { id: 'upgrade', icon: '⟳', label: 'Upgrade', key: 'U' },
   { id: 'area', icon: '▰', label: 'Ground', key: 'G' },
   { id: 'zone', icon: '▦', label: 'Zoning', key: 'Z' },
@@ -93,6 +95,10 @@ export default function HotBar({ units }: Props) {
   const activeAreaAssetId = useEditorStore((s) => s.activeAreaAssetId);
   const recentAssetIds = useEditorStore((s) => s.recentAssetIds);
   const roundaboutRadius = useEditorStore((s) => s.roundaboutRadius);
+  const rampKind = useEditorStore((s) => s.rampKind);
+  const laneType = useEditorStore((s) => s.laneType);
+  const setLaneType = useEditorStore((s) => s.setLaneType);
+  const setRampKind = useEditorStore((s) => s.setRampKind);
   const setRoundaboutRadius = useEditorStore((s) => s.setRoundaboutRadius);
 
   const setTool = useEditorStore((s) => s.setTool);
@@ -210,6 +216,52 @@ export default function HotBar({ units }: Props) {
             </button>
           ))}
         </div>
+
+        {tool === 'lane' && (
+          <>
+            <span className="hb-sep" />
+            <div className="hb-group" role="group" aria-label="Lane type">
+              {(
+                [
+                  ['turnPocket', 'Turn lane'],
+                  ['auxiliaryLane', 'Auxiliary'],
+                ] as const
+              ).map(([type, label]) => (
+                <button
+                  key={type}
+                  type="button"
+                  className={`hb-btn${laneType === type ? ' is-active' : ''}`}
+                  aria-pressed={laneType === type}
+                  onClick={() => setLaneType(type)}
+                >
+                  <span className="hb-label">{label}</span>
+                </button>
+              ))}
+            </div>
+            <span className="hb-hint">Point near the end of a road, on the side the lane goes</span>
+          </>
+        )}
+
+        {tool === 'ramp' && (
+          <>
+            <span className="hb-sep" />
+            <div className="hb-group" role="group" aria-label="Ramp type">
+              {(['exit', 'entrance'] as const).map((kind) => (
+                <button
+                  key={kind}
+                  type="button"
+                  className={`hb-btn${rampKind === kind ? ' is-active' : ''}`}
+                  aria-pressed={rampKind === kind}
+                  onClick={() => setRampKind(kind)}
+                >
+                  <span className="hb-icon">{kind === 'exit' ? '↱' : '↰'}</span>
+                  <span className="hb-label">{kind === 'exit' ? 'Exit' : 'Entrance'}</span>
+                </button>
+              ))}
+            </div>
+            <span className="hb-hint">Point to the side of the road the ramp goes on</span>
+          </>
+        )}
 
         {tool === 'roundabout' && (
           <>

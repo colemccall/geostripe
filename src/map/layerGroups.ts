@@ -68,7 +68,7 @@ export const LAYER_GROUPS = [
     id: 'junctions',
     label: 'Junctions',
     hint: 'The paved ground each node owns, drawn over the road ends that meet there.',
-    layers: perDeck('plate'),
+    layers: [...perDeck('plate'), 'patch-outline'],
   },
   {
     id: 'handles',

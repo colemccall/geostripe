@@ -47,3 +47,41 @@ describe('a roundabout', () => {
     expect(b[1]).toBeGreaterThan(a[1]);
   });
 });
+
+describe('a roundabout with roads joined to it', () => {
+  it('forms a junction at each entry and paints without error', async () => {
+    const { layRoad } = await import('./build');
+    const { addNode, endsAt } = await import('./doc');
+    const { paintDoc } = await import('../map/paint');
+    const { assetMap, builtInAssets, defaultLineAssetId } = await import('../library/assets');
+    const { localPlane } = await import('../geo/crs');
+
+    const palette = builtInAssets();
+    const assetId = defaultLineAssetId(palette);
+    const ring = addRoundabout(emptyDoc(), assetId, CENTRE, 22);
+    let doc = ring.doc;
+    const plane = localPlane(CENTRE);
+
+    // Four roads in from the compass points, each ending on the ring node nearest it.
+    for (const [index, [x, y]] of [[0, [200, 0]], [2, [0, 200]], [4, [-200, 0]], [6, [0, -200]]] as [number, [number, number]][]) {
+      const far = addNode(doc, plane.toLngLat({ x, y }));
+      doc = far.doc;
+      doc = layRoad(doc, {
+        assetId,
+        fromNodeId: far.nodeId,
+        toNodeId: ring.nodeIds[index]!,
+        handles: [],
+        curved: false,
+        elevation: 0,
+      }).doc;
+    }
+
+    for (const index of [0, 2, 4, 6]) {
+      expect(endsAt(ring.nodeIds[index]!, doc.segments)).toHaveLength(3);
+    }
+
+    const painted = paintDoc(doc, assetMap(palette), { defaultRadiusMeters: 6 });
+    const withPlate = new Set(painted.plates.features.map((f) => f.properties!.nodeId));
+    for (const index of [0, 2, 4, 6]) expect(withPlate.has(ring.nodeIds[index]!)).toBe(true);
+  });
+});

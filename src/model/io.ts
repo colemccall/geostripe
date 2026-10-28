@@ -3,8 +3,8 @@ import type { Feature, FeatureCollection } from 'geojson';
 import { ASSET_FAMILIES } from './asset';
 import type { Asset, AssetFamily } from './asset';
 import { componentSchema } from './schema';
-import { emptyDoc, newAreaId, newBuildingId, newDistrictId, newNodeId, newSegmentId, newZoneId } from './doc';
-import type { AreaShape, Building, District, Doc, Node, Segment, Zone } from './doc';
+import { emptyDoc, newAreaId, newBuildingId, newDistrictId, newNodeId, newPatchId, newSegmentId, newZoneId } from './doc';
+import type { AreaShape, Building, District, Doc, Node, Patch, Segment, Zone } from './doc';
 import { isLandUseId } from '../library/landuse';
 import { isBuildingTypeId } from '../library/buildingTypes';
 import { newId } from './types';
@@ -138,6 +138,7 @@ export function toProjectGeoJSON(
         name: node.name,
         elevation: node.elevation,
         radiusMeters: node.radiusMeters,
+        role: node.role,
       },
     });
   }
@@ -193,6 +194,20 @@ export function toProjectGeoJSON(
         id: zone.id,
         landUse: zone.landUse,
         visible: zone.visible,
+      },
+    });
+  }
+
+  for (const patch of doc.patches) {
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'Polygon', coordinates: [closeRing(patch.ring)] },
+      properties: {
+        streetcity: 'patch',
+        id: patch.id,
+        kind: patch.kind,
+        deck: patch.deck,
+        ownerId: patch.ownerId,
       },
     });
   }
@@ -446,6 +461,7 @@ function readNative(features: readonly Feature[], warnings: string[], assetIds: 
   const zones: Zone[] = [];
   const buildings: Building[] = [];
   const districts: District[] = [];
+  const patches: Patch[] = [];
   const seen = new Set<string>();
   let duplicates = 0;
   /** True when this id was already used by an earlier feature of the same kind. */
@@ -482,6 +498,7 @@ function readNative(features: readonly Feature[], warnings: string[], assetIds: 
           typeof feature.properties!.radiusMeters === 'number' && Number.isFinite(feature.properties!.radiusMeters)
             ? clamp(feature.properties!.radiusMeters, RADIUS_RANGE)
             : undefined,
+        role: feature.properties!.role === 'rampNose' ? 'rampNose' : undefined,
       });
       continue;
     }
@@ -555,6 +572,25 @@ function readNative(features: readonly Feature[], warnings: string[], assetIds: 
       continue;
     }
 
+    if (kind === 'patch' && feature.geometry?.type === 'Polygon') {
+      const props = feature.properties!;
+      const rings = readRings(feature.geometry.coordinates);
+      if (!rings || !['taper', 'gore', 'paint'].includes(String(props.kind))) {
+        warnings.push('A pavement patch had an outline or kind this version does not understand and was dropped.');
+        continue;
+      }
+      const patchId = String(props.id ?? newPatchId());
+      if (duplicate('patch', patchId)) continue;
+      patches.push({
+        id: patchId,
+        kind: props.kind as Patch['kind'],
+        ring: rings[0]!,
+        deck: typeof props.deck === 'number' ? Math.round(clamp(props.deck, ELEVATION_RANGE)) : 0,
+        ownerId: typeof props.ownerId === 'string' ? props.ownerId : undefined,
+      });
+      continue;
+    }
+
     if (kind === 'building' && feature.geometry?.type === 'Point') {
       const props = feature.properties!;
       const position = positionSchema.safeParse(feature.geometry.coordinates);
@@ -614,5 +650,8 @@ function readNative(features: readonly Feature[], warnings: string[], assetIds: 
     warnings.push(`${segments.length - kept.length} road(s) referred to missing nodes.`);
   }
 
-  return { nodes, segments: kept, areas, zones, buildings, districts };
+  // A patch whose road is gone is a leftover; drop it rather than keep paint with no road.
+  const keptIds = new Set(kept.map((s) => s.id));
+  const livePatches = patches.filter((p) => !p.ownerId || keptIds.has(p.ownerId));
+  return { nodes, segments: kept, areas, zones, buildings, districts, patches: livePatches };
 }

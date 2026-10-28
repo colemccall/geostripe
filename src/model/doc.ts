@@ -61,6 +61,15 @@ export interface Node {
   radiusMeters?: number;
   /** Painted crossings on the approaches, by segment id. Absent means none. */
   crossings?: string[];
+  /**
+   * What kind of end this is, when it is not an ordinary junction.
+   *
+   * `rampNose` is where a ramp's pavement meets the lane it peels off from or joins, beside
+   * the mainline rather than on it. It is deliberately not connected to the mainline in the
+   * graph (the pavement between them is the lane transition, drawn as patches), so it is
+   * neither a loose end to be joined nor a place two roads cross.
+   */
+  role?: 'rampNose';
 }
 
 /**
@@ -145,6 +154,25 @@ export interface District {
   visible: boolean;
 }
 
+/**
+ * A piece of pavement or paint that is not a road: the wedge where a lane begins or ends,
+ * the painted gore between a ramp and the mainline, a stripe along a taper.
+ *
+ * Authored, like everything else. A ramp builder computes these once from the geometry it
+ * is placing and stores them, tagged with the ramp that owns them so they leave with it;
+ * they do not follow the mainline if it is moved afterwards.
+ */
+export interface Patch {
+  id: string;
+  kind: 'taper' | 'gore' | 'paint';
+  /** Outline, WGS84, first point not repeated. */
+  ring: LngLat[];
+  /** The deck it is drawn on, as for roads: -1 under, 0 at grade, 1 over. */
+  deck: number;
+  /** The road segment this belongs to; removing that segment removes the patch. */
+  ownerId?: string;
+}
+
 export interface Doc {
   nodes: Node[];
   segments: Segment[];
@@ -152,6 +180,7 @@ export interface Doc {
   zones: Zone[];
   buildings: Building[];
   districts: District[];
+  patches: Patch[];
 }
 
 export const emptyDoc = (): Doc => ({
@@ -161,6 +190,7 @@ export const emptyDoc = (): Doc => ({
   zones: [],
   buildings: [],
   districts: [],
+  patches: [],
 });
 
 export const newNodeId = (): string => newId('n');
@@ -169,6 +199,7 @@ export const newAreaId = (): string => newId('area');
 export const newZoneId = (): string => newId('zone');
 export const newBuildingId = (): string => newId('bldg');
 export const newDistrictId = (): string => newId('dist');
+export const newPatchId = (): string => newId('patch');
 
 // --------------------------------------------------------------------------- reading
 
@@ -355,7 +386,12 @@ function sweep(doc: Doc): Doc {
 }
 
 export function removeSegment(doc: Doc, segmentId: string): Doc {
-  return sweep({ ...doc, segments: doc.segments.filter((s) => s.id !== segmentId) });
+  return sweep({
+    ...doc,
+    segments: doc.segments.filter((s) => s.id !== segmentId),
+    // A ramp takes its tapers and gore with it.
+    patches: doc.patches.filter((p) => p.ownerId !== segmentId),
+  });
 }
 
 /** Remove a node and every road that ran into it. */

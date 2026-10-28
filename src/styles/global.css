@@ -2137,3 +2137,8 @@ button {
     display: none;
   }
 }
+
+.status-hint.is-warning {
+  color: #b7791f;
+  font-weight: 600;
+}
